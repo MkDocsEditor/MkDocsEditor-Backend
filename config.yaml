@@ -1,0 +1,8 @@
+database:
+  connectionUri: "database connection uri"
+
+server:
+  port: 8080
+
+mkdocs:
+  path: "/root/wiki/"
