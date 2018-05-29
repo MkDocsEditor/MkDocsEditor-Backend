@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/OneOfOne/xxhash"
+  packages = ["."]
+  revision = "4e9e81466dc37c9fd94ce9ecf42020ef54112203"
+  version = "v1.2.1"
+
+[[projects]]
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
   revision = "06ea1031745cb8b3dab3f6a236daf2b0aa468b7e"
@@ -73,6 +79,12 @@
   name = "github.com/mitchellh/mapstructure"
   packages = ["."]
   revision = "bb74f1db0675b241733089d5a1faa5dd8b0ef57b"
+
+[[projects]]
+  name = "github.com/patrickmn/go-cache"
+  packages = ["."]
+  revision = "a3647f8e31d79543b2d0f0ae2fe5c379d72cedc0"
+  version = "v2.1.0"
 
 [[projects]]
   name = "github.com/pelletier/go-toml"
@@ -162,6 +174,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "e7f8bd763379b921680d3bebb729646db6d5398ab7ce090dbb4cac8b9a2bda04"
+  inputs-digest = "25efbe341971160da874899e34071f77d12e7926b82380e22aed05f03e1f01eb"
   solver-name = "gps-cdcl"
   solver-version = 1

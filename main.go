@@ -6,17 +6,24 @@ import (
 	"mkdocsrest/config"
 	"github.com/labstack/echo/middleware"
 	"fmt"
+	"mkdocsrest/backend"
 )
 
-type Document struct {
-	ID      string `json:"id" xml:"id" form:"id" query:"id"`
+type NewDocumentRequest struct {
 	Name    string `json:"name" xml:"name" form:"name" query:"name"`
 	Content string `json:"content" xml:"content" form:"content" query:"content"`
 }
 
-// our main function
+type Error struct {
+	Message string `json:"message" xml:"message" form:"message" query:"message"`
+}
+
+// main entry point
 func main() {
 	config.Setup()
+
+	backend.SetupCache()
+	backend.UpdateCache()
 
 	setupRestService()
 }
@@ -56,19 +63,26 @@ func setupRestService() {
 }
 
 func GetDocuments(c echo.Context) error {
-	return c.String(http.StatusOK, "Hello, World!")
+	return c.JSONPretty(http.StatusOK, backend.DataCache.Items(), "  ")
 }
 
 func GetDocument(c echo.Context) error {
 	id := c.Param("id")
 
-	d := &Document{
-		ID:      id,
-		Name:    "Test.md",
-		Content: "# Header",
+	d, found := backend.DataCache.Get(id)
+	if found {
+		return c.JSONPretty(http.StatusOK, d, "  ")
+	} else {
+		return c.NoContent(http.StatusNotFound)
+	}
+}
+
+func createError(c echo.Context) error {
+	e := &Error{
+		Message: "Something went terribly wrong! :(",
 	}
 
-	return c.JSONPretty(http.StatusOK, d, "  ")
+	return c.JSONPretty(http.StatusInternalServerError, e, "  ")
 }
 
 func UpdateDocument(c echo.Context) error {
@@ -77,14 +91,12 @@ func UpdateDocument(c echo.Context) error {
 }
 
 func CreateDocument(c echo.Context) error {
-	id := c.Param("id")
-
-	document := new(Document)
-	if err := c.Bind(document); err != nil {
+	newDocumentRequest := new(NewDocumentRequest)
+	if err := c.Bind(newDocumentRequest); err != nil {
 		return err
 	}
 
-	return c.String(http.StatusOK, "Document ID: "+id)
+	return c.String(http.StatusOK, "Document Created")
 }
 
 func DeleteDocument(c echo.Context) error {

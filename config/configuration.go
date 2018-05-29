@@ -13,6 +13,7 @@ type Configuration struct {
 
 var CurrentConfig Configuration
 
+// one time setup for the configuration file
 func Setup() {
 	viper.SetConfigName("config")
 

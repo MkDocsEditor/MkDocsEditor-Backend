@@ -5,4 +5,4 @@ server:
   port: 8080
 
 mkdocs:
-  path: "/root/wiki/"
+  path: "D:/mkdocsrest-test"
