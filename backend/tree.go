@@ -11,13 +11,19 @@ import (
 	"strings"
 )
 
+const sectionType = "section"
+const documentType = "document"
+const resourceType = "resource"
+
 type Section struct {
+	Type        string      `json:"type" xml:"type" form:"type" query:"type"`
 	Name        string      `json:"name" xml:"name" form:"name" query:"name"`
 	Subsections *[]Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
 	Documents   *[]Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
 }
 
 type Document struct {
+	Type     string `json:"type" xml:"type" form:"type" query:"type"`
 	ID       string `json:"id" xml:"id" form:"id" query:"id"`
 	Name     string `json:"name" xml:"name" form:"name" query:"name"`
 	Path     string `json:"path" xml:"path" form:"path" query:"path"`
@@ -25,15 +31,9 @@ type Document struct {
 	Content  string `json:"content" xml:"content" form:"content" query:"content"`
 }
 
-type DocumentDescription struct {
-	ID       string `json:"id" xml:"id" form:"id" query:"id"`
-	Name     string `json:"name" xml:"name" form:"name" query:"name"`
-	Path     string `json:"path" xml:"path" form:"path" query:"path"`
-	Filesize int64  `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
-}
-
 // an in memory representation of the mkdocs file structure
 var DocumentTree = &Section{
+	Type:        sectionType,
 	Name:        "root",
 	Documents:   &[]Document{},
 	Subsections: &[]Section{},
@@ -53,47 +53,81 @@ func populateDocumentTree(section *Section, path string) {
 
 	for _, f := range files {
 		if f.IsDir() {
-			var subSection = createSection(path, f)
+			var subSection = createSectionForTree(path, f)
 			*section.Subsections = append(*section.Subsections, subSection)
 
 			// recursive call
 			populateDocumentTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
 			if strings.HasSuffix(f.Name(), ".md") {
-				var document = createDocument(path, f)
+				var document = createDocumentForTree(path, f)
 				*section.Documents = append(*section.Documents, document)
 			}
 		}
 	}
 }
 
-func createSection(path string, info os.FileInfo) Section {
+func createSectionForTree(path string, info os.FileInfo) Section {
 	return Section{
+		Type:        sectionType,
 		Name:        info.Name(),
 		Documents:   &[]Document{},
 		Subsections: &[]Section{},
 	}
 }
 
-func createDocument(path string, f os.FileInfo) Document {
-	_, err := ReadFile(filepath.Join(path, f.Name()))
+func createDocumentForTree(path string, f os.FileInfo) Document {
+	var documentPath = filepath.Join(path, f.Name())
 
-	if isError(err) {
-		panic(err)
-	}
-
-	var pathHash = xxhash.ChecksumString64(path)
+	var pathHash = xxhash.ChecksumString64(documentPath)
 	var pathHashAsString = strconv.FormatUint(pathHash, 10)
 
 	var fileName = f.Name()
 	var fileSize = f.Size()
-	var relativeFilePath = path
 
 	return Document{
+		Type:     documentType,
 		ID:       pathHashAsString,
 		Name:     fileName,
-		Path:     relativeFilePath,
+		Path:     documentPath,
 		Filesize: fileSize,
-		Content:  "",
+		Content:  "", // only filled on single "get" requests
+	}
+}
+
+func GetDocument(id string) *Document {
+	d := findRecursive(DocumentTree, id)
+	if d != nil {
+		var content, err = ReadFile(d.Path)
+		if err != nil {
+			panic(err)
+		}
+
+		d.Content = content
+	}
+
+	return d
+}
+
+// traverses the document tree and searches for a document with the given id
+func findRecursive(section *Section, id string) *Document {
+	for _, document := range *section.Documents {
+		if document.ID == id {
+			return &document
+		}
+	}
+
+	for _, subsection := range *section.Subsections {
+		return findRecursive(&subsection, id)
+	}
+
+	return nil
+}
+
+// deletes a document
+func DeleteDocument(id string) {
+	d := findRecursive(DocumentTree, id)
+	if d != nil && d.Type == documentType {
+		DeleteFile(d.Path)
 	}
 }

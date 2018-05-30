@@ -14,6 +14,11 @@ type NewDocumentRequest struct {
 	Content string `json:"content" xml:"content" form:"content" query:"content"`
 }
 
+type UpdateDocumentRequest struct {
+	Name    string `json:"name" xml:"name" form:"name" query:"name"`
+	Content string `json:"content" xml:"content" form:"content" query:"content"`
+}
+
 type Error struct {
 	Message string `json:"message" xml:"message" form:"message" query:"message"`
 }
@@ -71,9 +76,9 @@ func GetDocuments(c echo.Context) error {
 func GetDocument(c echo.Context) error {
 	id := c.Param("id")
 
-	d, found := backend.DataCache.Get(id)
+	d := backend.GetDocument(id)
 
-	if found {
+	if d != nil {
 		return c.JSONPretty(http.StatusOK, d, "  ")
 	} else {
 		return c.NoContent(http.StatusNotFound)
@@ -104,6 +109,9 @@ func CreateDocument(c echo.Context) error {
 
 func DeleteDocument(c echo.Context) error {
 	id := c.Param("id")
+
+	backend.DeleteDocument(id)
+
 	return c.String(http.StatusOK, "Document ID: "+id)
 }
 
