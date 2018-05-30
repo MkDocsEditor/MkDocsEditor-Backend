@@ -25,6 +25,8 @@ func main() {
 	backend.SetupCache()
 	backend.UpdateCache()
 
+	backend.CreateDocumentTree()
+
 	setupRestService()
 }
 
@@ -63,13 +65,14 @@ func setupRestService() {
 }
 
 func GetDocuments(c echo.Context) error {
-	return c.JSONPretty(http.StatusOK, backend.DataCache.Items(), "  ")
+	return c.JSONPretty(http.StatusOK, backend.DocumentTree, " ")
 }
 
 func GetDocument(c echo.Context) error {
 	id := c.Param("id")
 
 	d, found := backend.DataCache.Get(id)
+
 	if found {
 		return c.JSONPretty(http.StatusOK, d, "  ")
 	} else {

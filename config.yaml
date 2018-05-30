@@ -3,6 +3,9 @@ database:
 
 server:
   port: 8080
+  auth:
+    user: joe
+    password: secret
 
 mkdocs:
   path: "D:/mkdocsrest-test"
