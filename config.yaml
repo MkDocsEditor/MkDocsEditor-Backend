@@ -1,11 +1,11 @@
-database:
-  connectionUri: "database connection uri"
-
 server:
+  host: "localhost"
   port: 8080
   auth:
-    user: joe
-    password: secret
+    user: "joe"
+    password: "secret"
 
 mkdocs:
-  path: "D:/mkdocsrest-test"
+  projectPath: "D:\\mkdocsrest-test"
+  # configFile: "D:/mkdocsrest-test/mkdocs.yaml"  # optional
+  # docsPath: "D:/mkdocsrest-test/docs"           # optional

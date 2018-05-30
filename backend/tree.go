@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"strings"
+	"time"
 )
 
 const sectionType = "section"
@@ -23,12 +24,12 @@ type Section struct {
 }
 
 type Document struct {
-	Type     string `json:"type" xml:"type" form:"type" query:"type"`
-	ID       string `json:"id" xml:"id" form:"id" query:"id"`
-	Name     string `json:"name" xml:"name" form:"name" query:"name"`
-	Path     string `json:"path" xml:"path" form:"path" query:"path"`
-	Filesize int64  `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
-	Content  string `json:"content" xml:"content" form:"content" query:"content"`
+	Type     string    `json:"type" xml:"type" form:"type" query:"type"`
+	ID       string    `json:"id" xml:"id" form:"id" query:"id"`
+	Name     string    `json:"name" xml:"name" form:"name" query:"name"`
+	Path     string    `json:"path" xml:"path" form:"path" query:"path"`
+	Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
+	ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 }
 
 // an in memory representation of the mkdocs file structure
@@ -41,8 +42,8 @@ var DocumentTree = &Section{
 
 // traverses the mkdocs directory and puts all files into the cache
 func CreateDocumentTree() {
-	searchDir := config.CurrentConfig.MkDocs.Path
-	populateDocumentTree(DocumentTree, filepath.Join(searchDir, "docs"))
+	searchDir := config.CurrentConfig.MkDocs.DocsPath
+	populateDocumentTree(DocumentTree, searchDir)
 }
 
 func populateDocumentTree(section *Section, path string) {
@@ -84,6 +85,7 @@ func createDocumentForTree(path string, f os.FileInfo) Document {
 
 	var fileName = f.Name()
 	var fileSize = f.Size()
+	var fileModTime = f.ModTime()
 
 	return Document{
 		Type:     documentType,
@@ -91,22 +93,12 @@ func createDocumentForTree(path string, f os.FileInfo) Document {
 		Name:     fileName,
 		Path:     documentPath,
 		Filesize: fileSize,
-		Content:  "", // only filled on single "get" requests
+		ModTime:  fileModTime,
 	}
 }
 
 func GetDocument(id string) *Document {
-	d := findRecursive(DocumentTree, id)
-	if d != nil {
-		var content, err = ReadFile(d.Path)
-		if err != nil {
-			panic(err)
-		}
-
-		d.Content = content
-	}
-
-	return d
+	return findRecursive(DocumentTree, id)
 }
 
 // traverses the document tree and searches for a document with the given id
@@ -118,7 +110,10 @@ func findRecursive(section *Section, id string) *Document {
 	}
 
 	for _, subsection := range *section.Subsections {
-		return findRecursive(&subsection, id)
+		d := findRecursive(&subsection, id)
+		if d != nil {
+			return d
+		}
 	}
 
 	return nil

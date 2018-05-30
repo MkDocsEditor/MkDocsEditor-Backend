@@ -9,6 +9,8 @@ import (
 	"mkdocsrest/backend"
 )
 
+const paramId = "id"
+
 type NewDocumentRequest struct {
 	Name    string `json:"name" xml:"name" form:"name" query:"name"`
 	Content string `json:"content" xml:"content" form:"content" query:"content"`
@@ -42,9 +44,10 @@ func setupRestService() {
 	echoRest.Use(middleware.Logger())
 	echoRest.Use(middleware.Recover())
 
-	// global auth needed
+	// global auth
+	var authConf = config.CurrentConfig.Server.Auth
 	echoRest.Use(middleware.BasicAuth(func(username, password string, c echo.Context) (bool, error) {
-		if username == "joe" && password == "secret" {
+		if username == authConf.User && password == authConf.Password {
 			return true, nil
 		}
 		return false, nil
@@ -53,8 +56,9 @@ func setupRestService() {
 	// Authentication
 	// Group level middleware
 	groupDocuments := echoRest.Group("/documents")
-	groupDocuments.GET("/", GetDocuments)
-	groupDocuments.GET("/:id", GetDocument)
+	groupDocuments.GET("/", GetDocumentDescriptions)
+	groupDocuments.GET("/:id", GetDocumentDescription)
+	groupDocuments.GET("/:id/content", GetDocumentContent)
 	groupDocuments.POST("/:id", UpdateDocument)
 	groupDocuments.PUT("/", CreateDocument)
 	groupDocuments.DELETE("/:id", DeleteDocument)
@@ -66,20 +70,33 @@ func setupRestService() {
 	groupResources.PUT("/", UploadResource)
 	groupResources.DELETE("/:id", DeleteResource)
 
-	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf(":%d", config.CurrentConfig.Server.Port)))
+	var serverConf = config.CurrentConfig.Server
+	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
 }
 
-func GetDocuments(c echo.Context) error {
+func GetDocumentDescriptions(c echo.Context) error {
 	return c.JSONPretty(http.StatusOK, backend.DocumentTree, " ")
 }
 
-func GetDocument(c echo.Context) error {
-	id := c.Param("id")
+func GetDocumentDescription(c echo.Context) error {
+	id := c.Param(paramId)
 
 	d := backend.GetDocument(id)
 
 	if d != nil {
 		return c.JSONPretty(http.StatusOK, d, "  ")
+	} else {
+		return c.NoContent(http.StatusNotFound)
+	}
+}
+
+func GetDocumentContent(c echo.Context) error {
+	id := c.Param(paramId)
+
+	d := backend.GetDocument(id)
+
+	if d != nil {
+		return c.File(d.Path)
 	} else {
 		return c.NoContent(http.StatusNotFound)
 	}
@@ -94,7 +111,7 @@ func createError(c echo.Context) error {
 }
 
 func UpdateDocument(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 	return c.String(http.StatusOK, "Document ID: "+id)
 }
 
@@ -108,7 +125,7 @@ func CreateDocument(c echo.Context) error {
 }
 
 func DeleteDocument(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 
 	backend.DeleteDocument(id)
 
@@ -116,23 +133,23 @@ func DeleteDocument(c echo.Context) error {
 }
 
 func ListResources(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 
 	return c.JSON(http.StatusOK, "Resource ID: "+id)
 }
 func GetResource(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func UpdateResource(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func UploadResource(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func DeleteResource(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param(paramId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }

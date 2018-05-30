@@ -16,7 +16,7 @@ func SetupCache() {
 
 // traverses the mkdocs directory and puts all files into the cache
 func UpdateCache() {
-	searchDir := config.CurrentConfig.MkDocs.Path
+	searchDir := config.CurrentConfig.MkDocs.DocsPath
 
 	e := filepath.Walk(searchDir, func(path string, f os.FileInfo, err error) error {
 		return err

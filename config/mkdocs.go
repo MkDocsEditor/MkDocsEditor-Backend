@@ -1,5 +1,7 @@
 package config
 
 type MkDocsConfiguration struct {
-	Path string
+	ProjectPath string
+	ConfigFile  string
+	DocsPath    string
 }

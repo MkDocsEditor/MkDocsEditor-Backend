@@ -3,12 +3,14 @@ package config
 import (
 	"github.com/spf13/viper"
 	"log"
+	"path/filepath"
 )
+
+const mkdocsConfigFileDefaultName = "mkdocs.yaml"
 
 type Configuration struct {
 	Server   ServerConfiguration
 	MkDocs   MkDocsConfiguration
-	Database DatabaseConfiguration
 }
 
 var CurrentConfig Configuration
@@ -29,6 +31,17 @@ func Setup() {
 		log.Fatalf("unable to decode into struct, %v", err)
 	}
 
-	log.Printf("database uri is %s", CurrentConfig.Database.ConnectionUri)
-	log.Printf("port for this application is %d", CurrentConfig.Server.Port)
+	setDefaultValues()
+
+	log.Printf("mkdocsrest is running at %s:%d", CurrentConfig.Server.Host, CurrentConfig.Server.Port)
+}
+func setDefaultValues() {
+	viper.SetDefault("MkDocs.ConfigFile", filepath.Join(CurrentConfig.MkDocs.ProjectPath, mkdocsConfigFileDefaultName))
+
+	if CurrentConfig.MkDocs.DocsPath == "" {
+		CurrentConfig.MkDocs.DocsPath = filepath.Join(CurrentConfig.MkDocs.ProjectPath, "docs")
+	}
+	if CurrentConfig.MkDocs.ConfigFile == "" {
+		CurrentConfig.MkDocs.ConfigFile = filepath.Join(CurrentConfig.MkDocs.ProjectPath, mkdocsConfigFileDefaultName)
+	}
 }
