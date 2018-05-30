@@ -10,7 +10,7 @@ import (
 
 var DataCache *cache.Cache
 
-func SetupCache() {
+func init() {
 	DataCache = cache.New(5*time.Minute, 10*time.Minute)
 }
 

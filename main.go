@@ -7,9 +7,11 @@ import (
 	"github.com/labstack/echo/middleware"
 	"fmt"
 	"mkdocsrest/backend"
+	"os"
+	"io"
 )
 
-const paramId = "id"
+const urlParamId = "id"
 
 type NewDocumentRequest struct {
 	Name    string `json:"name" xml:"name" form:"name" query:"name"`
@@ -27,10 +29,10 @@ type Error struct {
 
 // main entry point
 func main() {
-	config.Setup()
+	//config.Setup()
 
-	backend.SetupCache()
-	backend.UpdateCache()
+	//backend.SetupCache()
+	//backend.UpdateCache()
 
 	backend.CreateDocumentTree()
 
@@ -56,15 +58,21 @@ func setupRestService() {
 	// Authentication
 	// Group level middleware
 	groupDocuments := echoRest.Group("/documents")
+
+	groupDocuments.GET("", GetDocumentDescriptions)
 	groupDocuments.GET("/", GetDocumentDescriptions)
+
 	groupDocuments.GET("/:id", GetDocumentDescription)
 	groupDocuments.GET("/:id/content", GetDocumentContent)
-	groupDocuments.POST("/:id", UpdateDocument)
+
+	groupDocuments.POST("/:id/name", UpdateDocumentName)
+	groupDocuments.POST("/:id/content", UpdateDocumentContent)
 	groupDocuments.PUT("/", CreateDocument)
 	groupDocuments.DELETE("/:id", DeleteDocument)
 
 	groupResources := echoRest.Group("/resources")
-	groupResources.GET("/", ListResources)
+	groupResources.GET("", ListResources)
+
 	groupResources.GET("/:id", GetResource)
 	groupResources.POST("/:id", UpdateResource)
 	groupResources.PUT("/", UploadResource)
@@ -79,7 +87,7 @@ func GetDocumentDescriptions(c echo.Context) error {
 }
 
 func GetDocumentDescription(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 
 	d := backend.GetDocument(id)
 
@@ -91,7 +99,7 @@ func GetDocumentDescription(c echo.Context) error {
 }
 
 func GetDocumentContent(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 
 	d := backend.GetDocument(id)
 
@@ -110,9 +118,41 @@ func createError(c echo.Context) error {
 	return c.JSONPretty(http.StatusInternalServerError, e, "  ")
 }
 
-func UpdateDocument(c echo.Context) error {
-	id := c.Param(paramId)
+func UpdateDocumentName(c echo.Context) error {
+	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Document ID: "+id)
+}
+
+func UpdateDocumentContent(c echo.Context) error {
+	id := c.Param(urlParamId)
+
+	d := backend.GetDocument(id)
+
+
+	// Source
+	file, err := c.FormFile("file")
+	if err != nil {
+		return err
+	}
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	// Destination
+	dst, err := os.Create(d.Path)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	// Copy
+	if _, err = io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return c.NoContent(http.StatusOK)
 }
 
 func CreateDocument(c echo.Context) error {
@@ -125,7 +165,7 @@ func CreateDocument(c echo.Context) error {
 }
 
 func DeleteDocument(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 
 	backend.DeleteDocument(id)
 
@@ -133,23 +173,23 @@ func DeleteDocument(c echo.Context) error {
 }
 
 func ListResources(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 
 	return c.JSON(http.StatusOK, "Resource ID: "+id)
 }
 func GetResource(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func UpdateResource(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func UploadResource(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
 func DeleteResource(c echo.Context) error {
-	id := c.Param(paramId)
+	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
