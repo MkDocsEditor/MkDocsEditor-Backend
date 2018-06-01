@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"errors"
 )
 
 const sectionType = "section"
@@ -18,9 +19,12 @@ const resourceType = "resource"
 
 type Section struct {
 	Type        string      `json:"type" xml:"type" form:"type" query:"type"`
+	ID          string      `json:"id" xml:"id" form:"id" query:"id"`
 	Name        string      `json:"name" xml:"name" form:"name" query:"name"`
+	Path        string      `json:"path" xml:"path" form:"path" query:"path"`
 	Subsections *[]Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
 	Documents   *[]Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
+	Resources   *[]Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
 }
 
 type Document struct {
@@ -32,18 +36,22 @@ type Document struct {
 	ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 }
 
-// an in memory representation of the mkdocs file structure
-var DocumentTree = &Section{
-	Type:        sectionType,
-	Name:        "root",
-	Documents:   &[]Document{},
-	Subsections: &[]Section{},
+type Resource struct {
+	Type     string    `json:"type" xml:"type" form:"type" query:"type"`
+	ID       string    `json:"id" xml:"id" form:"id" query:"id"`
+	Name     string    `json:"name" xml:"name" form:"name" query:"name"`
+	Path     string    `json:"path" xml:"path" form:"path" query:"path"`
+	Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
+	ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 }
+
+// an in memory representation of the mkdocs file structure
+var DocumentTree = createSectionForTree("", "root")
 
 // traverses the mkdocs directory and puts all files into the cache
 func CreateDocumentTree() {
 	searchDir := config.CurrentConfig.MkDocs.DocsPath
-	populateDocumentTree(DocumentTree, searchDir)
+	populateDocumentTree(&DocumentTree, searchDir)
 }
 
 func populateDocumentTree(section *Section, path string) {
@@ -54,7 +62,7 @@ func populateDocumentTree(section *Section, path string) {
 
 	for _, f := range files {
 		if f.IsDir() {
-			var subSection = createSectionForTree(path, f)
+			var subSection = createSectionForTree(path, f.Name())
 			*section.Subsections = append(*section.Subsections, subSection)
 
 			// recursive call
@@ -63,33 +71,43 @@ func populateDocumentTree(section *Section, path string) {
 			if strings.HasSuffix(f.Name(), ".md") {
 				var document = createDocumentForTree(path, f)
 				*section.Documents = append(*section.Documents, document)
+			} else {
+				var resource = createResourceForTree(path, f)
+				*section.Resources = append(*section.Resources, resource)
 			}
 		}
 	}
 }
 
-func createSectionForTree(path string, info os.FileInfo) Section {
+// creates a section object for storing in the tree
+func createSectionForTree(path string, name string) Section {
 	return Section{
 		Type:        sectionType,
-		Name:        info.Name(),
+		ID:          createHash(path),
+		Name:        name,
+		Path:        path,
 		Documents:   &[]Document{},
 		Subsections: &[]Section{},
+		Resources:   &[]Resource{},
 	}
 }
 
+// creates a (non-cryptographic) hash of the given string
+func createHash(s string) string {
+	var pathHash = xxhash.ChecksumString64(s)
+	return strconv.FormatUint(pathHash, 10)
+}
+
+// creates a document object for storing in the tree
 func createDocumentForTree(path string, f os.FileInfo) Document {
-	var documentPath = filepath.Join(path, f.Name())
-
-	var pathHash = xxhash.ChecksumString64(documentPath)
-	var pathHashAsString = strconv.FormatUint(pathHash, 10)
-
 	var fileName = f.Name()
 	var fileSize = f.Size()
 	var fileModTime = f.ModTime()
+	var documentPath = filepath.Join(path, f.Name())
 
 	return Document{
 		Type:     documentType,
-		ID:       pathHashAsString,
+		ID:       createHash(documentPath),
 		Name:     fileName,
 		Path:     documentPath,
 		Filesize: fileSize,
@@ -97,11 +115,29 @@ func createDocumentForTree(path string, f os.FileInfo) Document {
 	}
 }
 
-func GetDocument(id string) *Document {
-	return findRecursive(DocumentTree, id)
+// creates a resource object for storing in the tree
+func createResourceForTree(path string, f os.FileInfo) Resource {
+	var fileName = f.Name()
+	var fileSize = f.Size()
+	var fileModTime = f.ModTime()
+	var resourcePath = filepath.Join(path, f.Name())
+
+	return Resource{
+		Type:     resourceType,
+		ID:       createHash(resourcePath),
+		Name:     fileName,
+		Path:     resourcePath,
+		Filesize: fileSize,
+		ModTime:  fileModTime,
+	}
 }
 
-// traverses the document tree and searches for a document with the given id
+// finds a document with the given id in the document tree
+func GetDocument(id string) *Document {
+	return findRecursive(&DocumentTree, id)
+}
+
+// traverses the tree and searches for a document with the given id
 func findRecursive(section *Section, id string) *Document {
 	for _, document := range *section.Documents {
 		if document.ID == id {
@@ -119,10 +155,16 @@ func findRecursive(section *Section, id string) *Document {
 	return nil
 }
 
+func CreateDocument(path string, name string) error {
+	return nil
+}
+
 // deletes a document
-func DeleteDocument(id string) {
-	d := findRecursive(DocumentTree, id)
+func DeleteDocument(id string) (success bool, err error) {
+	d := findRecursive(&DocumentTree, id)
 	if d != nil && d.Type == documentType {
-		DeleteFile(d.Path)
+		return DeleteFile(d.Path)
+	} else {
+		return true, errors.New("not found")
 	}
 }
