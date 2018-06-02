@@ -1,12 +1,14 @@
 package config
 
-type ServerConfiguration struct {
-	Host string
-	Port int
-	Auth AuthenticationConfiguration
-}
+type (
+	ServerConfiguration struct {
+		Host      string
+		Port      int
+		BasicAuth AuthenticationConfiguration
+	}
 
-type AuthenticationConfiguration struct {
-	User     string
-	Password string
-}
+	AuthenticationConfiguration struct {
+		User     string
+		Password string
+	}
+)

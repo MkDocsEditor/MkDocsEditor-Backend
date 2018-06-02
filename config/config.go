@@ -9,8 +9,8 @@ import (
 const mkdocsConfigFileDefaultName = "mkdocs.yaml"
 
 type Configuration struct {
-	Server   ServerConfiguration
-	MkDocs   MkDocsConfiguration
+	Server ServerConfiguration
+	MkDocs MkDocsConfiguration
 }
 
 var CurrentConfig Configuration
@@ -35,6 +35,7 @@ func init() {
 
 	log.Printf("mkdocsrest is running at %s:%d", CurrentConfig.Server.Host, CurrentConfig.Server.Port)
 }
+
 func setDefaultValues() {
 	viper.SetDefault("MkDocs.ConfigFile", filepath.Join(CurrentConfig.MkDocs.ProjectPath, mkdocsConfigFileDefaultName))
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"fmt"
 	"io/ioutil"
+	"io"
+	"mime/multipart"
 )
 
 // read the content of a file
@@ -29,6 +31,29 @@ func CreateFile(path string, content string) {
 		}
 		defer file.Close()
 	}
+}
+
+// update the content of an existing file
+func UpdateFileFromForm(file *multipart.FileHeader, targetPath string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	// Destination
+	dst, err := os.Create(targetPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	// Copy
+	if _, err = io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // update the content of an existing file

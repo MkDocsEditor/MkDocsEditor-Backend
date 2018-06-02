@@ -1,9 +1,9 @@
 server:
   host: "localhost"
   port: 8080
-  auth:
-    user: "joe"
-    password: "secret"
+  #basicAuth:                # optional
+  #  user: "joe"             # optional
+  #  password: "secret"      # optional
 
 mkdocs:
   projectPath: "D:\\mkdocsrest-test"
