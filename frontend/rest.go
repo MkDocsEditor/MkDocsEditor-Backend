@@ -59,13 +59,15 @@ func SetupRestService() {
 	groupResources := echoRest.Group("/resource")
 
 	groupSections.GET("/:id", getSectionDescription)
+	groupSections.PUT("", createSection)
 	groupSections.PUT("/", createSection)
-	groupSections.DELETE("/", deleteSection)
+	groupSections.DELETE("/:id", deleteSection)
 
 	groupDocuments.GET("/:id", getDocumentDescription)
 	groupDocuments.GET("/:id/content", getDocumentContent)
 
 	groupDocuments.POST("/:id/content", updateDocumentContent)
+	groupDocuments.PUT("", createDocument)
 	groupDocuments.PUT("/", createDocument)
 	groupDocuments.DELETE("/:id", deleteDocument)
 
@@ -74,6 +76,7 @@ func SetupRestService() {
 	groupResources.GET("/:id", getResourceDescription)
 	groupDocuments.GET("/:id/content", getResourceContent)
 	groupResources.POST("/:id", updateResource)
+	groupResources.PUT("", uploadResource)
 	groupResources.PUT("/", uploadResource)
 	groupResources.DELETE("/:id", deleteResource)
 
@@ -164,22 +167,38 @@ func updateDocumentContent(c echo.Context) (err error) {
 func createSection(c echo.Context) (err error) {
 	r := new(NewSectionRequest)
 	if err = c.Bind(r); err != nil {
-		return
+		return returnError(c, err)
 	}
-	backend.CreateSection(r.Parent, r.Name)
 
-	return c.String(http.StatusOK, "Document Created")
+	s := backend.GetSection(r.Parent)
+	if s == nil {
+		return returnNotFound(c, r.Parent)
+	}
+
+	if err = backend.CreateSection(s.Path, r.Name); err != nil {
+		return returnError(c, err)
+	}
+
+	backend.CreateDocumentTree()
+	return c.String(http.StatusOK, "Subsection '"+r.Name+"' created in section '"+s.Name+"'")
 }
 
 // creates a new document with the given data
 func createDocument(c echo.Context) (err error) {
 	r := new(NewDocumentRequest)
 	if err = c.Bind(r); err != nil {
-		return
+		return returnError(c, err)
 	}
-	backend.CreateDocument(r.Parent, r.Name)
 
-	return c.String(http.StatusOK, "Document Created")
+	s := backend.GetSection(r.Parent)
+	if s == nil {
+		return returnNotFound(c, r.Parent)
+	}
+	if err = backend.CreateDocument(r.Parent, r.Name); err != nil {
+		return returnError(c, err)
+	}
+
+	return c.String(http.StatusOK, "Document '"+r.Name+"' created in section '"+s.Name+"'")
 }
 
 // deletes an existing section

@@ -53,7 +53,9 @@ var DocumentTree Section
 
 // traverses the mkdocs directory and puts all files into the cache
 func CreateDocumentTree() {
-	DocumentTree = createSectionForTree("", "root")
+	_, file := filepath.Split(config.CurrentConfig.MkDocs.DocsPath)
+
+	DocumentTree = createSectionForTree(config.CurrentConfig.MkDocs.DocsPath, file)
 	searchDir := config.CurrentConfig.MkDocs.DocsPath
 	populateDocumentTree(&DocumentTree, searchDir)
 }
@@ -85,11 +87,13 @@ func populateDocumentTree(section *Section, path string) {
 
 // creates a section object for storing in the tree
 func createSectionForTree(path string, name string) Section {
+	var sectionPath = filepath.Join(path, name)
+
 	return Section{
 		Type:        TypeSection,
-		ID:          createHash(path),
+		ID:          createHash(sectionPath),
 		Name:        name,
-		Path:        path,
+		Path:        sectionPath,
 		Documents:   &[]Document{},
 		Subsections: &[]Section{},
 		Resources:   &[]Resource{},
@@ -204,8 +208,8 @@ func findResourceRecursive(section *Section, id string) *Resource {
 }
 
 // creates a new section as a child of the given parent section id and the given name
-func CreateSection(parentSectionId string, sectionName string) (err error) {
-	return nil
+func CreateSection(parentPath string, sectionName string) (err error) {
+	return os.MkdirAll(filepath.Join(parentPath, sectionName), os.ModeDir)
 }
 
 // creates a new document as a child of the given parent section id and the given name
@@ -214,11 +218,31 @@ func CreateDocument(parentSectionId string, documentName string) (err error) {
 }
 
 // deletes a file/folder with the given ID and type
-func DeleteItem(id string, fileType string) (success bool, err error) {
-	d := findDocumentRecursive(&DocumentTree, id)
-	if d != nil && d.Type == fileType {
-		return DeleteFile(d.Path)
-	} else {
-		return false, nil
+func DeleteItem(id string, itemType string) (success bool, err error) {
+	var path string
+	switch itemType {
+	case TypeSection:
+		s := findSectionRecursive(&DocumentTree, id)
+		if s != nil {
+			path = s.Path
+		} else {
+			return false, nil
+		}
+	case TypeDocument:
+		d := findDocumentRecursive(&DocumentTree, id)
+		if d != nil {
+			path = d.Path
+		} else {
+			return false, nil
+		}
+	case TypeResource:
+		r := findResourceRecursive(&DocumentTree, id)
+		if r != nil {
+			path = r.Path
+		} else {
+			return false, nil
+		}
 	}
+
+	return DeleteFileOrFolder(path)
 }

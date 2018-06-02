@@ -81,8 +81,8 @@ func UpdateFile(path string, content string) error {
 }
 
 // delete a file from disk
-func DeleteFile(path string) (bool, error) {
-	var err = os.Remove(path)
+func DeleteFileOrFolder(path string) (bool, error) {
+	var err = os.RemoveAll(path)
 	if isError(err) {
 		return false, err
 	}
