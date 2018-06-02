@@ -7,6 +7,7 @@ import (
 	"mkdocsrest/config"
 	"github.com/labstack/echo/middleware"
 	"fmt"
+	"errors"
 )
 
 const (
@@ -16,8 +17,8 @@ const (
 
 type (
 	Result struct {
-		Name    string
-		Message string
+		Name    string `json:"name" form:"name" query:"name"`
+		Message string `json:"message" form:"message" query:"message"`
 	}
 
 	NewSectionRequest struct {
@@ -106,19 +107,30 @@ func getResourceDescription(c echo.Context) error {
 func getItemDescription(c echo.Context, itemType string) (err error) {
 	id := c.Param(urlParamId)
 
-	var d interface{}
 	switch itemType {
 	case backend.TypeSection:
-		d = backend.GetSection(id)
+		s := backend.GetSection(id)
+		if s != nil {
+			return c.JSONPretty(http.StatusOK, s, indentationChar)
+		} else {
+			return returnNotFound(c, id)
+		}
 	case backend.TypeDocument:
-		d = backend.GetDocument(id)
+		d := backend.GetDocument(id)
+		if d != nil {
+			return c.JSONPretty(http.StatusOK, d, indentationChar)
+		} else {
+			return returnNotFound(c, id)
+		}
 	case backend.TypeResource:
-		d = backend.GetResource(id)
-	}
-	if d != nil {
-		return c.JSONPretty(http.StatusOK, d, indentationChar)
-	} else {
-		return returnNotFound(c, id)
+		r := backend.GetResource(id)
+		if r != nil {
+			return c.JSONPretty(http.StatusOK, r, indentationChar)
+		} else {
+			return returnNotFound(c, id)
+		}
+	default:
+		return returnError(c, errors.New("Unknown itemType '"+itemType+"'"))
 	}
 }
 
