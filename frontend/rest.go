@@ -17,18 +17,18 @@ const (
 
 type (
 	Result struct {
-		Name    string `json:"name" form:"name" query:"name"`
-		Message string `json:"message" form:"message" query:"message"`
+		Name    string `json:"name" xml:"name" form:"name" query:"name"`
+		Message string `json:"message" xml:"message" form:"message" query:"message"`
 	}
 
 	NewSectionRequest struct {
-		Parent string `json:"parent" form:"parent" query:"parent" validate:"required"`
-		Name   string `json:"name" form:"name" query:"name" validate:"required"`
+		Parent string `json:"parent" xml:"parent" form:"parent" query:"parent" validate:"required"`
+		Name   string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
 
 	NewDocumentRequest struct {
-		Parent string `json:"parent" form:"parent" query:"parent" validate:"required"`
-		Name   string `json:"name" form:"name" query:"name" validate:"required"`
+		Parent string `json:"parent" xml:"parent" form:"parent" query:"parent" validate:"required"`
+		Name   string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
 )
 
