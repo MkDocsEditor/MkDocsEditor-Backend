@@ -23,7 +23,7 @@ type (
 		Type        string      `json:"type" xml:"type" form:"type" query:"type"`
 		ID          string      `json:"id" xml:"id" form:"id" query:"id"`
 		Name        string      `json:"name" xml:"name" form:"name" query:"name"`
-		Path        string      `json:"path" xml:"path" form:"path" query:"path"`
+		Path        string      `json:"-" xml:"-" form:"-" query:"-"`
 		Subsections *[]Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
 		Documents   *[]Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
 		Resources   *[]Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
@@ -33,7 +33,7 @@ type (
 		Type     string    `json:"type" xml:"type" form:"type" query:"type"`
 		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
 		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
-		Path     string    `json:"path" xml:"path" form:"path" query:"path"`
+		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 	}
@@ -42,7 +42,7 @@ type (
 		Type     string    `json:"type" xml:"type" form:"type" query:"type"`
 		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
 		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
-		Path     string    `json:"path" xml:"path" form:"path" query:"path"`
+		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 	}

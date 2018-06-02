@@ -58,27 +58,26 @@ func SetupRestService() {
 	groupDocuments := echoRest.Group("/document")
 	groupResources := echoRest.Group("/resource")
 
-	groupSections.GET("/:id", getSectionDescription)
+	groupSections.GET("/:"+urlParamId, getSectionDescription)
 	groupSections.PUT("", createSection)
 	groupSections.PUT("/", createSection)
-	groupSections.DELETE("/:id", deleteSection)
+	groupSections.DELETE("/:"+urlParamId, deleteSection)
 
-	groupDocuments.GET("/:id", getDocumentDescription)
-	groupDocuments.GET("/:id/content", getDocumentContent)
-
-	groupDocuments.POST("/:id/content", updateDocumentContent)
+	groupDocuments.GET("/:"+urlParamId, getDocumentDescription)
+	groupDocuments.GET("/:"+urlParamId+"/content", getDocumentContent)
+	groupDocuments.POST("/:"+urlParamId+"/content", updateDocumentContent)
 	groupDocuments.PUT("", createDocument)
 	groupDocuments.PUT("/", createDocument)
-	groupDocuments.DELETE("/:id", deleteDocument)
+	groupDocuments.DELETE("/:"+urlParamId, deleteDocument)
 
 	groupResources.GET("", listResources)
 
-	groupResources.GET("/:id", getResourceDescription)
-	groupDocuments.GET("/:id/content", getResourceContent)
-	groupResources.POST("/:id", updateResource)
+	groupResources.GET("/:"+urlParamId, getResourceDescription)
+	groupDocuments.GET("/:"+urlParamId+"/content", getResourceContent)
+	groupResources.POST("/:"+urlParamId, updateResource)
 	groupResources.PUT("", uploadResource)
 	groupResources.PUT("/", uploadResource)
-	groupResources.DELETE("/:id", deleteResource)
+	groupResources.DELETE("/:"+urlParamId, deleteResource)
 
 	var serverConf = config.CurrentConfig.Server
 	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
