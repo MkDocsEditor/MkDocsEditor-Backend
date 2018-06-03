@@ -74,7 +74,6 @@ func SetupRestService() {
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
-	groupResources.PUT("/:"+urlParamId+"/content/", updateResourceContent)
 	groupResources.POST("/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
@@ -253,26 +252,6 @@ func getResourceContent(c echo.Context) (err error) {
 	} else {
 		return returnNotFound(c, id)
 	}
-}
-
-// updates an existing resource file
-func updateResourceContent(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-
-	d := backend.GetResource(id)
-	if d == nil {
-		return returnNotFound(c, id)
-	}
-
-	// Source
-	file, err := c.FormFile("file")
-	if err != nil {
-		return err
-	}
-
-	backend.UpdateFileFromForm(file, d.Path)
-
-	return c.NoContent(http.StatusOK)
 }
 
 // uploads a new resource file
