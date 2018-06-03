@@ -63,19 +63,19 @@ func SetupRestService() {
 	groupResources := echoRest.Group("/resource")
 
 	groupSections.GET("/:"+urlParamId+"/", getSectionDescription)
-	groupSections.PUT("/", createSection)
+	groupSections.POST("/", createSection)
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
-	groupDocuments.POST("/:"+urlParamId+"/content/", updateDocumentContent)
-	groupDocuments.PUT("/", createDocument)
+	groupDocuments.PUT("/:"+urlParamId+"/content/", updateDocumentContent)
+	groupDocuments.POST("/", createDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
-	groupResources.POST("/:"+urlParamId+"/content/", updateResourceContent)
-	groupResources.PUT("/", uploadNewResource)
+	groupResources.PUT("/:"+urlParamId+"/content/", updateResourceContent)
+	groupResources.POST("/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
 	var serverConf = config.CurrentConfig.Server
