@@ -67,15 +67,15 @@ func SetupRestService() {
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
-	groupDocuments.GET("/:"+urlParamId+"/content", getDocumentContent)
-	groupDocuments.POST("/:"+urlParamId+"/content", updateDocumentContent)
+	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
+	groupDocuments.POST("/:"+urlParamId+"/content/", updateDocumentContent)
 	groupDocuments.PUT("/", createDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
-	groupDocuments.GET("/:"+urlParamId+"/content/", getResourceContent)
+	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
 	groupResources.POST("/:"+urlParamId+"/content/", updateResourceContent)
-	groupResources.PUT("/", uploadResource)
+	groupResources.PUT("/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
 	var serverConf = config.CurrentConfig.Server
@@ -143,12 +143,6 @@ func getDocumentContent(c echo.Context) (err error) {
 	} else {
 		return returnNotFound(c, id)
 	}
-}
-
-// updates the name of a document
-func updateDocumentName(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-	return c.String(http.StatusOK, "Document ID: "+id)
 }
 
 // updates the content of the document with the given id (if found)
@@ -251,17 +245,38 @@ func GetResourceDescription(c echo.Context) (err error) {
 // returns the content of a single resource with the given id (if found)
 func getResourceContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
-	return c.String(http.StatusOK, "Resource ID: "+id)
+
+	d := backend.GetResource(id)
+
+	if d != nil {
+		return c.File(d.Path)
+	} else {
+		return returnNotFound(c, id)
+	}
 }
 
 // updates an existing resource file
 func updateResourceContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
-	return c.String(http.StatusOK, "Resource ID: "+id)
+
+	d := backend.GetResource(id)
+	if d == nil {
+		return returnNotFound(c, id)
+	}
+
+	// Source
+	file, err := c.FormFile("file")
+	if err != nil {
+		return err
+	}
+
+	backend.UpdateFileFromForm(file, d.Path)
+
+	return c.NoContent(http.StatusOK)
 }
 
 // uploads a new resource file
-func uploadResource(c echo.Context) (err error) {
+func uploadNewResource(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
