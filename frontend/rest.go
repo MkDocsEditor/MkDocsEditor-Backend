@@ -38,6 +38,8 @@ func SetupRestService() {
 	// Root level middleware
 	echoRest.Pre(middleware.AddTrailingSlash())
 
+	echoRest.Use(middleware.Secure())
+
 	echoRest.Use(middleware.Logger())
 	echoRest.Use(middleware.Recover())
 
