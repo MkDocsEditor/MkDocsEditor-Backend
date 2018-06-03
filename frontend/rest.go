@@ -36,6 +36,8 @@ func SetupRestService() {
 	echoRest := echo.New()
 
 	// Root level middleware
+	echoRest.Pre(middleware.AddTrailingSlash())
+
 	echoRest.Use(middleware.Logger())
 	echoRest.Use(middleware.Recover())
 
@@ -50,7 +52,6 @@ func SetupRestService() {
 		}))
 	}
 
-	echoRest.GET("/tree", getTree)
 	echoRest.GET("/tree/", getTree)
 
 	// Authentication
@@ -59,26 +60,21 @@ func SetupRestService() {
 	groupDocuments := echoRest.Group("/document")
 	groupResources := echoRest.Group("/resource")
 
-	groupSections.GET("/:"+urlParamId, getSectionDescription)
-	groupSections.PUT("", createSection)
+	groupSections.GET("/:"+urlParamId+"/", getSectionDescription)
 	groupSections.PUT("/", createSection)
-	groupSections.DELETE("/:"+urlParamId, deleteSection)
+	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
-	groupDocuments.GET("/:"+urlParamId, getDocumentDescription)
+	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
 	groupDocuments.GET("/:"+urlParamId+"/content", getDocumentContent)
 	groupDocuments.POST("/:"+urlParamId+"/content", updateDocumentContent)
-	groupDocuments.PUT("", createDocument)
 	groupDocuments.PUT("/", createDocument)
-	groupDocuments.DELETE("/:"+urlParamId, deleteDocument)
+	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
-	groupResources.GET("", listResources)
-
-	groupResources.GET("/:"+urlParamId, getResourceDescription)
-	groupDocuments.GET("/:"+urlParamId+"/content", getResourceContent)
-	groupResources.POST("/:"+urlParamId, updateResource)
-	groupResources.PUT("", uploadResource)
+	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
+	groupDocuments.GET("/:"+urlParamId+"/content/", getResourceContent)
+	groupResources.POST("/:"+urlParamId+"/content/", updateResourceContent)
 	groupResources.PUT("/", uploadResource)
-	groupResources.DELETE("/:"+urlParamId, deleteResource)
+	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
 	var serverConf = config.CurrentConfig.Server
 	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
@@ -244,13 +240,6 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 	}
 }
 
-// returns a list of all resources in the tree
-func listResources(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-
-	return c.JSON(http.StatusOK, "Resource ID: "+id)
-}
-
 // returns the description of a single resource with the given id (if found)
 func GetResourceDescription(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
@@ -264,7 +253,7 @@ func getResourceContent(c echo.Context) (err error) {
 }
 
 // updates an existing resource file
-func updateResource(c echo.Context) (err error) {
+func updateResourceContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
 }
