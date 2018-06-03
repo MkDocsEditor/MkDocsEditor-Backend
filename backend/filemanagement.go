@@ -56,30 +56,6 @@ func UpdateFileFromForm(file *multipart.FileHeader, targetPath string) error {
 	return nil
 }
 
-// update the content of an existing file
-func UpdateFile(path string, content string) error {
-	// open file using READ & WRITE permission
-	var file, err = os.OpenFile(path, os.O_RDWR, 0644)
-	if isError(err) {
-		return err
-	}
-	defer file.Close()
-
-	// write some text line-by-line to file
-	_, err = file.WriteString(content)
-	if isError(err) {
-		return err
-	}
-
-	// save changes
-	err = file.Sync()
-	if isError(err) {
-		return err
-	}
-
-	return nil
-}
-
 // delete a file from disk
 func DeleteFileOrFolder(path string) (bool, error) {
 	var err = os.RemoveAll(path)
