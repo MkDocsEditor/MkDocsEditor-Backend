@@ -10,6 +10,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"mkdocsrest/backend/diff"
 )
 
 const (
@@ -36,6 +37,7 @@ type (
 		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
+		Content  string    `json:"-" xml:"-" form:"-" query:"-"`
 	}
 
 	Resource struct {
@@ -51,16 +53,17 @@ type (
 // an in memory representation of the mkdocs file structure
 var DocumentTree Section
 
-// traverses the mkdocs directory and puts all files into the cache
-func CreateDocumentTree() {
+// traverses the mkdocs directory and puts all files into a tree representation
+func CreateItemTree() {
 	_, file := filepath.Split(config.CurrentConfig.MkDocs.DocsPath)
 
 	DocumentTree = createSectionForTree(config.CurrentConfig.MkDocs.DocsPath, file)
 	searchDir := config.CurrentConfig.MkDocs.DocsPath
-	populateDocumentTree(&DocumentTree, searchDir)
+	populateItemTree(&DocumentTree, searchDir)
 }
 
-func populateDocumentTree(section *Section, path string) {
+// recursive function that creates a subtree of the complete item tree
+func populateItemTree(section *Section, path string) {
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
@@ -72,7 +75,7 @@ func populateDocumentTree(section *Section, path string) {
 			*section.Subsections = append(*section.Subsections, subSection)
 
 			// recursive call
-			populateDocumentTree(&subSection, filepath.Join(path, subSection.Name))
+			populateItemTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
 			if strings.HasSuffix(f.Name(), ".md") {
 				var document = createDocumentForTree(path, f)
@@ -107,11 +110,16 @@ func createHash(s string) string {
 }
 
 // creates a document object for storing in the tree
-func createDocumentForTree(path string, f os.FileInfo) Document {
+func createDocumentForTree(path string, f os.FileInfo) (document Document) {
 	var fileName = f.Name()
 	var fileSize = f.Size()
 	var fileModTime = f.ModTime()
 	var documentPath = filepath.Join(path, f.Name())
+
+	content, err := ReadFile(documentPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return Document{
 		Type:     TypeDocument,
@@ -120,6 +128,7 @@ func createDocumentForTree(path string, f os.FileInfo) Document {
 		Path:     documentPath,
 		Filesize: fileSize,
 		ModTime:  fileModTime,
+		Content:  content,
 	}
 }
 
@@ -217,7 +226,20 @@ func CreateDocument(parentSectionId string, documentName string) (err error) {
 	return nil
 }
 
-// deletes a file/folder with the given ID and type
+// Applies the given patch to the document with the given id
+func ApplyPatch(document Document, patch string) (err error) {
+	patched, err := diff.ApplyPatch(document.Content, patch)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	document.Content = patched
+
+	return err
+}
+
+// deletes a file/folder with the given ID and type from disk
 func DeleteItem(id string, itemType string) (success bool, err error) {
 	var path string
 	switch itemType {

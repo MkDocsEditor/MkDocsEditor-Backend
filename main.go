@@ -7,6 +7,6 @@ import (
 
 // main entry point
 func main() {
-	backend.CreateDocumentTree()
+	backend.CreateItemTree()
 	frontend.SetupRestService()
 }

@@ -1,4 +1,4 @@
-package backend
+package cache
 
 import (
 	"github.com/patrickmn/go-cache"

@@ -67,6 +67,7 @@ func SetupRestService() {
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
+	groupDocuments.GET("/:"+urlParamId+"/ws", handleDocumentWebsocketConnections)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
 	groupDocuments.PUT("/:"+urlParamId+"/content/", updateDocumentContent)
 	groupDocuments.POST("/", createDocument)
@@ -104,30 +105,22 @@ func getResourceDescription(c echo.Context) error {
 func getItemDescription(c echo.Context, itemType string) (err error) {
 	id := c.Param(urlParamId)
 
+	var result interface{}
 	switch itemType {
 	case backend.TypeSection:
-		s := backend.GetSection(id)
-		if s != nil {
-			return c.JSONPretty(http.StatusOK, s, indentationChar)
-		} else {
-			return returnNotFound(c, id)
-		}
+		result = backend.GetSection(id)
 	case backend.TypeDocument:
-		d := backend.GetDocument(id)
-		if d != nil {
-			return c.JSONPretty(http.StatusOK, d, indentationChar)
-		} else {
-			return returnNotFound(c, id)
-		}
+		result = backend.GetDocument(id)
 	case backend.TypeResource:
-		r := backend.GetResource(id)
-		if r != nil {
-			return c.JSONPretty(http.StatusOK, r, indentationChar)
-		} else {
-			return returnNotFound(c, id)
-		}
+		result = backend.GetResource(id)
 	default:
 		return returnError(c, errors.New("Unknown itemType '"+itemType+"'"))
+	}
+
+	if result != nil {
+		return c.JSONPretty(http.StatusOK, result, indentationChar)
+	} else {
+		return returnNotFound(c, id)
 	}
 }
 
@@ -181,7 +174,7 @@ func createSection(c echo.Context) (err error) {
 		return returnError(c, err)
 	}
 
-	backend.CreateDocumentTree()
+	backend.CreateItemTree()
 	return c.String(http.StatusOK, "Subsection '"+r.Name+"' created in section '"+s.Name+"'")
 }
 
@@ -230,7 +223,7 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 	if !success {
 		return returnNotFound(c, id)
 	} else {
-		backend.CreateDocumentTree()
+		backend.CreateItemTree()
 		return c.String(http.StatusOK, "Section '"+id+"' deleted")
 	}
 }
