@@ -227,16 +227,16 @@ func CreateDocument(parentSectionId string, documentName string) (err error) {
 }
 
 // Applies the given patch to the document with the given id
-func ApplyPatch(document Document, patch string) (err error) {
-	patched, err := diff.ApplyPatch(document.Content, patch)
+func ApplyPatch(document *Document, patchesAsText string) (result string, err error) {
+	result, err = diff.ApplyPatch(document.Content, patchesAsText)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	document.Content = patched
+	document.Content = result
 
-	return err
+	return result, err
 }
 
 // deletes a file/folder with the given ID and type from disk

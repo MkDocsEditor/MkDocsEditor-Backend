@@ -11,7 +11,7 @@ import (
 type (
 	EditRequest struct {
 		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
-		Patch      string `json:"patch" xml:"patch" form:"patch" query:"patch"`
+		Patches    string `json:"patches" xml:"patches" form:"patches" query:"patches"`
 	}
 )
 
@@ -54,7 +54,6 @@ func handleDocumentWebsocketConnections(c echo.Context) (err error) {
 
 	for {
 		// Read incoming edit requests
-
 		var editRequest EditRequest
 		// Read in a new message as JSON and map it to a Message object
 		err := ws.ReadJSON(&editRequest)
@@ -79,11 +78,16 @@ func handleIncomingMessages() {
 		editRequest := <-incomingEditRequests
 
 		d := backend.GetDocument(editRequest.DocumentId)
-		backend.ApplyPatch(*d, editRequest.Patch)
+
+		patchedText, err := backend.ApplyPatch(d, editRequest.Patches)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		// Send it out to every client that is currently connected
 		for client := range clients {
-			err := client.WriteJSON(editRequest)
+			err := client.WriteMessage(websocket.TextMessage, []byte(patchedText))
+			//err := client.WriteJSON(editRequest)
 			if err != nil {
 				log.Printf("error: %v", err)
 				client.Close()
