@@ -21,13 +21,13 @@ const (
 
 type (
 	Section struct {
-		Type        string      `json:"type" xml:"type" form:"type" query:"type"`
-		ID          string      `json:"id" xml:"id" form:"id" query:"id"`
-		Name        string      `json:"name" xml:"name" form:"name" query:"name"`
-		Path        string      `json:"-" xml:"-" form:"-" query:"-"`
-		Subsections *[]Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
-		Documents   *[]Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
-		Resources   *[]Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
+		Type        string       `json:"type" xml:"type" form:"type" query:"type"`
+		ID          string       `json:"id" xml:"id" form:"id" query:"id"`
+		Name        string       `json:"name" xml:"name" form:"name" query:"name"`
+		Path        string       `json:"-" xml:"-" form:"-" query:"-"`
+		Subsections *[]*Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
+		Documents   *[]*Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
+		Resources   *[]*Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
 	}
 
 	Document struct {
@@ -72,17 +72,17 @@ func populateItemTree(section *Section, path string) {
 	for _, f := range files {
 		if f.IsDir() {
 			var subSection = createSectionForTree(path, f.Name())
-			*section.Subsections = append(*section.Subsections, subSection)
+			*section.Subsections = append(*section.Subsections, &subSection)
 
 			// recursive call
 			populateItemTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
 			if strings.HasSuffix(f.Name(), ".md") {
 				var document = createDocumentForTree(path, f)
-				*section.Documents = append(*section.Documents, document)
+				*section.Documents = append(*section.Documents, &document)
 			} else {
 				var resource = createResourceForTree(path, f)
-				*section.Resources = append(*section.Resources, resource)
+				*section.Resources = append(*section.Resources, &resource)
 			}
 		}
 	}
@@ -97,9 +97,9 @@ func createSectionForTree(path string, name string) Section {
 		ID:          createHash(sectionPath),
 		Name:        name,
 		Path:        sectionPath,
-		Documents:   &[]Document{},
-		Subsections: &[]Section{},
-		Resources:   &[]Resource{},
+		Documents:   &[]*Document{},
+		Subsections: &[]*Section{},
+		Resources:   &[]*Resource{},
 	}
 }
 
@@ -171,7 +171,7 @@ func findSectionRecursive(section *Section, id string) *Section {
 	}
 
 	for _, subsection := range *section.Subsections {
-		d := findSectionRecursive(&subsection, id)
+		d := findSectionRecursive(subsection, id)
 		if d != nil {
 			return d
 		}
@@ -184,12 +184,12 @@ func findSectionRecursive(section *Section, id string) *Section {
 func findDocumentRecursive(section *Section, id string) *Document {
 	for _, document := range *section.Documents {
 		if document.ID == id {
-			return &document
+			return document
 		}
 	}
 
 	for _, subsection := range *section.Subsections {
-		d := findDocumentRecursive(&subsection, id)
+		d := findDocumentRecursive(subsection, id)
 		if d != nil {
 			return d
 		}
@@ -202,12 +202,12 @@ func findDocumentRecursive(section *Section, id string) *Document {
 func findResourceRecursive(section *Section, id string) *Resource {
 	for _, resource := range *section.Resources {
 		if resource.ID == id {
-			return &resource
+			return resource
 		}
 	}
 
 	for _, subsection := range *section.Subsections {
-		r := findResourceRecursive(&subsection, id)
+		r := findResourceRecursive(subsection, id)
 		if r != nil {
 			return r
 		}
@@ -233,8 +233,6 @@ func ApplyPatch(document *Document, patchesAsText string) (result string, err er
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	document.Content = result
 
 	return result, err
 }

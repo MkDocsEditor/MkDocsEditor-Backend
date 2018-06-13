@@ -131,7 +131,9 @@ func getDocumentContent(c echo.Context) (err error) {
 	d := backend.GetDocument(id)
 
 	if d != nil {
-		return c.File(d.Path)
+		// TODO: return file again
+		//return c.File(d.Path)
+		return c.String(http.StatusOK, d.Content)
 	} else {
 		return returnNotFound(c, id)
 	}
