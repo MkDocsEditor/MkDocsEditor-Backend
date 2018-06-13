@@ -18,15 +18,16 @@ type (
 var (
 	upgrader = websocket.Upgrader{}
 
-	clients              = make(map[*websocket.Conn]string) // connected clients (websocket -> document id)
-	incomingEditRequests = make(chan EditRequest)           // incoming messages from clients
+	clients                = make(map[*websocket.Conn]string) // connected clients (websocket -> document id)
+	connectionsPerDocument = make(map[string]uint)
+	incomingEditRequests   = make(chan EditRequest) // incoming messages from clients
 )
 
 func init() {
 	go handleIncomingMessages()
 }
 
-func handleDocumentWebsocketConnections(c echo.Context) (err error) {
+func handleNewConnections(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 
 	d := backend.GetDocument(id)
@@ -34,32 +35,33 @@ func handleDocumentWebsocketConnections(c echo.Context) (err error) {
 		return returnNotFound(c, id)
 	}
 
-	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	client, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err
 	}
 
 	// Make sure we close the connection when the function returns
-	defer ws.Close()
+	defer client.Close()
 
 	// Register our new client
-	clients[ws] = id
+	clients[client] = id
+	connectionsPerDocument[id] = connectionsPerDocument[id] + 1
 
 	// Write current document state to the client
-	err = ws.WriteMessage(websocket.TextMessage, []byte(backend.GetDocument(id).Content))
+	err = client.WriteMessage(websocket.TextMessage, []byte(d.Content))
 	if err != nil {
 		c.Logger().Error(err)
-		delete(clients, ws)
+		disconnectClient(client)
 	}
 
 	for {
 		// Read incoming edit requests
 		var editRequest EditRequest
 		// Read in a new message as JSON and map it to a Message object
-		err := ws.ReadJSON(&editRequest)
+		err := client.ReadJSON(&editRequest)
 		if err != nil {
 			log.Printf("error: %v", err)
-			delete(clients, ws)
+			disconnectClient(client)
 			break
 		}
 		fmt.Printf("%s\n", editRequest)
@@ -78,7 +80,6 @@ func handleIncomingMessages() {
 		editRequest := <-incomingEditRequests
 
 		d := backend.GetDocument(editRequest.DocumentId)
-
 		patchedText, err := backend.ApplyPatch(d, editRequest.Patches)
 		if err != nil {
 			log.Fatal(err)
@@ -91,9 +92,28 @@ func handleIncomingMessages() {
 			//err := client.WriteJSON(editRequest)
 			if err != nil {
 				log.Printf("error: %v", err)
-				client.Close()
-				delete(clients, client)
+				disconnectClient(client)
 			}
 		}
+	}
+}
+
+// disconnects a client
+func disconnectClient(conn *websocket.Conn) {
+	conn.Close()
+	documentId := clients[conn]
+
+	connectedClientsAfterDisconnect := connectionsPerDocument[documentId] - 1
+
+	connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
+	delete(clients, conn)
+
+	if connectedClientsAfterDisconnect <= 0 {
+		d := backend.GetDocument(documentId)
+		if d == nil {
+			log.Fatal("Document was nil!")
+		}
+
+		backend.WriteFile(d.Path, []byte(d.Content))
 	}
 }

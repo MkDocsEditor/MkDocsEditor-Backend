@@ -18,6 +18,12 @@ func ReadFile(path string) (string, error) {
 	return string(data), nil
 }
 
+func WriteFile(path string, data []byte) (err error) {
+	err = ioutil.WriteFile(path, data, 0x660)
+	isError(err)
+	return err
+}
+
 // create a new file with the given content
 func CreateFile(path string, content string) {
 	// detect if file exists
