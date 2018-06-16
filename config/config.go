@@ -32,8 +32,6 @@ func init() {
 	}
 
 	setDefaultValues()
-
-	log.Printf("mkdocsrest is running at %s:%d", CurrentConfig.Server.Host, CurrentConfig.Server.Port)
 }
 
 func setDefaultValues() {

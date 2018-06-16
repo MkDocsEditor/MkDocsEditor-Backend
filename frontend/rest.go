@@ -34,6 +34,7 @@ type (
 
 func SetupRestService() {
 	echoRest := echo.New()
+	echoRest.HideBanner = true
 
 	// Root level middleware
 	echoRest.Pre(middleware.AddTrailingSlash())
