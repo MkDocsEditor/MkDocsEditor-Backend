@@ -13,7 +13,7 @@ const banner = `       _     _                         _
 |     | '_| . | . |  _|_ -|  _| -_|_ -|  _|
 |_|_|_|_,_|___|___|___|___|_| |___|___|_|  
 
-REST Server for MkDocs projects.
+     REST Server for MkDocs projects.
 ===========================================
 
 Listening at: %s:%d

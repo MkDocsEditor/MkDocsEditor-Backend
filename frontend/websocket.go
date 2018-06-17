@@ -88,8 +88,8 @@ func handleIncomingMessages() {
 
 		// Send it out to every client that is currently connected
 		for client := range clients {
-			err := client.WriteMessage(websocket.TextMessage, []byte(d.Content))
-			//err := client.WriteJSON(editRequest)
+			//err := client.WriteMessage(websocket.TextMessage, []byte(d.Content))
+			err := client.WriteJSON(editRequest)
 			if err != nil {
 				log.Printf("error: %v", err)
 				disconnectClient(client)
