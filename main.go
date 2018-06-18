@@ -38,7 +38,7 @@ func printStartupInfo() {
 
 	var auth = config.CurrentConfig.Server.BasicAuth
 	if auth.User == "" && auth.Password == "" {
-		warning("WARNING: No basic auth values set in config, unauthorized access to all files in document is possible!")
+		warning("WARNING: No basic auth values set in config, unauthorized access to all files in document path is possible!")
 	}
 
 	fmt.Println("")

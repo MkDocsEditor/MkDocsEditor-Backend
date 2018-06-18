@@ -10,6 +10,7 @@ import (
 
 type (
 	EditRequest struct {
+		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
 		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
 		Patches    string `json:"patches" xml:"patches" form:"patches" query:"patches"`
 	}
