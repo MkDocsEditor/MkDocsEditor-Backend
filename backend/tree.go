@@ -53,6 +53,10 @@ type (
 // an in memory representation of the mkdocs file structure
 var DocumentTree Section
 
+func init() {
+	CreateItemTree()
+}
+
 // traverses the mkdocs directory and puts all files into a tree representation
 func CreateItemTree() {
 	_, file := filepath.Split(config.CurrentConfig.MkDocs.DocsPath)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"mkdocsrest/backend"
 	"mkdocsrest/frontend"
 	"mkdocsrest/config"
 	"fmt"
@@ -27,9 +26,6 @@ var warning = color.New(color.FgYellow).PrintfFunc()
 // main entry point
 func main() {
 	printStartupInfo()
-
-	backend.CreateItemTree()
-
 	frontend.SetupRestService()
 }
 

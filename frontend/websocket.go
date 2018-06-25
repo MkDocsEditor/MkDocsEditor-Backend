@@ -88,7 +88,12 @@ func handleIncomingMessages() {
 		d.Content = patchedText
 
 		// Send it out to every client that is currently connected
-		for client := range clients {
+		for client, documentId := range clients {
+			// skip clients that have other documents open
+			if (documentId) != editRequest.DocumentId {
+				continue
+			}
+
 			//err := client.WriteMessage(websocket.TextMessage, []byte(d.Content))
 			err := client.WriteJSON(editRequest)
 			if err != nil {
