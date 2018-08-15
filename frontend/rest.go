@@ -55,6 +55,8 @@ func SetupRestService() {
 		}))
 	}
 
+	echoRest.GET("/alive/", isAlive)
+
 	echoRest.GET("/tree/", getTree)
 
 	// Authentication
@@ -81,6 +83,11 @@ func SetupRestService() {
 
 	var serverConf = config.CurrentConfig.Server
 	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
+}
+
+// returns an empty "ok" answer
+func isAlive(c echo.Context) error {
+	return c.NoContent(http.StatusOK)
 }
 
 // returns the complete file tree
