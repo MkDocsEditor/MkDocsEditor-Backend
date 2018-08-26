@@ -1,16 +1,17 @@
 package backend
 
 import (
-	"mkdocsrest/config"
-	"path/filepath"
-	"os"
 	"github.com/OneOfOne/xxhash"
-	"strconv"
 	"io/ioutil"
 	"log"
+	"mkdocsrest/backend/diff"
+	"mkdocsrest/config"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-	"mkdocsrest/backend/diff"
 )
 
 const (
@@ -38,6 +39,7 @@ type (
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 		Content  string    `json:"-" xml:"-" form:"-" query:"-"`
+		SubUrl   string    `json:"url" xml:"url" form:"url" query:"url"`
 	}
 
 	Resource struct {
@@ -120,6 +122,14 @@ func createDocumentForTree(path string, f os.FileInfo) (document Document) {
 	var fileModTime = f.ModTime()
 	var documentPath = filepath.Join(path, f.Name())
 
+	var subUrl = ""
+	for _, element := range strings.Split(strings.TrimPrefix(documentPath, config.CurrentConfig.MkDocs.DocsPath), string(filepath.Separator)) {
+		element = strings.TrimSuffix(element, ".md")
+		if len(element) > 0 {
+			subUrl += url.PathEscape(element) + "/"
+		}
+	}
+
 	content, err := ReadFile(documentPath)
 	if err != nil {
 		log.Fatal(err)
@@ -133,6 +143,7 @@ func createDocumentForTree(path string, f os.FileInfo) (document Document) {
 		Filesize: fileSize,
 		ModTime:  fileModTime,
 		Content:  content,
+		SubUrl:   subUrl,
 	}
 }
 
