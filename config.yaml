@@ -4,6 +4,15 @@ server:
   basicAuth:                # optional
     user: "joe"             # optional
     password: "secret"      # optional
+  #cors:                     # optional
+  #  allowedorigins:
+  #    - "https://wiki.mycompany.com"
+  #  allowedmethods:
+  #    - HEAD
+  #    - GET
+  #    - PUT
+  #    - POST
+  #    - DELETE
 
 mkdocs:
   projectPath: "D:\\mkdocsrest-test"
