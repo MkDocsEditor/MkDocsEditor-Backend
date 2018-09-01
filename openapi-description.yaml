@@ -1,3 +1,5 @@
+---
+
 openapi: "3.0.0"
 info:
   title: "MkDocsRest API"
@@ -594,3 +596,4 @@ components:
           description: "A description of the error"
           type: string
 
+...
