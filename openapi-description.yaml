@@ -55,6 +55,30 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   /section/:
+    get:
+      summary: "Returns the description of the head of the section tree, including all subsections, documents and resources in it."
+      operationId: getRootSection
+      tags:
+      - Sections
+      responses:
+        '200':
+          description: "The root section"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Section"
+        '401':
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: "unexpected error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     post:
       summary: "Creates a new section"
       operationId: createSection

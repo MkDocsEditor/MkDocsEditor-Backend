@@ -76,6 +76,7 @@ func SetupRestService() {
 	groupDocuments := echoRest.Group("/document")
 	groupResources := echoRest.Group("/resource")
 
+	groupSections.GET("/", getTree)
 	groupSections.GET("/:"+urlParamId+"/", getSectionDescription)
 	groupSections.POST("/", createSection)
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
