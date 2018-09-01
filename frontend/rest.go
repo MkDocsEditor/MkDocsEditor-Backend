@@ -1,13 +1,13 @@
 package frontend
 
 import (
+	"errors"
+	"fmt"
 	"github.com/labstack/echo"
-	"net/http"
+	"github.com/labstack/echo/middleware"
 	"mkdocsrest/backend"
 	"mkdocsrest/config"
-	"github.com/labstack/echo/middleware"
-	"fmt"
-	"errors"
+	"net/http"
 )
 
 const (
@@ -83,7 +83,6 @@ func SetupRestService() {
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
 	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnections)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
-	groupDocuments.PUT("/:"+urlParamId+"/content/", updateDocumentContent)
 	groupDocuments.POST("/", createDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
@@ -156,27 +155,6 @@ func getDocumentContent(c echo.Context) (err error) {
 	} else {
 		return returnNotFound(c, id)
 	}
-}
-
-// updates the content of the document with the given id (if found)
-// if the document doesn't exist
-func updateDocumentContent(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-
-	d := backend.GetDocument(id)
-	if d == nil {
-		return returnNotFound(c, id)
-	}
-
-	// Source
-	file, err := c.FormFile("file")
-	if err != nil {
-		return err
-	}
-
-	backend.UpdateFileFromForm(file, d.Path)
-
-	return c.NoContent(http.StatusOK)
 }
 
 // creates a new document with the given data
