@@ -1,10 +1,10 @@
 package main
 
 import (
-	"mkdocsrest/frontend"
-	"mkdocsrest/config"
 	"fmt"
 	"github.com/fatih/color"
+	"mkdocsrest/config"
+	"mkdocsrest/frontend"
 )
 
 const banner = `       _     _                         _   

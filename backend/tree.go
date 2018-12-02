@@ -63,7 +63,7 @@ func init() {
 func CreateItemTree() {
 	_, file := filepath.Split(config.CurrentConfig.MkDocs.DocsPath)
 
-	DocumentTree = createSectionForTree(config.CurrentConfig.MkDocs.DocsPath, file)
+	DocumentTree = createSectionForTree(config.CurrentConfig.MkDocs.DocsPath, file, "root")
 	searchDir := config.CurrentConfig.MkDocs.DocsPath
 	populateItemTree(&DocumentTree, searchDir)
 }
@@ -77,7 +77,7 @@ func populateItemTree(section *Section, path string) {
 
 	for _, f := range files {
 		if f.IsDir() {
-			var subSection = createSectionForTree(path, f.Name())
+			var subSection = createSectionForTree(path, f.Name(), "")
 			*section.Subsections = append(*section.Subsections, &subSection)
 
 			// recursive call
@@ -94,25 +94,29 @@ func populateItemTree(section *Section, path string) {
 	}
 }
 
+// creates a (non-cryptographic) hash of the given string
+func createHash(s string) string {
+	var pathHash = xxhash.ChecksumString64(s)
+	return strconv.FormatUint(pathHash, 10)
+}
+
 // creates a section object for storing in the tree
-func createSectionForTree(path string, name string) Section {
+func createSectionForTree(path string, name string, id string) Section {
 	var sectionPath = filepath.Join(path, name)
+
+	if id == "" {
+		id = createHash(sectionPath)
+	}
 
 	return Section{
 		Type:        TypeSection,
-		ID:          createHash(sectionPath),
+		ID:          id,
 		Name:        name,
 		Path:        sectionPath,
 		Documents:   &[]*Document{},
 		Subsections: &[]*Section{},
 		Resources:   &[]*Resource{},
 	}
-}
-
-// creates a (non-cryptographic) hash of the given string
-func createHash(s string) string {
-	var pathHash = xxhash.ChecksumString64(s)
-	return strconv.FormatUint(pathHash, 10)
 }
 
 // creates a document object for storing in the tree
