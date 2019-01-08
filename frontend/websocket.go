@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
-	"mkdocsrest/backend"
 	"log"
+	"mkdocsrest/backend"
+	"sync"
 )
 
 type (
@@ -18,6 +19,8 @@ type (
 
 var (
 	upgrader = websocket.Upgrader{}
+
+	lock = sync.RWMutex{}
 
 	clients                = make(map[*websocket.Conn]string) // connected clients (websocket -> document id)
 	connectionsPerDocument = make(map[string]uint)
@@ -44,9 +47,13 @@ func handleNewConnections(c echo.Context) (err error) {
 	// Make sure we close the connection when the function returns
 	defer client.Close()
 
+	lock.Lock()
+
 	// Register our new client
 	clients[client] = id
 	connectionsPerDocument[id] = connectionsPerDocument[id] + 1
+
+	lock.Unlock()
 
 	// Write current document state to the client
 	err = client.WriteMessage(websocket.TextMessage, []byte(d.Content))
@@ -107,12 +114,16 @@ func handleIncomingMessages() {
 // disconnects a client
 func disconnectClient(conn *websocket.Conn) {
 	conn.Close()
+
+	lock.Lock()
 	documentId := clients[conn]
 
 	connectedClientsAfterDisconnect := connectionsPerDocument[documentId] - 1
 
 	connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
 	delete(clients, conn)
+
+	lock.Unlock()
 
 	if connectedClientsAfterDisconnect <= 0 {
 		d := backend.GetDocument(documentId)
