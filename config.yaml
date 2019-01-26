@@ -15,6 +15,6 @@ server:
   #    - DELETE
 
 mkdocs:
-  projectPath: "D:\\mkdocsrest-test"
+  projectPath: "/home/markus/documents/Wiki"
   # configFile: "D:/mkdocsrest-test/mkdocs.yaml"  # optional
   # docsPath: "D:/mkdocsrest-test/docs"           # optional
