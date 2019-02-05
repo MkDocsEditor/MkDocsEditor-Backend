@@ -9,8 +9,21 @@ import (
 	"sync"
 )
 
+const (
+	TypeInitialContent = "initial-content"
+	TypeEditRequest    = "edit-request"
+)
+
 type (
+	InitialContentRequest struct {
+		Type       string `json:"type" xml:"type" form:"type" query:"type"`
+		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
+		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
+		Content    string `json:"content" xml:"content" form:"content" query:"content"`
+	}
+
 	EditRequest struct {
+		Type       string `json:"type" xml:"type" form:"type" query:"type"`
 		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
 		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
 		Patches    string `json:"patches" xml:"patches" form:"patches" query:"patches"`
@@ -55,8 +68,15 @@ func handleNewConnections(c echo.Context) (err error) {
 
 	lock.Unlock()
 
+	initialContentRequest := InitialContentRequest{
+		Type:       TypeInitialContent,
+		DocumentId: id,
+		RequestId:  id,
+		Content:    d.Content,
+	}
+
 	// Write current document state to the client
-	err = client.WriteMessage(websocket.TextMessage, []byte(d.Content))
+	err = client.WriteJSON(initialContentRequest)
 	if err != nil {
 		c.Logger().Error(err)
 		disconnectClient(client)
@@ -101,7 +121,6 @@ func handleIncomingMessages() {
 				continue
 			}
 
-			//err := client.WriteMessage(websocket.TextMessage, []byte(d.Content))
 			err := client.WriteJSON(editRequest)
 			if err != nil {
 				log.Printf("error: %v", err)
