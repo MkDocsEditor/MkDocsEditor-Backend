@@ -48,6 +48,10 @@ func watchDirRecursive(path string, action func(s string)) {
 func addFolderWatch(path string, fi os.FileInfo, err error) error {
 	// since fsnotify can watch all the files in a directory, watchers only need
 	// to be added to each nested directory
+	if err != nil {
+		return err
+	}
+
 	if fi.Mode().IsDir() {
 		return watcher.Add(path)
 	}
