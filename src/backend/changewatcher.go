@@ -1,10 +1,10 @@
 package backend
 
 import (
-	"mkdocsrest/config"
+	"MkDocsEditor-Backend/src/config"
 	"fmt"
-	"os"
 	"github.com/fsnotify/fsnotify"
+	"os"
 	"path/filepath"
 )
 

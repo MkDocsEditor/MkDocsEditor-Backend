@@ -1,10 +1,10 @@
-package main
+package src
 
 import (
+	"MkDocsEditor-Backend/src/config"
+	"MkDocsEditor-Backend/src/frontend"
 	"fmt"
 	"github.com/fatih/color"
-	"mkdocsrest/config"
-	"mkdocsrest/frontend"
 )
 
 const banner = `       _     _                         _   

@@ -1,11 +1,11 @@
 package frontend
 
 import (
+	"MkDocsEditor-Backend/src/backend"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 	"log"
-	"mkdocsrest/backend"
 	"sync"
 )
 

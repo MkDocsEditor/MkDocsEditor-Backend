@@ -1,11 +1,11 @@
 package backend
 
 import (
-	"os"
 	"fmt"
-	"io/ioutil"
 	"io"
+	"io/ioutil"
 	"mime/multipart"
+	"os"
 )
 
 // read the content of a file

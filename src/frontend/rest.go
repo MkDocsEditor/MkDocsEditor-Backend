@@ -1,12 +1,12 @@
 package frontend
 
 import (
+	"MkDocsEditor-Backend/src/backend"
+	"MkDocsEditor-Backend/src/config"
 	"errors"
 	"fmt"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
-	"mkdocsrest/backend"
-	"mkdocsrest/config"
 	"net/http"
 )
 

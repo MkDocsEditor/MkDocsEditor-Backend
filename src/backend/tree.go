@@ -1,11 +1,11 @@
 package backend
 
 import (
+	"MkDocsEditor-Backend/src/backend/diff"
+	"MkDocsEditor-Backend/src/config"
 	"github.com/OneOfOne/xxhash"
 	"io/ioutil"
 	"log"
-	"mkdocsrest/backend/diff"
-	"mkdocsrest/config"
 	"net/url"
 	"os"
 	"path/filepath"
