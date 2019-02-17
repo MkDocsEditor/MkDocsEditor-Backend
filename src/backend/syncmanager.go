@@ -3,6 +3,7 @@ package backend
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"github.com/gorilla/websocket"
 	"log"
 )
@@ -53,8 +54,7 @@ func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest
 		err = err2
 		serverShadows[clientConnection] = patchedServerShadow
 	} else {
-		// TODO: return error and disconnect client (resync necessary)
-		return "", err
+		return "", errors.New("shadow out of sync :-(")
 	}
 
 	// then patch the server document version

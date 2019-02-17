@@ -108,12 +108,13 @@ func handleIncomingMessages() {
 
 		patches, err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
 		if err != nil {
+			// force resync
 			disconnectClient(incomingWsMessage.connection)
 			continue
 		} else if len(patches) > 0 {
 			serverEditRequest := backend.EditRequest{
 				Type:           TypeEditRequest,
-				RequestId:      "00000000",
+				RequestId:      "",
 				DocumentId:     documentId,
 				Patches:        patches,
 				ShadowChecksum: "unused",
