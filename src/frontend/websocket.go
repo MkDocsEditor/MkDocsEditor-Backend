@@ -6,7 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 	"log"
-	"sync"
+	mutexSync "sync"
 )
 
 const (
@@ -14,30 +14,21 @@ const (
 	TypeEditRequest    = "edit-request"
 )
 
-type (
-	InitialContentRequest struct {
-		Type       string `json:"type" xml:"type" form:"type" query:"type"`
-		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
-		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
-		Content    string `json:"content" xml:"content" form:"content" query:"content"`
-	}
-
-	EditRequest struct {
-		Type       string `json:"type" xml:"type" form:"type" query:"type"`
-		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
-		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
-		Patches    string `json:"patches" xml:"patches" form:"patches" query:"patches"`
-	}
-)
-
 var (
 	upgrader = websocket.Upgrader{}
 
-	lock = sync.RWMutex{}
+	lock = mutexSync.RWMutex{}
 
 	clients                = make(map[*websocket.Conn]string) // connected clients (websocket -> document id)
 	connectionsPerDocument = make(map[string]uint)
-	incomingEditRequests   = make(chan EditRequest) // incoming messages from clients
+	incomingWsMessages     = make(chan IncomingWebsocketRequest) // incoming messages from clients
+)
+
+type (
+	IncomingWebsocketRequest struct {
+		connection *websocket.Conn
+		request    backend.EditRequest
+	}
 )
 
 func init() {
@@ -68,7 +59,10 @@ func handleNewConnections(c echo.Context) (err error) {
 
 	lock.Unlock()
 
-	initialContentRequest := InitialContentRequest{
+	// set initial state in backend
+	backend.InitClient(client, d.Content)
+
+	initialContentRequest := backend.InitialContentRequest{
 		Type:       TypeInitialContent,
 		DocumentId: id,
 		RequestId:  id,
@@ -84,7 +78,7 @@ func handleNewConnections(c echo.Context) (err error) {
 
 	for {
 		// Read incoming edit requests
-		var editRequest EditRequest
+		var editRequest backend.EditRequest
 		// Read in a new message as JSON and map it to a Message object
 		err := client.ReadJSON(&editRequest)
 		if err != nil {
@@ -95,7 +89,10 @@ func handleNewConnections(c echo.Context) (err error) {
 		fmt.Printf("%s\n", editRequest)
 
 		// Send the newly received message to the broadcast channel
-		incomingEditRequests <- editRequest
+		incomingWsMessages <- IncomingWebsocketRequest{
+			connection: client,
+			request:    editRequest,
+		}
 	}
 
 	return err
@@ -105,27 +102,41 @@ func handleNewConnections(c echo.Context) (err error) {
 func handleIncomingMessages() {
 	for {
 		// Grab the next message from the broadcast channel
-		editRequest := <-incomingEditRequests
+		incomingWsMessage := <-incomingWsMessages
 
-		d := backend.GetDocument(editRequest.DocumentId)
-		patchedText, err := backend.ApplyPatch(d, editRequest.Patches)
+		documentId := incomingWsMessage.request.DocumentId
+
+		patches, err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
 		if err != nil {
-			log.Fatal(err)
+			disconnectClient(incomingWsMessage.connection)
+			continue
+		} else if len(patches) > 0 {
+			serverEditRequest := backend.EditRequest{
+				Type:           TypeEditRequest,
+				RequestId:      "00000000",
+				DocumentId:     documentId,
+				Patches:        patches,
+				ShadowChecksum: "unused",
+			}
+
+			sendToClients(serverEditRequest)
 		}
-		d.Content = patchedText
+	}
+}
 
-		// Send it out to every client that is currently connected
-		for client, documentId := range clients {
-			// skip clients that have other documents open
-			if (documentId) != editRequest.DocumentId {
-				continue
-			}
+// sends an EditRequest to all currently connected clients
+func sendToClients(editRequest backend.EditRequest) {
+	// Send it out to every client that is currently connected
+	for client, documentId := range clients {
+		// skip clients that have other documents open
+		if (documentId) != editRequest.DocumentId {
+			continue
+		}
 
-			err := client.WriteJSON(editRequest)
-			if err != nil {
-				log.Printf("error: %v", err)
-				disconnectClient(client)
-			}
+		err := client.WriteJSON(editRequest)
+		if err != nil {
+			log.Printf("error: %v", err)
+			disconnectClient(client)
 		}
 	}
 }
@@ -140,6 +151,7 @@ func disconnectClient(conn *websocket.Conn) {
 	connectedClientsAfterDisconnect := connectionsPerDocument[documentId] - 1
 
 	connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
+	backend.RemoveClient(conn)
 	delete(clients, conn)
 
 	lock.Unlock()

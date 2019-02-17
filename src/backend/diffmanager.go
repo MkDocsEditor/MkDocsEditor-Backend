@@ -1,4 +1,4 @@
-package diff
+package backend
 
 import (
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -13,4 +13,12 @@ func ApplyPatch(textToPatch string, patchesText string) (patched string, err err
 	p, err := dmp.PatchFromText(patchesText)
 	patched, _ = dmp.PatchApply(p, textToPatch)
 	return patched, err
+}
+
+// detect diff and create patch from diff
+func CreatePatch(oldText string, newText string) (patches string, err error) {
+	diffs := dmp.DiffMain(oldText, newText, true)
+	patchArray := dmp.PatchMake(diffs)
+	patches = dmp.PatchToText(patchArray)
+	return patches, nil
 }

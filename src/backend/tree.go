@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"MkDocsEditor-Backend/src/backend/diff"
 	"MkDocsEditor-Backend/src/config"
 	"github.com/OneOfOne/xxhash"
 	"io/ioutil"
@@ -243,17 +242,6 @@ func CreateSection(parentPath string, sectionName string) (err error) {
 // creates a new document as a child of the given parent section id and the given name
 func CreateDocument(parentSectionId string, documentName string) (err error) {
 	return nil
-}
-
-// Applies the given patch to the document with the given id
-func ApplyPatch(document *Document, patchesAsText string) (result string, err error) {
-	result, err = diff.ApplyPatch(document.Content, patchesAsText)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return result, err
 }
 
 // deletes a file/folder with the given ID and type from disk
