@@ -1,17 +1,16 @@
 package backend
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"github.com/gorilla/websocket"
 	"log"
+	"strconv"
 )
 
 // Manages processing of EditRequests from clients
 var (
 	// client connection -> server shadow
-	serverShadows = make(map[*websocket.Conn]string)
+	ServerShadows = make(map[*websocket.Conn]string)
 )
 
 type (
@@ -36,25 +35,25 @@ func init() {
 
 // sets the initial server shadow for a new client connection
 func InitClient(conn *websocket.Conn, shadowContent string) {
-	serverShadows[conn] = shadowContent
+	ServerShadows[conn] = shadowContent
 }
 
 // removes the shadow for the given client
 func RemoveClient(conn *websocket.Conn) {
-	delete(serverShadows, conn)
+	delete(ServerShadows, conn)
 }
 
 // handles incoming edit requests from the client
-func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest) (patches string, err error) {
+func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest) (err error) {
 	// check if the server shadow matches the client shadow before the patch has been applied
-	checksum := GetMD5Hash(serverShadows[clientConnection])
+	checksum := GetMD5Hash(ServerShadows[clientConnection])
 	if checksum == editRequest.ShadowChecksum {
 		// if so, patch the server shadow
-		patchedServerShadow, err2 := ApplyPatch(serverShadows[clientConnection], editRequest.Patches)
+		patchedServerShadow, err2 := ApplyPatch(ServerShadows[clientConnection], editRequest.Patches)
 		err = err2
-		serverShadows[clientConnection] = patchedServerShadow
+		ServerShadows[clientConnection] = patchedServerShadow
 	} else {
-		return "", errors.New("shadow out of sync :-(")
+		return errors.New("unrecoverable: shadow out of sync")
 	}
 
 	// then patch the server document version
@@ -63,26 +62,16 @@ func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest
 	if err != nil {
 		// TODO: if fuzzy patch fails make a diff of serverShadow and current server version
 		log.Fatal(err)
-		return "", err
+		return err
 	}
 	d.Content = patchedText
 
-	// take a diff between the server document version and the server shadow
-	patches, err = CreatePatch(d.Content, serverShadows[clientConnection])
-	if err != nil {
-		log.Fatal(err)
-		return "", err
-	}
-
-	// copy the server version to the server shadow
-	serverShadows[clientConnection] = d.Content
-
-	// send the diff to all clients
-	return patches, err
+	return err
 }
 
 func GetMD5Hash(text string) string {
-	hasher := md5.New()
-	hasher.Write([]byte(text))
-	return hex.EncodeToString(hasher.Sum(nil))
+	// TODO: this md5 is sometimes not the same as in kotlin...
+	return strconv.Itoa(len(text))
+	//hash := md5.Sum([]byte(text))
+	//return hex.EncodeToString(hash[:])
 }

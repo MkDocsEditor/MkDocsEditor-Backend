@@ -49,7 +49,7 @@ func handleNewConnections(c echo.Context) (err error) {
 	}
 
 	// Make sure we close the connection when the function returns
-	defer client.Close()
+	defer disconnectClient(client)
 
 	lock.Lock()
 
@@ -106,39 +106,58 @@ func handleIncomingMessages() {
 
 		documentId := incomingWsMessage.request.DocumentId
 
-		patches, err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
+		err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
 		if err != nil {
 			// force resync
 			disconnectClient(incomingWsMessage.connection)
 			continue
-		} else if len(patches) > 0 {
-			serverEditRequest := backend.EditRequest{
-				Type:           TypeEditRequest,
-				RequestId:      "",
-				DocumentId:     documentId,
-				Patches:        patches,
-				ShadowChecksum: "unused",
-			}
-
-			sendToClients(serverEditRequest)
+		} else {
+			NotifyClientsOfChange(documentId)
 		}
 	}
 }
 
-// sends an EditRequest to all currently connected clients
-func sendToClients(editRequest backend.EditRequest) {
-	// Send it out to every client that is currently connected
-	for client, documentId := range clients {
-		// skip clients that have other documents open
-		if (documentId) != editRequest.DocumentId {
+func NotifyClientsOfChange(documentId string) {
+	d := backend.GetDocument(documentId)
+
+	// take a diff between the server document version and the server shadow
+	for connection, shadow := range backend.ServerShadows {
+		if clients[connection] != d.ID {
+			// this client is working on another document
 			continue
 		}
 
-		err := client.WriteJSON(editRequest)
+		patches, err := backend.CreatePatch(shadow, d.Content)
 		if err != nil {
-			log.Printf("error: %v", err)
-			disconnectClient(client)
+			log.Fatal(err)
+			continue
 		}
+
+		if len(patches) <= 0 {
+			continue
+		}
+
+		// copy the server version to the server shadow
+		backend.ServerShadows[connection] = d.Content
+
+		serverEditRequest := backend.EditRequest{
+			Type:           TypeEditRequest,
+			RequestId:      "",
+			DocumentId:     documentId,
+			Patches:        patches,
+			ShadowChecksum: "unused",
+		}
+
+		sendToClient(connection, serverEditRequest)
+	}
+}
+
+// sends an EditRequest to the specified connection
+func sendToClient(connection *websocket.Conn, editRequest backend.EditRequest) {
+	err := connection.WriteJSON(editRequest)
+	if err != nil {
+		log.Printf("error: %v", err)
+		disconnectClient(connection)
 	}
 }
 
