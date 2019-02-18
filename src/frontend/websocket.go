@@ -74,6 +74,7 @@ func handleNewConnections(c echo.Context) (err error) {
 	if err != nil {
 		c.Logger().Error(err)
 		disconnectClient(client)
+		return err
 	}
 
 	for {
@@ -84,7 +85,7 @@ func handleNewConnections(c echo.Context) (err error) {
 		if err != nil {
 			log.Printf("error: %v", err)
 			disconnectClient(client)
-			break
+			return err
 		}
 		fmt.Printf("%s\n", editRequest)
 
@@ -94,8 +95,6 @@ func handleNewConnections(c echo.Context) (err error) {
 			request:    editRequest,
 		}
 	}
-
-	return err
 }
 
 // processes incoming messages from connected clients
@@ -109,61 +108,96 @@ func handleIncomingMessages() {
 		err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
 		if err != nil {
 			// force resync
+			log.Printf("error handling EditRequest: %v", err)
 			disconnectClient(incomingWsMessage.connection)
 			continue
 		} else {
-			NotifyClientsOfChange(documentId)
+			NotifyClientsOfChange(incomingWsMessage.connection, documentId)
 		}
 	}
 }
 
-func NotifyClientsOfChange(documentId string) {
+func NotifyClientsOfChange(inducingConnection *websocket.Conn, documentId string) {
 	d := backend.GetDocument(documentId)
 
-	// take a diff between the server document version and the server shadow
-	for connection, shadow := range backend.ServerShadows {
-		if clients[connection] != d.ID {
-			// this client is working on another document
-			continue
-		}
+	shadow := backend.ServerShadows[inducingConnection]
 
-		patches, err := backend.CreatePatch(shadow, d.Content)
-		if err != nil {
-			log.Fatal(err)
-			continue
-		}
-
-		if len(patches) <= 0 {
-			continue
-		}
-
-		// copy the server version to the server shadow
-		backend.ServerShadows[connection] = d.Content
-
-		serverEditRequest := backend.EditRequest{
-			Type:           TypeEditRequest,
-			RequestId:      "",
-			DocumentId:     documentId,
-			Patches:        patches,
-			ShadowChecksum: "unused",
-		}
-
-		sendToClient(connection, serverEditRequest)
+	patches, err := backend.CreatePatch(shadow, d.Content)
+	if err != nil {
+		log.Fatal(err)
+		return
 	}
+
+	if len(patches) <= 0 {
+		return
+	}
+
+	// if this is the connection that caused the change
+	// if connection == inducingConnection {
+	// copy the server version to the server shadow
+	backend.ServerShadows[inducingConnection] = d.Content
+	// }
+
+	serverEditRequest := backend.EditRequest{
+		Type:           TypeEditRequest,
+		RequestId:      "",
+		DocumentId:     documentId,
+		Patches:        patches,
+		ShadowChecksum: "unused",
+	}
+
+	sendToClient(inducingConnection, serverEditRequest)
+
+	// take a diff between the server document version and the server shadow
+	//for connection, shadow := range backend.ServerShadows {
+	//	if clients[connection] != d.ID {
+	//		// this client is working on another document
+	//		continue
+	//	}
+	//
+	//	patches, err := backend.CreatePatch(shadow, d.Content)
+	//	if err != nil {
+	//		log.Fatal(err)
+	//		continue
+	//	}
+	//
+	//	if len(patches) <= 0 {
+	//		continue
+	//	}
+	//
+	//	// if this is the connection that caused the change
+	//	if connection == inducingConnection {
+	//		// copy the server version to the server shadow
+	//		backend.ServerShadows[connection] = d.Content
+	//	}
+	//
+	//	serverEditRequest := backend.EditRequest{
+	//		Type:           TypeEditRequest,
+	//		RequestId:      "",
+	//		DocumentId:     documentId,
+	//		Patches:        patches,
+	//		ShadowChecksum: "unused",
+	//	}
+	//
+	//	sendToClient(connection, serverEditRequest)
+	//}
 }
 
 // sends an EditRequest to the specified connection
 func sendToClient(connection *websocket.Conn, editRequest backend.EditRequest) {
 	err := connection.WriteJSON(editRequest)
 	if err != nil {
-		log.Printf("error: %v", err)
+		log.Printf("error writing EditRequest to websocket client: %v", err)
 		disconnectClient(connection)
 	}
 }
 
 // disconnects a client
 func disconnectClient(conn *websocket.Conn) {
-	conn.Close()
+	err := conn.Close()
+	if err != nil {
+		log.Printf("error closing websocket connection: %v", err)
+	}
 
 	lock.Lock()
 	documentId := clients[conn]
@@ -182,6 +216,9 @@ func disconnectClient(conn *websocket.Conn) {
 			log.Fatal("Document was nil!")
 		}
 
-		backend.WriteFile(d.Path, []byte(d.Content))
+		err := backend.WriteFile(d.Path, []byte(d.Content))
+		if err != nil {
+			log.Printf("error writing edited file to disk: %v", err)
+		}
 	}
 }

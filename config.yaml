@@ -2,8 +2,8 @@ server:
   host: "0.0.0.0"
   port: 8080
   basicAuth:                # optional
-    user: "joe"             # optional
-    password: "secret"      # optional
+    user: "mkdocsrest"             # optional
+    password: "nR6G7RNYPSSvcnkQqiFIc49sx"      # optional
   #cors:                     # optional
   #  allowedorigins:
   #    - "https://wiki.mycompany.com"
