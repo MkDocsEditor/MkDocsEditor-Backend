@@ -53,6 +53,7 @@ func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest
 		err = err2
 		ServerShadows[clientConnection] = patchedServerShadow
 	} else {
+		// TODO: this happens more often than it should, why?
 		return errors.New("unrecoverable: shadow out of sync")
 	}
 
