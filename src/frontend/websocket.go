@@ -32,31 +32,28 @@ type (
 )
 
 func init() {
-	go handleIncomingMessages()
 }
 
 func handleNewConnections(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
+	documentId := c.Param(urlParamId)
 
-	d := backend.GetDocument(id)
+	d := backend.GetDocument(documentId)
 	if d == nil {
-		return returnNotFound(c, id)
+		return returnNotFound(c, documentId)
 	}
 
 	client, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		return err
+		return returnError(c, err)
 	}
 
 	// Make sure we close the connection when the function returns
 	defer disconnectClient(client)
 
 	lock.Lock()
-
 	// Register our new client
-	clients[client] = id
-	connectionsPerDocument[id] = connectionsPerDocument[id] + 1
-
+	clients[client] = documentId
+	connectionsPerDocument[documentId] = connectionsPerDocument[documentId] + 1
 	lock.Unlock()
 
 	// set initial state in backend
@@ -64,8 +61,8 @@ func handleNewConnections(c echo.Context) (err error) {
 
 	initialContentRequest := backend.InitialContentRequest{
 		Type:       TypeInitialContent,
-		DocumentId: id,
-		RequestId:  id,
+		DocumentId: documentId,
+		RequestId:  "",
 		Content:    d.Content,
 	}
 
@@ -73,7 +70,7 @@ func handleNewConnections(c echo.Context) (err error) {
 	err = client.WriteJSON(initialContentRequest)
 	if err != nil {
 		c.Logger().Error(err)
-		disconnectClient(client)
+		log.Printf("error writing initial content response: %v", err)
 		return err
 	}
 
@@ -84,40 +81,40 @@ func handleNewConnections(c echo.Context) (err error) {
 		err := client.ReadJSON(&editRequest)
 		if err != nil {
 			log.Printf("error: %v", err)
-			disconnectClient(client)
 			return err
 		}
-		fmt.Printf("%s\n", editRequest)
 
 		// Send the newly received message to the broadcast channel
-		incomingWsMessages <- IncomingWebsocketRequest{
-			connection: client,
-			request:    editRequest,
+		err = handleIncomingMessage(client, editRequest)
+		if err != nil {
+			log.Printf("error: %v", err)
+			return err
 		}
 	}
 }
 
 // processes incoming messages from connected clients
-func handleIncomingMessages() {
-	for {
-		// Grab the next message from the broadcast channel
-		incomingWsMessage := <-incomingWsMessages
+func handleIncomingMessage(client *websocket.Conn, request backend.EditRequest) (err error) {
+	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
+	documentId := request.DocumentId
 
-		documentId := incomingWsMessage.request.DocumentId
-
-		err := backend.HandleEditRequest(incomingWsMessage.connection, incomingWsMessage.request)
-		if err != nil {
-			// force resync
-			log.Printf("error handling EditRequest: %v", err)
-			disconnectClient(incomingWsMessage.connection)
-			continue
-		} else {
-			NotifyClientsOfChange(incomingWsMessage.connection, documentId)
-		}
+	err = backend.HandleEditRequest(client, request)
+	if err != nil {
+		// force resync
+		log.Printf("error handling EditRequest: %v", err)
+		return err
 	}
+
+	err = sendEditRequestResponse(client, documentId)
+	if err != nil {
+		log.Printf("error sending response: %v", err)
+		return err
+	}
+
+	return err
 }
 
-func NotifyClientsOfChange(inducingConnection *websocket.Conn, documentId string) {
+func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId string) (err error) {
 	d := backend.GetDocument(documentId)
 
 	shadow := backend.ServerShadows[inducingConnection]
@@ -125,11 +122,7 @@ func NotifyClientsOfChange(inducingConnection *websocket.Conn, documentId string
 	patches, err := backend.CreatePatch(shadow, d.Content)
 	if err != nil {
 		log.Fatal(err)
-		return
-	}
-
-	if len(patches) <= 0 {
-		return
+		return err
 	}
 
 	// if this is the connection that caused the change
@@ -137,6 +130,10 @@ func NotifyClientsOfChange(inducingConnection *websocket.Conn, documentId string
 	// copy the server version to the server shadow
 	backend.ServerShadows[inducingConnection] = d.Content
 	// }
+
+	if len(patches) <= 0 {
+		return
+	}
 
 	serverEditRequest := backend.EditRequest{
 		Type:           TypeEditRequest,
@@ -146,50 +143,18 @@ func NotifyClientsOfChange(inducingConnection *websocket.Conn, documentId string
 		ShadowChecksum: "unused",
 	}
 
-	sendToClient(inducingConnection, serverEditRequest)
+	err = sendToClient(inducingConnection, serverEditRequest)
 
-	// take a diff between the server document version and the server shadow
-	//for connection, shadow := range backend.ServerShadows {
-	//	if clients[connection] != d.ID {
-	//		// this client is working on another document
-	//		continue
-	//	}
-	//
-	//	patches, err := backend.CreatePatch(shadow, d.Content)
-	//	if err != nil {
-	//		log.Fatal(err)
-	//		continue
-	//	}
-	//
-	//	if len(patches) <= 0 {
-	//		continue
-	//	}
-	//
-	//	// if this is the connection that caused the change
-	//	if connection == inducingConnection {
-	//		// copy the server version to the server shadow
-	//		backend.ServerShadows[connection] = d.Content
-	//	}
-	//
-	//	serverEditRequest := backend.EditRequest{
-	//		Type:           TypeEditRequest,
-	//		RequestId:      "",
-	//		DocumentId:     documentId,
-	//		Patches:        patches,
-	//		ShadowChecksum: "unused",
-	//	}
-	//
-	//	sendToClient(connection, serverEditRequest)
-	//}
+	return err
 }
 
 // sends an EditRequest to the specified connection
-func sendToClient(connection *websocket.Conn, editRequest backend.EditRequest) {
-	err := connection.WriteJSON(editRequest)
+func sendToClient(connection *websocket.Conn, editRequest backend.EditRequest) (err error) {
+	err = connection.WriteJSON(editRequest)
 	if err != nil {
 		log.Printf("error writing EditRequest to websocket client: %v", err)
-		disconnectClient(connection)
 	}
+	return err
 }
 
 // disconnects a client

@@ -47,15 +47,13 @@ func RemoveClient(conn *websocket.Conn) {
 func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest) (err error) {
 	// check if the server shadow matches the client shadow before the patch has been applied
 	checksum := GetMD5Hash(ServerShadows[clientConnection])
-	if checksum == editRequest.ShadowChecksum {
-		// if so, patch the server shadow
-		patchedServerShadow, err2 := ApplyPatch(ServerShadows[clientConnection], editRequest.Patches)
-		err = err2
-		ServerShadows[clientConnection] = patchedServerShadow
-	} else {
+	if checksum != editRequest.ShadowChecksum {
 		// TODO: this happens more often than it should, why?
 		return errors.New("unrecoverable: shadow out of sync")
 	}
+
+	// patch the server shadow
+	ServerShadows[clientConnection], err = ApplyPatch(ServerShadows[clientConnection], editRequest.Patches)
 
 	// then patch the server document version
 	d := GetDocument(editRequest.DocumentId)
@@ -71,8 +69,8 @@ func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest
 }
 
 func GetMD5Hash(text string) string {
-	// TODO: this md5 is sometimes not the same as in kotlin...
 	return strconv.Itoa(len(text))
+	// TODO: this md5 is sometimes not the same as in kotlin...
 	//hash := md5.Sum([]byte(text))
 	//return hex.EncodeToString(hash[:])
 }
