@@ -30,50 +30,117 @@ type (
 	}
 )
 
-func init() {
-}
-
 // sets the initial server shadow for a new client connection
-func InitClient(conn *websocket.Conn, shadowContent string) {
+func initClient(conn *websocket.Conn, shadowContent string) {
 	ServerShadows[conn] = shadowContent
 }
 
 // removes the shadow for the given client
-func RemoveClient(conn *websocket.Conn) {
+func removeClient(conn *websocket.Conn) {
 	delete(ServerShadows, conn)
 }
 
 // handles incoming edit requests from the client
-func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest) (err error) {
+func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
 	// check if the server shadow matches the client shadow before the patch has been applied
-	checksum := GetMD5Hash(ServerShadows[clientConnection])
+	checksum := calculateChecksum(ServerShadows[client])
 	if checksum != editRequest.ShadowChecksum {
-		// TODO: this happens more often than it should, why?
-		log.Printf("shadows out of sync!")
-		log.Printf("server Shadow: %s", ServerShadows[clientConnection])
-		log.Printf("server Shadow chksum: %s Client Shadow Checksum: %s", checksum, editRequest.ShadowChecksum)
-
 		return errors.New("unrecoverable: shadow out of sync")
 	}
 
+	documentId := editRequest.DocumentId
+
 	// patch the server shadow
-	ServerShadows[clientConnection], err = ApplyPatch(ServerShadows[clientConnection], editRequest.Patches)
+	ServerShadows[client], err = ApplyPatch(ServerShadows[client], editRequest.Patches)
 
 	// then patch the server document version
 	d := GetDocument(editRequest.DocumentId)
 	patchedText, err := ApplyPatch(d.Content, editRequest.Patches)
 	if err != nil {
-		// TODO: if fuzzy patch fails make a diff of serverShadow and current server version
-		log.Fatal(err)
+		// if fuzzy patch fails, drop client changes
+		log.Printf("fuzzy patch failed")
+		// reset err variable as we can recover from this error
+		err = nil
+	} else {
+		d.Content = patchedText
+	}
+
+	if err != nil {
+		log.Printf("error handling EditRequest, resending InitialText to %v", client.RemoteAddr())
+		// force resync
+		d := GetDocument(documentId)
+		err = sendInitialTextResponse(client, d)
 		return err
 	}
-	d.Content = patchedText
+
+	err = sendEditRequestResponse(client, documentId)
+	if err != nil {
+		log.Printf("error sending response: %v", err)
+		return err
+	}
 
 	return err
 }
 
-func GetMD5Hash(text string) string {
-	return strconv.Itoa(len(text))
+func sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
+	// set initial state in backend
+	initClient(client, document.Content)
+
+	initialContentRequest := InitialContentRequest{
+		Type:       TypeInitialContent,
+		DocumentId: document.ID,
+		RequestId:  "",
+		Content:    document.Content,
+	}
+
+	// Write current document state to the client
+	err = client.WriteJSON(initialContentRequest)
+	if err != nil {
+		log.Printf("error writing initial content response: %v", err)
+		return err
+	}
+
+	return
+}
+
+func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId string) (err error) {
+	d := GetDocument(documentId)
+
+	shadow := ServerShadows[inducingConnection]
+	shadowChecksum := calculateChecksum(shadow)
+
+	patches, err := CreatePatch(shadow, d.Content)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	// if this is the connection that caused the change
+	// if connection == inducingConnection {
+	// copy the server version to the server shadow
+	ServerShadows[inducingConnection] = d.Content
+	// }
+
+	if len(patches) <= 0 {
+		return
+	}
+
+	serverEditRequest := EditRequest{
+		Type:           TypeEditRequest,
+		RequestId:      "",
+		DocumentId:     documentId,
+		Patches:        patches,
+		ShadowChecksum: shadowChecksum,
+	}
+
+	err = sendToClient(inducingConnection, serverEditRequest)
+
+	return err
+}
+
+func calculateChecksum(text string) string {
+	return strconv.Itoa(len([]rune(text)))
+	//return text
 	// TODO: this md5 is sometimes not the same as in kotlin...
 	//hash := md5.Sum([]byte(text))
 	//return hex.EncodeToString(hash[:])

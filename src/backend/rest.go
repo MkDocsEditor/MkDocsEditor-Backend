@@ -1,7 +1,6 @@
-package frontend
+package backend
 
 import (
-	"MkDocsEditor-Backend/src/backend"
 	"MkDocsEditor-Backend/src/config"
 	"errors"
 	"fmt"
@@ -103,22 +102,22 @@ func isAlive(c echo.Context) error {
 
 // returns the complete file tree
 func getTree(c echo.Context) error {
-	return c.JSONPretty(http.StatusOK, backend.DocumentTree, " ")
+	return c.JSONPretty(http.StatusOK, DocumentTree, " ")
 }
 
 // returns the description of a single section (if found)
 func getSectionDescription(c echo.Context) error {
-	return getItemDescription(c, backend.TypeSection)
+	return getItemDescription(c, TypeSection)
 }
 
 // returns the description of a single document (if found)
 func getDocumentDescription(c echo.Context) error {
-	return getItemDescription(c, backend.TypeDocument)
+	return getItemDescription(c, TypeDocument)
 }
 
 // returns the description of a single document (if found)
 func getResourceDescription(c echo.Context) error {
-	return getItemDescription(c, backend.TypeResource)
+	return getItemDescription(c, TypeResource)
 }
 
 func getItemDescription(c echo.Context, itemType string) (err error) {
@@ -126,12 +125,12 @@ func getItemDescription(c echo.Context, itemType string) (err error) {
 
 	var result interface{}
 	switch itemType {
-	case backend.TypeSection:
-		result = backend.GetSection(id)
-	case backend.TypeDocument:
-		result = backend.GetDocument(id)
-	case backend.TypeResource:
-		result = backend.GetResource(id)
+	case TypeSection:
+		result = GetSection(id)
+	case TypeDocument:
+		result = GetDocument(id)
+	case TypeResource:
+		result = GetResource(id)
 	default:
 		return returnError(c, errors.New("Unknown itemType '"+itemType+"'"))
 	}
@@ -147,7 +146,7 @@ func getItemDescription(c echo.Context, itemType string) (err error) {
 func getDocumentContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 
-	d := backend.GetDocument(id)
+	d := GetDocument(id)
 
 	if d != nil {
 		// TODO: return file again
@@ -165,16 +164,16 @@ func createSection(c echo.Context) (err error) {
 		return returnError(c, err)
 	}
 
-	s := backend.GetSection(r.Parent)
+	s := GetSection(r.Parent)
 	if s == nil {
 		return returnNotFound(c, r.Parent)
 	}
 
-	if err = backend.CreateSection(s.Path, r.Name); err != nil {
+	if err = CreateSection(s.Path, r.Name); err != nil {
 		return returnError(c, err)
 	}
 
-	backend.CreateItemTree()
+	CreateItemTree()
 	return c.String(http.StatusOK, "Subsection '"+r.Name+"' created in section '"+s.Name+"'")
 }
 
@@ -185,11 +184,11 @@ func createDocument(c echo.Context) (err error) {
 		return returnError(c, err)
 	}
 
-	s := backend.GetSection(r.Parent)
+	s := GetSection(r.Parent)
 	if s == nil {
 		return returnNotFound(c, r.Parent)
 	}
-	if err = backend.CreateDocument(r.Parent, r.Name); err != nil {
+	if err = CreateDocument(r.Parent, r.Name); err != nil {
 		return returnError(c, err)
 	}
 
@@ -198,24 +197,24 @@ func createDocument(c echo.Context) (err error) {
 
 // deletes an existing section
 func deleteSection(c echo.Context) (err error) {
-	return deleteItem(c, backend.TypeSection)
+	return deleteItem(c, TypeSection)
 }
 
 // deletes an existing document
 func deleteDocument(c echo.Context) (err error) {
-	return deleteItem(c, backend.TypeDocument)
+	return deleteItem(c, TypeDocument)
 }
 
 // deletes an existing resource
 func deleteResource(c echo.Context) (err error) {
-	return deleteItem(c, backend.TypeResource)
+	return deleteItem(c, TypeResource)
 }
 
 // deletes an item by id and itemType
 func deleteItem(c echo.Context, itemType string) (err error) {
 	id := c.Param(urlParamId)
 
-	success, err := backend.DeleteItem(id, itemType)
+	success, err := DeleteItem(id, itemType)
 	if err != nil {
 		return returnError(c, err)
 	}
@@ -223,7 +222,7 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 	if !success {
 		return returnNotFound(c, id)
 	} else {
-		backend.CreateItemTree()
+		CreateItemTree()
 		return c.String(http.StatusOK, "Section '"+id+"' deleted")
 	}
 }
@@ -238,7 +237,7 @@ func GetResourceDescription(c echo.Context) (err error) {
 func getResourceContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 
-	d := backend.GetResource(id)
+	d := GetResource(id)
 
 	if d != nil {
 		return c.File(d.Path)

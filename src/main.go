@@ -1,8 +1,8 @@
 package main
 
 import (
+	"MkDocsEditor-Backend/src/backend"
 	"MkDocsEditor-Backend/src/config"
-	"MkDocsEditor-Backend/src/frontend"
 	"fmt"
 	"github.com/fatih/color"
 )
@@ -26,7 +26,7 @@ var warning = color.New(color.FgYellow).PrintfFunc()
 // main entry point
 func main() {
 	printStartupInfo()
-	frontend.SetupRestService()
+	backend.SetupRestService()
 }
 
 func printStartupInfo() {
