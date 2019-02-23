@@ -1,9 +1,11 @@
 package backend
 
 import (
+	"crypto/md5"
+	"fmt"
 	"github.com/gorilla/websocket"
 	"log"
-	"strconv"
+	"strings"
 )
 
 // Manages processing of EditRequests from clients
@@ -128,10 +130,12 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 		})
 }
 
+// calculates a checksum for a given text using the MD5 hashing algorithm
+// important notes:
+// the checksum string must include leading zeros
+// all characters are lowercase
 func calculateChecksum(text string) string {
-	return strconv.Itoa(len([]rune(text)))
-	//return text
-	// TODO: this md5 is sometimes not the same as in kotlin...
-	//hash := md5.Sum([]byte(text))
-	//return hex.EncodeToString(hash[:])
+	hash := md5.Sum([]byte(text))
+	checksum := fmt.Sprintf("%02x", hash[:])
+	return strings.ToLower(checksum)
 }
