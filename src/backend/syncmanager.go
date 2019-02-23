@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"errors"
 	"github.com/gorilla/websocket"
 	"log"
 	"strconv"
@@ -42,19 +41,25 @@ func removeClient(conn *websocket.Conn) {
 
 // handles incoming edit requests from the client
 func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
+	documentId := editRequest.DocumentId
+
 	// check if the server shadow matches the client shadow before the patch has been applied
 	checksum := calculateChecksum(ServerShadows[client])
 	if checksum != editRequest.ShadowChecksum {
-		return errors.New("unrecoverable: shadow out of sync")
+		log.Printf("%v: shadow out of sync", client.RemoteAddr())
+		err = sendInitialTextResponse(client, GetDocument(documentId)) // force resync
+		if err != nil {
+			log.Printf("unable to resync with client %v: %v", client.RemoteAddr(), err)
+			return err
+		}
+		return
 	}
-
-	documentId := editRequest.DocumentId
 
 	// patch the server shadow
 	ServerShadows[client], err = ApplyPatch(ServerShadows[client], editRequest.Patches)
 
 	// then patch the server document version
-	d := GetDocument(editRequest.DocumentId)
+	d := GetDocument(documentId)
 	patchedText, err := ApplyPatch(d.Content, editRequest.Patches)
 	if err != nil {
 		// if fuzzy patch fails, drop client changes
@@ -63,14 +68,6 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 		err = nil
 	} else {
 		d.Content = patchedText
-	}
-
-	if err != nil {
-		log.Printf("error handling EditRequest, resending InitialText to %v", client.RemoteAddr())
-		// force resync
-		d := GetDocument(documentId)
-		err = sendInitialTextResponse(client, d)
-		return err
 	}
 
 	err = sendEditRequestResponse(client, documentId)
@@ -82,19 +79,18 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 	return err
 }
 
+// send the full document text to a client
 func sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
 	// set initial state in backend
 	initClient(client, document.Content)
 
-	initialContentRequest := InitialContentRequest{
+	// Write current document state to the client
+	err = client.WriteJSON(InitialContentRequest{
 		Type:       TypeInitialContent,
 		DocumentId: document.ID,
 		RequestId:  "",
 		Content:    document.Content,
-	}
-
-	// Write current document state to the client
-	err = client.WriteJSON(initialContentRequest)
+	})
 	if err != nil {
 		log.Printf("error writing initial content response: %v", err)
 		return err
@@ -103,10 +99,11 @@ func sendInitialTextResponse(client *websocket.Conn, document *Document) (err er
 	return
 }
 
-func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId string) (err error) {
+// responds to a client with the changes from the server site document version
+func sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
 	d := GetDocument(documentId)
 
-	shadow := ServerShadows[inducingConnection]
+	shadow := ServerShadows[client]
 	shadowChecksum := calculateChecksum(shadow)
 
 	patches, err := CreatePatch(shadow, d.Content)
@@ -114,28 +111,21 @@ func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId stri
 		log.Fatal(err)
 		return err
 	}
+	ServerShadows[client] = d.Content
 
-	// if this is the connection that caused the change
-	// if connection == inducingConnection {
-	// copy the server version to the server shadow
-	ServerShadows[inducingConnection] = d.Content
-	// }
-
+	// we can skip this if there are no changes that need to be passed to the client
 	if len(patches) <= 0 {
 		return
 	}
 
-	serverEditRequest := EditRequest{
-		Type:           TypeEditRequest,
-		RequestId:      "",
-		DocumentId:     documentId,
-		Patches:        patches,
-		ShadowChecksum: shadowChecksum,
-	}
-
-	err = sendToClient(inducingConnection, serverEditRequest)
-
-	return err
+	return sendToClient(client,
+		EditRequest{
+			Type:           TypeEditRequest,
+			RequestId:      "",
+			DocumentId:     documentId,
+			Patches:        patches,
+			ShadowChecksum: shadowChecksum,
+		})
 }
 
 func calculateChecksum(text string) string {
