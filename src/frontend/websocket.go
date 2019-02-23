@@ -56,22 +56,9 @@ func handleNewConnections(c echo.Context) (err error) {
 	connectionsPerDocument[documentId] = connectionsPerDocument[documentId] + 1
 	lock.Unlock()
 
-	// set initial state in backend
-	backend.InitClient(client, d.Content)
-
-	initialContentRequest := backend.InitialContentRequest{
-		Type:       TypeInitialContent,
-		DocumentId: documentId,
-		RequestId:  "",
-		Content:    d.Content,
-	}
-
-	// Write current document state to the client
-	err = client.WriteJSON(initialContentRequest)
+	err = sendInitialTextResponse(client, d)
 	if err != nil {
-		c.Logger().Error(err)
-		log.Printf("error writing initial content response: %v", err)
-		return err
+		return returnError(c, err)
 	}
 
 	for {
@@ -93,6 +80,27 @@ func handleNewConnections(c echo.Context) (err error) {
 	}
 }
 
+func sendInitialTextResponse(client *websocket.Conn, document *backend.Document) (err error) {
+	// set initial state in backend
+	backend.InitClient(client, document.Content)
+
+	initialContentRequest := backend.InitialContentRequest{
+		Type:       TypeInitialContent,
+		DocumentId: document.ID,
+		RequestId:  "",
+		Content:    document.Content,
+	}
+
+	// Write current document state to the client
+	err = client.WriteJSON(initialContentRequest)
+	if err != nil {
+		log.Printf("error writing initial content response: %v", err)
+		return err
+	}
+
+	return
+}
+
 // processes incoming messages from connected clients
 func handleIncomingMessage(client *websocket.Conn, request backend.EditRequest) (err error) {
 	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
@@ -100,8 +108,11 @@ func handleIncomingMessage(client *websocket.Conn, request backend.EditRequest) 
 
 	err = backend.HandleEditRequest(client, request)
 	if err != nil {
-		// force resync
 		log.Printf("error handling EditRequest: %v", err)
+		log.Printf("resending InitialText to %v", client.RemoteAddr())
+		// force resync
+		d := backend.GetDocument(documentId)
+		sendInitialTextResponse(client, d)
 		return err
 	}
 
@@ -118,6 +129,7 @@ func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId stri
 	d := backend.GetDocument(documentId)
 
 	shadow := backend.ServerShadows[inducingConnection]
+	shadowChecksum := backend.GetMD5Hash(shadow)
 
 	patches, err := backend.CreatePatch(shadow, d.Content)
 	if err != nil {
@@ -140,7 +152,7 @@ func sendEditRequestResponse(inducingConnection *websocket.Conn, documentId stri
 		RequestId:      "",
 		DocumentId:     documentId,
 		Patches:        patches,
-		ShadowChecksum: "unused",
+		ShadowChecksum: shadowChecksum,
 	}
 
 	err = sendToClient(inducingConnection, serverEditRequest)
