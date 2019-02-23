@@ -56,14 +56,14 @@ func handleNewConnection(c echo.Context) (err error) {
 		// Read in a new message as JSON and map it to a Message object
 		err := client.ReadJSON(&editRequest)
 		if err != nil {
-			log.Printf("error: %v", err)
+			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			return err
 		}
 
 		// Send the newly received message to the broadcast channel
 		err = handleIncomingMessage(client, editRequest)
 		if err != nil {
-			log.Printf("error: %v", err)
+			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			return err
 		}
 	}
@@ -80,7 +80,7 @@ func handleIncomingMessage(client *websocket.Conn, request EditRequest) (err err
 func sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
 	err = connection.WriteJSON(editRequest)
 	if err != nil {
-		log.Printf("error writing EditRequest to websocket client: %v", err)
+		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
 	}
 	return err
 }
@@ -89,7 +89,7 @@ func sendToClient(connection *websocket.Conn, editRequest EditRequest) (err erro
 func disconnectClient(conn *websocket.Conn) {
 	err := conn.Close()
 	if err != nil {
-		log.Printf("error closing websocket connection: %v", err)
+		log.Printf("%v: error closing websocket connection: %v", conn.RemoteAddr(), err)
 	}
 
 	lock.Lock()

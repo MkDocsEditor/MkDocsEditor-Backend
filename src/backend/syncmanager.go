@@ -51,7 +51,7 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 		log.Printf("%v: shadow out of sync", client.RemoteAddr())
 		err = sendInitialTextResponse(client, GetDocument(documentId)) // force resync
 		if err != nil {
-			log.Printf("unable to resync with client %v: %v", client.RemoteAddr(), err)
+			log.Printf("%v: unable to resync with client: %v", client.RemoteAddr(), err)
 			return err
 		}
 		return
@@ -65,7 +65,7 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 	patchedText, err := ApplyPatch(d.Content, editRequest.Patches)
 	if err != nil {
 		// if fuzzy patch fails, drop client changes
-		log.Printf("fuzzy patch failed")
+		log.Printf("%v: fuzzy patch failed: %v", client.RemoteAddr(), err)
 		// reset err variable as we can recover from this error
 		err = nil
 	} else {
@@ -74,7 +74,7 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 
 	err = sendEditRequestResponse(client, documentId)
 	if err != nil {
-		log.Printf("error sending response: %v", err)
+		log.Printf("%v: error sending response: %v", client.RemoteAddr(), err)
 		return err
 	}
 
@@ -94,7 +94,7 @@ func sendInitialTextResponse(client *websocket.Conn, document *Document) (err er
 		Content:    document.Content,
 	})
 	if err != nil {
-		log.Printf("error writing initial content response: %v", err)
+		log.Printf("%v: error writing initial content response: %v", client.RemoteAddr(), err)
 		return err
 	}
 
