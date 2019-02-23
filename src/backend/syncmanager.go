@@ -49,6 +49,10 @@ func HandleEditRequest(clientConnection *websocket.Conn, editRequest EditRequest
 	checksum := GetMD5Hash(ServerShadows[clientConnection])
 	if checksum != editRequest.ShadowChecksum {
 		// TODO: this happens more often than it should, why?
+		log.Printf("shadows out of sync!")
+		log.Printf("server Shadow: %s", ServerShadows[clientConnection])
+		log.Printf("server Shadow chksum: %s Client Shadow Checksum: %s", checksum, editRequest.ShadowChecksum)
+
 		return errors.New("unrecoverable: shadow out of sync")
 	}
 

@@ -34,7 +34,7 @@ type (
 func init() {
 }
 
-func handleNewConnections(c echo.Context) (err error) {
+func handleNewConnection(c echo.Context) (err error) {
 	documentId := c.Param(urlParamId)
 
 	d := backend.GetDocument(documentId)
@@ -112,7 +112,7 @@ func handleIncomingMessage(client *websocket.Conn, request backend.EditRequest) 
 		log.Printf("resending InitialText to %v", client.RemoteAddr())
 		// force resync
 		d := backend.GetDocument(documentId)
-		sendInitialTextResponse(client, d)
+		err = sendInitialTextResponse(client, d)
 		return err
 	}
 

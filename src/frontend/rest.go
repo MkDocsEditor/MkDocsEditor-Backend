@@ -82,7 +82,7 @@ func SetupRestService() {
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
-	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnections)
+	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnection)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
 	groupDocuments.POST("/", createDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
