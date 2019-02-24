@@ -245,11 +245,11 @@ func CreateSection(parentPath string, sectionName string) (err error) {
 }
 
 // creates a new document as a child of the given parent section id and the given name
-func CreateDocument(parentSectionId string, documentName string) (err error) {
+func CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
 	parent := findSectionRecursive(&DocumentTree, parentSectionId)
 
 	if parent == nil {
-		return errors.New("Parent section " + parentSectionId + " does not exist")
+		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
 	}
 
 	var fileName string
@@ -263,21 +263,21 @@ func CreateDocument(parentSectionId string, documentName string) (err error) {
 
 	exists, err := fileExists(filePath)
 	if exists {
-		return errors.New("Target document " + documentName + " already exists!")
+		return nil, errors.New("Target document " + documentName + " already exists!")
 	}
 
 	f, err := os.Create(filePath)
 	fileInfo, err := f.Stat()
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	newDocumentTreeItem := createDocumentForTree(filePath, fileInfo)
 	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
 
 	CreateItemTree()
-	return err
+	return &newDocumentTreeItem, err
 }
 
 func fileExists(filePath string) (exists bool, err error) {

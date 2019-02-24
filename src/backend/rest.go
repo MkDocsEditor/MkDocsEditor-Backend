@@ -188,11 +188,12 @@ func createDocument(c echo.Context) (err error) {
 	if s == nil {
 		return returnNotFound(c, r.Parent)
 	}
-	if err = CreateDocument(r.Parent, r.Name); err != nil {
+	document, err := CreateDocument(r.Parent, r.Name)
+	if err != nil {
 		return returnError(c, err)
 	}
 
-	return c.String(http.StatusOK, "Document '"+r.Name+"' created in section '"+s.Name+"'")
+	return c.JSONPretty(http.StatusOK, document, " ")
 }
 
 // deletes an existing section
