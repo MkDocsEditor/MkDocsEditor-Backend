@@ -2,6 +2,7 @@ package backend
 
 import (
 	"MkDocsEditor-Backend/src/config"
+	"errors"
 	"github.com/OneOfOne/xxhash"
 	"io/ioutil"
 	"log"
@@ -17,6 +18,8 @@ const (
 	TypeSection  = "section"
 	TypeDocument = "document"
 	TypeResource = "resource"
+
+	markdownFileExtension = ".md"
 )
 
 type (
@@ -53,17 +56,19 @@ type (
 
 // an in memory representation of the mkdocs file structure
 var DocumentTree Section
+var rootPath string
 
 func init() {
+	rootPath = config.CurrentConfig.MkDocs.DocsPath
 	CreateItemTree()
 }
 
 // traverses the mkdocs directory and puts all files into a tree representation
 func CreateItemTree() {
-	_, file := filepath.Split(config.CurrentConfig.MkDocs.DocsPath)
+	_, file := filepath.Split(rootPath)
 
-	DocumentTree = createSectionForTree(config.CurrentConfig.MkDocs.DocsPath, file, "root")
-	searchDir := config.CurrentConfig.MkDocs.DocsPath
+	DocumentTree = createSectionForTree(rootPath, file, "root")
+	searchDir := rootPath
 	populateItemTree(&DocumentTree, searchDir)
 }
 
@@ -82,7 +87,7 @@ func populateItemTree(section *Section, path string) {
 			// recursive call
 			populateItemTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
-			if strings.HasSuffix(f.Name(), ".md") {
+			if strings.HasSuffix(f.Name(), markdownFileExtension) {
 				var document = createDocumentForTree(path, f)
 				*section.Documents = append(*section.Documents, &document)
 			} else {
@@ -126,8 +131,8 @@ func createDocumentForTree(path string, f os.FileInfo) (document Document) {
 	var documentPath = filepath.Join(path, f.Name())
 
 	var subUrl = ""
-	for _, element := range strings.Split(strings.TrimPrefix(documentPath, config.CurrentConfig.MkDocs.DocsPath), string(filepath.Separator)) {
-		element = strings.TrimSuffix(element, ".md")
+	for _, element := range strings.Split(strings.TrimPrefix(documentPath, rootPath), string(filepath.Separator)) {
+		element = strings.TrimSuffix(element, markdownFileExtension)
 		if len(element) > 0 {
 			subUrl += url.PathEscape(element) + "/"
 		}
@@ -241,7 +246,49 @@ func CreateSection(parentPath string, sectionName string) (err error) {
 
 // creates a new document as a child of the given parent section id and the given name
 func CreateDocument(parentSectionId string, documentName string) (err error) {
-	return nil
+	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+
+	if parent == nil {
+		return errors.New("Parent section " + parentSectionId + " does not exist")
+	}
+
+	var fileName string
+	if strings.HasSuffix(documentName, markdownFileExtension) {
+		fileName = documentName
+	} else {
+		fileName = documentName + markdownFileExtension
+	}
+
+	filePath := filepath.Join(parent.Path, fileName)
+
+	exists, err := fileExists(filePath)
+	if exists {
+		return errors.New("Target document " + documentName + " already exists!")
+	}
+
+	f, err := os.Create(filePath)
+	fileInfo, err := f.Stat()
+
+	if err != nil {
+		return err
+	}
+
+	newDocumentTreeItem := createDocumentForTree(filePath, fileInfo)
+	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
+
+	CreateItemTree()
+	return err
+}
+
+func fileExists(filePath string) (exists bool, err error) {
+	if _, err := os.Stat(filePath); err == nil {
+		// path/to/whatever exists
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return exists, err
+	}
 }
 
 // deletes a file/folder with the given ID and type from disk
@@ -271,5 +318,8 @@ func DeleteItem(id string, itemType string) (success bool, err error) {
 		}
 	}
 
+	// TODO: check if anyone is editing files in here before actually deleting it
+
+	// TODO: remove the deleted item from document tree
 	return DeleteFileOrFolder(path)
 }
