@@ -60,6 +60,6 @@ func addFolderWatch(path string, fi os.FileInfo, err error) error {
 }
 
 // stop watching any files
-func Close() {
+func close() {
 	watcher.Close()
 }

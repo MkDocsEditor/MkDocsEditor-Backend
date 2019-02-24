@@ -65,10 +65,10 @@ func init() {
 
 // traverses the mkdocs directory and puts all files into a tree representation
 func CreateItemTree() {
-	_, file := filepath.Split(rootPath)
+	path, file := filepath.Split(rootPath)
 
-	DocumentTree = createSectionForTree(rootPath, file, "root")
-	searchDir := rootPath
+	DocumentTree = createSectionForTree(path, file, "root")
+	searchDir := DocumentTree.Path
 	populateItemTree(&DocumentTree, searchDir)
 }
 
@@ -124,11 +124,11 @@ func createSectionForTree(path string, name string, id string) Section {
 }
 
 // creates a document object for storing in the tree
-func createDocumentForTree(path string, f os.FileInfo) (document Document) {
+func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Document) {
 	var fileName = f.Name()
 	var fileSize = f.Size()
 	var fileModTime = f.ModTime()
-	var documentPath = filepath.Join(path, f.Name())
+	var documentPath = filepath.Join(parentFolderPath, f.Name())
 
 	var subUrl = ""
 	for _, element := range strings.Split(strings.TrimPrefix(documentPath, rootPath), string(filepath.Separator)) {
@@ -156,11 +156,11 @@ func createDocumentForTree(path string, f os.FileInfo) (document Document) {
 }
 
 // creates a resource object for storing in the tree
-func createResourceForTree(path string, f os.FileInfo) Resource {
+func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 	var fileName = f.Name()
 	var fileSize = f.Size()
 	var fileModTime = f.ModTime()
-	var resourcePath = filepath.Join(path, f.Name())
+	var resourcePath = filepath.Join(parentFolderPath, f.Name())
 
 	return Resource{
 		Type:     TypeResource,
@@ -267,13 +267,15 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 	}
 
 	f, err := os.Create(filePath)
+	if err != nil {
+		return nil, err
+	}
 	fileInfo, err := f.Stat()
-
 	if err != nil {
 		return nil, err
 	}
 
-	newDocumentTreeItem := createDocumentForTree(filePath, fileInfo)
+	newDocumentTreeItem := createDocumentForTree(parent.Path, fileInfo)
 	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
 
 	CreateItemTree()
