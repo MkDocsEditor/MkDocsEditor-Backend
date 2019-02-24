@@ -211,12 +211,18 @@
   revision = "c11f84a56e43e20a78cee75a7c034031ecf57d1f"
 
 [[projects]]
-  digest = "1:8029e9743749d4be5bc9f7d42ea1659471767860f0cdc34d37c3111bd308a295"
+  digest = "1:9f3b0c91b07e00d34ee317647f00f3b1ab5ef5c76fd17348e3bbb823c4901d88"
   name = "golang.org/x/text"
   packages = [
+    "encoding",
+    "encoding/internal",
+    "encoding/internal/identifier",
+    "encoding/unicode",
     "internal/gen",
     "internal/triegen",
     "internal/ucd",
+    "internal/utf8internal",
+    "runes",
     "transform",
     "unicode/cldr",
     "unicode/norm",
@@ -245,6 +251,7 @@
     "github.com/labstack/echo/middleware",
     "github.com/sergi/go-diff/diffmatchpatch",
     "github.com/spf13/viper",
+    "golang.org/x/text/encoding/unicode",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
