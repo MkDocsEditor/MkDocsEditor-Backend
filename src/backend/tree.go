@@ -146,7 +146,7 @@ func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Doc
 	return Document{
 		Type:     TypeDocument,
 		ID:       createHash(documentPath),
-		Name:     fileName,
+		Name:     fileName[0 : len(fileName)-len(markdownFileExtension)],
 		Path:     documentPath,
 		Filesize: fileSize,
 		ModTime:  fileModTime,
@@ -252,12 +252,7 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
 	}
 
-	var fileName string
-	if strings.HasSuffix(documentName, markdownFileExtension) {
-		fileName = documentName
-	} else {
-		fileName = documentName + markdownFileExtension
-	}
+	var fileName = documentName + markdownFileExtension
 
 	filePath := filepath.Join(parent.Path, fileName)
 
