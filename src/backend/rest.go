@@ -169,12 +169,12 @@ func createSection(c echo.Context) (err error) {
 		return returnNotFound(c, r.Parent)
 	}
 
-	if err = CreateSection(s.Path, r.Name); err != nil {
+	section, err := CreateSection(s.Path, r.Name)
+	if err != nil {
 		return returnError(c, err)
 	}
 
-	CreateItemTree()
-	return c.String(http.StatusOK, "Subsection '"+r.Name+"' created in section '"+s.Name+"'")
+	return c.JSONPretty(http.StatusOK, section, " ")
 }
 
 // creates a new document with the given data

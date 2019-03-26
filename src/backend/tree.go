@@ -240,8 +240,19 @@ func findResourceRecursive(section *Section, id string) *Resource {
 }
 
 // creates a new section as a child of the given parent section id and the given name
-func CreateSection(parentPath string, sectionName string) (err error) {
-	return os.MkdirAll(filepath.Join(parentPath, sectionName), os.ModeDir)
+func CreateSection(parentPath string, sectionName string) (section *Section, err error) {
+	// TODO: this should come from the tree that was just created
+	sectionTreeItem := createSectionForTree(parentPath, sectionName, "")
+
+	err = os.MkdirAll(sectionTreeItem.Path, os.ModeDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: this should not be necessary
+	CreateItemTree()
+
+	return &sectionTreeItem, err
 }
 
 // creates a new document as a child of the given parent section id and the given name
@@ -273,7 +284,6 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 	newDocumentTreeItem := createDocumentForTree(parent.Path, fileInfo)
 	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
 
-	CreateItemTree()
 	return &newDocumentTreeItem, err
 }
 
