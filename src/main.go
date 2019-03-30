@@ -20,16 +20,19 @@ Document path: %s
 
 `
 
-var green = color.New(color.FgGreen).PrintfFunc()
-var warning = color.New(color.FgYellow).PrintfFunc()
-
 // main entry point
 func main() {
 	printStartupInfo()
-	backend.SetupRestService()
+
+	echoRest := backend.CreateRestService()
+	var serverConf = config.CurrentConfig.Server
+	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
 }
 
 func printStartupInfo() {
+	green := color.New(color.FgGreen).PrintfFunc()
+	warning := color.New(color.FgYellow).PrintfFunc()
+
 	green(banner, config.CurrentConfig.Server.Host, config.CurrentConfig.Server.Port, config.CurrentConfig.MkDocs.DocsPath)
 
 	var auth = config.CurrentConfig.Server.BasicAuth

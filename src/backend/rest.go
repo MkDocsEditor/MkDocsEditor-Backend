@@ -3,7 +3,6 @@ package backend
 import (
 	"MkDocsEditor-Backend/src/config"
 	"errors"
-	"fmt"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	"net/http"
@@ -31,7 +30,7 @@ type (
 	}
 )
 
-func SetupRestService() {
+func CreateRestService() *echo.Echo {
 	echoRest := echo.New()
 	echoRest.HideBanner = true
 
@@ -91,8 +90,7 @@ func SetupRestService() {
 	groupResources.POST("/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
-	var serverConf = config.CurrentConfig.Server
-	echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
+	return echoRest
 }
 
 // returns an empty "ok" answer
