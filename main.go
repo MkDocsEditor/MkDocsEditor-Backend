@@ -1,9 +1,9 @@
 package main
 
 import (
-	"MkDocsEditor-Backend/src/backend"
-	"MkDocsEditor-Backend/src/config"
 	"fmt"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/backend"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
 	"github.com/fatih/color"
 )
 

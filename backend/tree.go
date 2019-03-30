@@ -1,8 +1,8 @@
 package backend
 
 import (
-	"MkDocsEditor-Backend/src/config"
 	"errors"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
 	"github.com/OneOfOne/xxhash"
 	"io/ioutil"
 	"log"

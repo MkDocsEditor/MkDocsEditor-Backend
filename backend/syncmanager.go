@@ -131,7 +131,7 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 		})
 }
 
-// calculates a checksum for a given text using the MD5 hashing algorithm.
+// calculateChecksum calculates a checksum for a given text using the MD5 hashing algorithm.
 //
 // important notes for the implementation of this method:
 // - the text that is hashed must be encoded using UTF-16LE without BOM
