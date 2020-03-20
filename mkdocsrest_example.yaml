@@ -1,0 +1,20 @@
+server:
+  host: "0.0.0.0"
+  port: 7413
+  basicAuth:                # optional
+    user: "mkdocsrest"      # optional
+    password: "mypassword"  # optional, recommended
+  cors:                     # optional
+    allowedorigins:
+      - "https://wiki.mycompany.com"
+    allowedmethods:
+      - HEAD
+      - GET
+      - PUT
+      - POST
+      - DELETE
+
+mkdocs:
+  projectPath: "/home/markus/documents/Wiki"
+  configFile: "/home/markus/.config/mkdocsrest.yaml"  # optional
+  docsPath: "/home/markus/documents/Wiki/docs"        # optional

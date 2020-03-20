@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-const mkdocsConfigFileDefaultName = "mkdocs.yaml"
+const mkdocsConfigFileDefaultName = "mkdocsrest.yaml"
 
 type Configuration struct {
 	Server ServerConfiguration
@@ -17,7 +17,7 @@ var CurrentConfig Configuration
 
 // one time setup for the configuration file
 func init() {
-	viper.SetConfigName("config")
+	viper.SetConfigName("mkdocsrest")
 
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("/etc/mkdocsrest/")
