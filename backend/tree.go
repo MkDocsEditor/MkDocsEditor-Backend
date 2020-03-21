@@ -109,7 +109,7 @@ func createSectionForTree(path string, name string, id string) Section {
 	var sectionPath = filepath.Join(path, name)
 
 	if id == "" {
-		id = createHash(sectionPath)
+		id = generateId(sectionPath)
 	}
 
 	return Section{
@@ -121,6 +121,11 @@ func createSectionForTree(path string, name string, id string) Section {
 		Subsections: &[]*Section{},
 		Resources:   &[]*Resource{},
 	}
+}
+
+// generates an item id from its path
+func generateId(path string) string {
+	return createHash(path)
 }
 
 // creates a document object for storing in the tree
@@ -145,7 +150,7 @@ func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Doc
 
 	return Document{
 		Type:     TypeDocument,
-		ID:       createHash(documentPath),
+		ID:       generateId(documentPath),
 		Name:     fileName[0 : len(fileName)-len(markdownFileExtension)],
 		Path:     documentPath,
 		Filesize: fileSize,
@@ -164,7 +169,7 @@ func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 
 	return Resource{
 		Type:     TypeResource,
-		ID:       createHash(resourcePath),
+		ID:       generateId(resourcePath),
 		Name:     fileName,
 		Path:     resourcePath,
 		Filesize: fileSize,
@@ -241,18 +246,24 @@ func findResourceRecursive(section *Section, id string) *Resource {
 
 // creates a new section as a child of the given parent section id and the given name
 func CreateSection(parentPath string, sectionName string) (section *Section, err error) {
-	// TODO: this should come from the tree that was just created
-	sectionTreeItem := createSectionForTree(parentPath, sectionName, "")
+	sectionId := generateId(parentPath)
+	parentSection := findSectionRecursive(&DocumentTree, sectionId)
+	if parentSection == nil {
+		log.Fatalf("Parent section %s not found", parentPath)
+	}
 
-	err = os.MkdirAll(sectionTreeItem.Path, os.ModeDir)
+	newSection := createSectionForTree(parentPath, sectionName, "")
+
+	// create folder
+	err = os.MkdirAll(newSection.Path, os.ModeDir)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: this should not be necessary
-	CreateItemTree()
+	// append section to tree
+	*parentSection.Subsections = append(*parentSection.Subsections, &newSection)
 
-	return &sectionTreeItem, err
+	return &newSection, err
 }
 
 // creates a new document as a child of the given parent section id and the given name
