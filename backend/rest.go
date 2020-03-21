@@ -11,6 +11,8 @@ import (
 const (
 	urlParamId      = "id"
 	indentationChar = "  "
+
+	ENDPOINT_PATH_ALIVE = "/alive/"
 )
 
 type (
@@ -56,15 +58,22 @@ func CreateRestService() *echo.Echo {
 	// global auth
 	var authConf = config.CurrentConfig.Server.BasicAuth
 	if authConf.User != "" && authConf.Password != "" {
-		echoRest.Use(middleware.BasicAuth(func(username, password string, c echo.Context) (bool, error) {
-			if username == authConf.User && password == authConf.Password {
-				return true, nil
-			}
-			return false, nil
-		}))
+		basicAuthConfig := middleware.BasicAuthConfig{
+			Skipper: func(context echo.Context) bool {
+				return context.Path() == ENDPOINT_PATH_ALIVE
+			},
+			Validator: func(username string, password string, context echo.Context) (b bool, err error) {
+				if username == authConf.User && password == authConf.Password {
+					return true, nil
+				}
+				return false, nil
+			},
+			Realm: "Restricted",
+		}
+		echoRest.Use(middleware.BasicAuthWithConfig(basicAuthConfig))
 	}
 
-	echoRest.GET("/alive/", isAlive)
+	echoRest.GET(ENDPOINT_PATH_ALIVE, isAlive)
 
 	echoRest.GET("/tree/", getTree)
 
