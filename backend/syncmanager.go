@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Manages processing of EditRequests from clients
+// Manages processing of EditRequests from documentClients
 var (
 	// client connection -> server shadow
 	ServerShadows = make(map[*websocket.Conn]string)
@@ -33,13 +33,13 @@ type (
 )
 
 // sets the initial server shadow for a new client connection
-func initClient(conn *websocket.Conn, shadowContent string) {
-	ServerShadows[conn] = shadowContent
+func initClient(client *websocket.Conn, shadowContent string) {
+	ServerShadows[client] = shadowContent
 }
 
 // removes the shadow for the given client
-func removeClient(conn *websocket.Conn) {
-	delete(ServerShadows, conn)
+func removeShadow(client *websocket.Conn) {
+	delete(ServerShadows, client)
 }
 
 // handles incoming edit requests from the client
@@ -87,13 +87,15 @@ func sendInitialTextResponse(client *websocket.Conn, document *Document) (err er
 	// set initial state in backend
 	initClient(client, document.Content)
 
-	// Write current document state to the client
-	err = client.WriteJSON(InitialContentRequest{
+	r := InitialContentRequest{
 		Type:       TypeInitialContent,
-		DocumentId: document.ID,
 		RequestId:  "",
+		DocumentId: document.ID,
 		Content:    document.Content,
-	})
+	}
+
+	// Write current document state to the client
+	err = sendToClient(client, r)
 	if err != nil {
 		log.Printf("%v: error writing initial content response: %v", client.RemoteAddr(), err)
 		return err
@@ -135,7 +137,7 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 //
 // important notes for the implementation of this method:
 // - the text that is hashed must be encoded using UTF-16LE without BOM
-//   this will ensure the bytes are the same on all clients
+//   this will ensure the bytes are the same on all documentClients
 // - the checksum string must include leading zeros
 // - all characters are lowercase
 func calculateChecksum(text string) string {

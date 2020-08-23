@@ -76,6 +76,7 @@ func CreateRestService() *echo.Echo {
 	echoRest.GET(ENDPOINT_PATH_ALIVE, isAlive)
 
 	echoRest.GET("/tree/", getTree)
+	echoRest.GET("/ws/", onRootWsConnection)
 
 	// Authentication
 	// Group level middleware
@@ -89,7 +90,7 @@ func CreateRestService() *echo.Echo {
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
-	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnection)
+	groupDocuments.GET("/:"+urlParamId+"/ws/", onDocumentWsConnection)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
 	groupDocuments.POST("/", createDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
