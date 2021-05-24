@@ -12,7 +12,7 @@ const (
 	urlParamId      = "id"
 	indentationChar = "  "
 
-	ENDPOINT_PATH_ALIVE = "/alive/"
+	EndpointPathAlive = "/alive/"
 )
 
 type (
@@ -60,7 +60,7 @@ func CreateRestService() *echo.Echo {
 	if authConf.User != "" && authConf.Password != "" {
 		basicAuthConfig := middleware.BasicAuthConfig{
 			Skipper: func(context echo.Context) bool {
-				return context.Path() == ENDPOINT_PATH_ALIVE
+				return context.Path() == EndpointPathAlive
 			},
 			Validator: func(username string, password string, context echo.Context) (b bool, err error) {
 				if username == authConf.User && password == authConf.Password {
@@ -73,7 +73,7 @@ func CreateRestService() *echo.Echo {
 		echoRest.Use(middleware.BasicAuthWithConfig(basicAuthConfig))
 	}
 
-	echoRest.GET(ENDPOINT_PATH_ALIVE, isAlive)
+	echoRest.GET(EndpointPathAlive, isAlive)
 
 	echoRest.GET("/tree/", getTree)
 
