@@ -3,8 +3,8 @@ package backend
 import (
 	"errors"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
-	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"net/http"
 )
 
@@ -12,7 +12,7 @@ const (
 	urlParamId      = "id"
 	indentationChar = "  "
 
-	ENDPOINT_PATH_ALIVE = "/alive/"
+	EndpointPathAlive = "/alive/"
 )
 
 type (
@@ -60,7 +60,7 @@ func CreateRestService() *echo.Echo {
 	if authConf.User != "" && authConf.Password != "" {
 		basicAuthConfig := middleware.BasicAuthConfig{
 			Skipper: func(context echo.Context) bool {
-				return context.Path() == ENDPOINT_PATH_ALIVE
+				return context.Path() == EndpointPathAlive
 			},
 			Validator: func(username string, password string, context echo.Context) (b bool, err error) {
 				if username == authConf.User && password == authConf.Password {
@@ -73,7 +73,7 @@ func CreateRestService() *echo.Echo {
 		echoRest.Use(middleware.BasicAuthWithConfig(basicAuthConfig))
 	}
 
-	echoRest.GET(ENDPOINT_PATH_ALIVE, isAlive)
+	echoRest.GET(EndpointPathAlive, isAlive)
 
 	echoRest.GET("/tree/", getTree)
 	echoRest.GET("/ws/", onRootWsConnection)
@@ -236,7 +236,7 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 	}
 }
 
-// returns the description of a single resource with the given id (if found)
+// GetResourceDescription returns the description of a single resource with the given id (if found)
 func GetResourceDescription(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
