@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"log"
+	"net/http"
 	mutexSync "sync"
 )
 
@@ -14,7 +15,13 @@ const (
 )
 
 var (
-	upgrader = websocket.Upgrader{}
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
 
 	lock = mutexSync.RWMutex{}
 
@@ -57,16 +64,18 @@ func handleNewConnection(c echo.Context) (err error) {
 		err := client.ReadJSON(&editRequest)
 		if err != nil {
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
-			return err
+			break
 		}
 
 		// Send the newly received message to the broadcast channel
 		err = handleIncomingMessage(client, editRequest)
 		if err != nil {
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
-			return err
+			break
 		}
 	}
+
+	return nil
 }
 
 // processes incoming messages from connected clients
