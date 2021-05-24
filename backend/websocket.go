@@ -3,7 +3,7 @@ package backend
 import (
 	"fmt"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo"
+	"github.com/labstack/echo/v4"
 	"log"
 	mutexSync "sync"
 )
