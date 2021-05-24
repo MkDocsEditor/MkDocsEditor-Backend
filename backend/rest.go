@@ -235,7 +235,7 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 	}
 }
 
-// returns the description of a single resource with the given id (if found)
+// GetResourceDescription returns the description of a single resource with the given id (if found)
 func GetResourceDescription(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	return c.String(http.StatusOK, "Resource ID: "+id)
