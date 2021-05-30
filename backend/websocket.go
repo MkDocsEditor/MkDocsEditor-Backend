@@ -115,12 +115,13 @@ func disconnectClient(conn *websocket.Conn) {
 	if connectedClientsAfterDisconnect <= 0 {
 		d := GetDocument(documentId)
 		if d == nil {
-			log.Fatal("Document was nil!")
+			log.Printf("Unable to write document content for document %s: Document was nil", documentId)
+			return
 		}
 
 		err := WriteFile(d.Path, []byte(d.Content))
 		if err != nil {
-			log.Printf("error writing edited file to disk: %v", err)
+			log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
 		}
 	}
 }
