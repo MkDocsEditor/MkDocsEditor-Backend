@@ -111,7 +111,7 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 
 	patches, err := CreatePatch(shadow, d.Content)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error creating patch: %v", err)
 		return err
 	}
 	ServerShadows[client] = d.Content
