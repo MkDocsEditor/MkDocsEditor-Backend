@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-// read the content of a file
+// ReadFile read the content of a file
 func ReadFile(path string) (string, error) {
 	data, err := ioutil.ReadFile(path)
 	if isError(err) {
@@ -24,7 +24,7 @@ func WriteFile(path string, data []byte) (err error) {
 	return err
 }
 
-// create a new file with the given content
+// CreateFile create a new file with the given content
 func CreateFile(path string, content string) {
 	// detect if file exists
 	var _, err = os.Stat(path)
@@ -39,7 +39,7 @@ func CreateFile(path string, content string) {
 	}
 }
 
-// update the content of an existing file
+// UpdateFileFromForm update the content of an existing file
 func UpdateFileFromForm(file *multipart.FileHeader, targetPath string) error {
 	src, err := file.Open()
 	if err != nil {
@@ -62,7 +62,7 @@ func UpdateFileFromForm(file *multipart.FileHeader, targetPath string) error {
 	return nil
 }
 
-// delete a file from disk
+// DeleteFileOrFolder delete a file from disk
 func DeleteFileOrFolder(path string) (bool, error) {
 	var err = os.RemoveAll(path)
 	if isError(err) {

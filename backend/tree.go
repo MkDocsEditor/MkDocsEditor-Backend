@@ -54,7 +54,7 @@ type (
 	}
 )
 
-// an in memory representation of the mkdocs file structure
+// DocumentTree an in memory representation of the mkdocs file structure
 var DocumentTree Section
 var rootPath string
 
@@ -63,7 +63,7 @@ func init() {
 	CreateItemTree()
 }
 
-// traverses the mkdocs directory and puts all files into a tree representation
+// CreateItemTree traverses the mkdocs directory and puts all files into a tree representation
 func CreateItemTree() {
 	path, file := filepath.Split(rootPath)
 
@@ -177,17 +177,17 @@ func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 	}
 }
 
-// finds a document with the given id in the document tree
+// GetSection finds a document with the given id in the document tree
 func GetSection(id string) *Section {
 	return findSectionRecursive(&DocumentTree, id)
 }
 
-// finds a document with the given id in the document tree
+// GetDocument finds a document with the given id in the document tree
 func GetDocument(id string) *Document {
 	return findDocumentRecursive(&DocumentTree, id)
 }
 
-// finds a resource with the given id in the document tree
+// GetResource finds a resource with the given id in the document tree
 func GetResource(id string) *Resource {
 	return findResourceRecursive(&DocumentTree, id)
 }

@@ -11,7 +11,7 @@ import (
 
 // Manages processing of EditRequests from clients
 var (
-	// client connection -> server shadow
+	// ServerShadows client connection -> server shadow
 	ServerShadows = make(map[*websocket.Conn]string)
 )
 
