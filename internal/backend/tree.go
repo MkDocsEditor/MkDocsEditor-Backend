@@ -58,7 +58,7 @@ type (
 var DocumentTree Section
 var rootPath string
 
-func init() {
+func InitWikiTree() {
 	rootPath = configuration.CurrentConfig.MkDocs.DocsPath
 	CreateItemTree()
 }

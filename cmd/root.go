@@ -34,6 +34,9 @@ var rootCmd = &cobra.Command{
 		setupUi()
 		printStartupInfo()
 
+		backend.InitWikiTree()
+		backend.InitFileWatcher()
+
 		echoRest := backend.CreateRestService()
 		var serverConf = configuration.CurrentConfig.Server
 		echoRest.Logger.Fatal(echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
