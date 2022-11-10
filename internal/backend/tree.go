@@ -2,7 +2,7 @@ package backend
 
 import (
 	"errors"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
 	"io/ioutil"
 	"log"
@@ -59,7 +59,7 @@ var DocumentTree Section
 var rootPath string
 
 func init() {
-	rootPath = config.CurrentConfig.MkDocs.DocsPath
+	rootPath = configuration.CurrentConfig.MkDocs.DocsPath
 	CreateItemTree()
 }
 

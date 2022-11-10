@@ -1,6 +1,7 @@
-package config
+package configuration
 
 import (
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 	"log"
 	"path/filepath"
@@ -15,16 +16,31 @@ type Configuration struct {
 
 var CurrentConfig Configuration
 
-// one time setup for the configuration file
-func init() {
+// InitConfig does a one time setup for the configuration file
+func InitConfig(cfgFile string) {
 	viper.SetConfigName("mkdocsrest")
 
-	viper.AddConfigPath(".")
-	viper.AddConfigPath("/etc/mkdocsrest/")
-	viper.AddConfigPath("$HOME/.mkdocsrest")
+	if cfgFile != "" {
+		// Use config file from the flag.
+		viper.SetConfigFile(cfgFile)
+	} else {
+		// Find home directory.
+		home, err := homedir.Dir()
+		if err != nil {
+			//ui.ErrorAndNotify("Path Error", "Couldn't detect home directory: %v", err)
+			log.Fatalf("Couldn't detect home directory: %v", err)
+		}
+
+		viper.AddConfigPath(".")
+		viper.AddConfigPath(home)
+		viper.AddConfigPath(home + "/.mkdocsrest")
+		viper.AddConfigPath("/etc/mkdocsrest/")
+	}
+
+	viper.AutomaticEnv() // read in environment variables that match
 
 	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file, %s", err)
+		log.Fatalf("Error reading configuration file, %s", err)
 	}
 	err := viper.Unmarshal(&CurrentConfig)
 	if err != nil {

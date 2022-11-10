@@ -134,10 +134,10 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 // calculateChecksum calculates a checksum for a given text using the MD5 hashing algorithm.
 //
 // important notes for the implementation of this method:
-// - the text that is hashed must be encoded using UTF-16LE without BOM
-//   this will ensure the bytes are the same on all clients
-// - the checksum string must include leading zeros
-// - all characters are lowercase
+//   - the text that is hashed must be encoded using UTF-16LE without BOM
+//     this will ensure the bytes are the same on all clients
+//   - the checksum string must include leading zeros
+//   - all characters are lowercase
 func calculateChecksum(text string) string {
 	encoder := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewEncoder()
 	utf16, err := encoder.String(text)

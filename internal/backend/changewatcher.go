@@ -2,7 +2,7 @@ package backend
 
 import (
 	"fmt"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/fsnotify/fsnotify"
 	"os"
 	"path/filepath"
@@ -13,7 +13,7 @@ var watcher *fsnotify.Watcher
 
 func init() {
 	action := func(s string) { CreateItemTree() }
-	watchDirRecursive(config.CurrentConfig.MkDocs.DocsPath, action)
+	watchDirRecursive(configuration.CurrentConfig.MkDocs.DocsPath, action)
 }
 
 // watches all files and folders in the given path recursively

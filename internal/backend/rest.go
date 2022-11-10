@@ -2,7 +2,7 @@ package backend
 
 import (
 	"errors"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/config"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"net/http"
@@ -44,8 +44,8 @@ func CreateRestService() *echo.Echo {
 	echoRest.Use(middleware.Logger())
 	echoRest.Use(middleware.Recover())
 
-	var allowedOrigins = config.CurrentConfig.Server.CORS.AllowedOrigins
-	var allowedMethods = config.CurrentConfig.Server.CORS.AllowedMethods
+	var allowedOrigins = configuration.CurrentConfig.Server.CORS.AllowedOrigins
+	var allowedMethods = configuration.CurrentConfig.Server.CORS.AllowedMethods
 	if len(allowedOrigins) <= 0 {
 		echoRest.Use(middleware.CORS())
 	} else {
@@ -56,7 +56,7 @@ func CreateRestService() *echo.Echo {
 	}
 
 	// global auth
-	var authConf = config.CurrentConfig.Server.BasicAuth
+	var authConf = configuration.CurrentConfig.Server.BasicAuth
 	if authConf.User != "" && authConf.Password != "" {
 		basicAuthConfig := middleware.BasicAuthConfig{
 			Skipper: func(context echo.Context) bool {
