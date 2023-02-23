@@ -15,7 +15,6 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/viper v1.10.1
 	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3 // indirect
-	golang.org/x/net v0.0.0-20220105145211-5b0dc2dfae98 // indirect
-	golang.org/x/text v0.3.7
+	golang.org/x/text v0.3.8
 	golang.org/x/time v0.0.0-20211116232009-f0f3c7e86c11 // indirect
 )
