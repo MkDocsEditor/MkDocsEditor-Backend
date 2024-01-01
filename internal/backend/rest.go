@@ -176,7 +176,7 @@ func createSection(c echo.Context) (err error) {
 		return returnNotFound(c, r.Parent)
 	}
 
-	section, err := CreateSection(s.Path, r.Name)
+	section, err := CreateSection(s, r.Name)
 	if err != nil {
 		return returnError(c, err)
 	}

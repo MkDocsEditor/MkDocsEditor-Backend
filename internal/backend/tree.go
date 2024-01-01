@@ -244,18 +244,12 @@ func findResourceRecursive(section *Section, id string) *Resource {
 	return nil
 }
 
-// creates a new section as a child of the given parent section id and the given name
-func CreateSection(parentPath string, sectionName string) (section *Section, err error) {
-	sectionId := generateId(parentPath)
-	parentSection := findSectionRecursive(&DocumentTree, sectionId)
-	if parentSection == nil {
-		log.Fatalf("Parent section %s not found", parentPath)
-	}
-
-	newSection := createSectionForTree(parentPath, sectionName, "")
+// CreateSection creates a new section with the given name as a child of the given parent section
+func CreateSection(parentSection *Section, sectionName string) (section *Section, err error) {
+	newSection := createSectionForTree(parentSection.Path, sectionName, "")
 
 	// create folder
-	err = os.MkdirAll(newSection.Path, os.ModeDir)
+	err = os.MkdirAll(newSection.Path, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +260,7 @@ func CreateSection(parentPath string, sectionName string) (section *Section, err
 	return &newSection, err
 }
 
-// creates a new document as a child of the given parent section id and the given name
+// CreateDocument creates a new document as a child of the given parent section id and the given name
 func CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
 	parent := findSectionRecursive(&DocumentTree, parentSectionId)
 
@@ -309,7 +303,7 @@ func fileExists(filePath string) (exists bool, err error) {
 	}
 }
 
-// deletes a file/folder with the given ID and type from disk
+// DeleteItem deletes a file/folder with the given ID and type from disk
 func DeleteItem(id string, itemType string) (success bool, err error) {
 	var path string
 	switch itemType {
