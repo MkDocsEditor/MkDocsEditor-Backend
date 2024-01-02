@@ -96,8 +96,7 @@ func CreateRestService() *echo.Echo {
 	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnection)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
 	groupDocuments.POST("/", createDocument)
-	groupDocuments.PATCH("/:"+urlParamId+"/", renameDocument)
-	groupDocuments.POST("/:"+urlParamId+"/", renameDocument)
+	groupDocuments.PUT("/:"+urlParamId+"/", renameDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
