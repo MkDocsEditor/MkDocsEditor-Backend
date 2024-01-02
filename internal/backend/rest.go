@@ -30,6 +30,10 @@ type (
 		Parent string `json:"parent" xml:"parent" form:"parent" query:"parent" validate:"required"`
 		Name   string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
+
+	RenameDocumentRequest struct {
+		Name string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
+	}
 )
 
 func CreateRestService() *echo.Echo {
@@ -92,6 +96,8 @@ func CreateRestService() *echo.Echo {
 	groupDocuments.GET("/:"+urlParamId+"/ws/", handleNewConnection)
 	groupDocuments.GET("/:"+urlParamId+"/content/", getDocumentContent)
 	groupDocuments.POST("/", createDocument)
+	groupDocuments.PATCH("/:"+urlParamId+"/", renameDocument)
+	groupDocuments.POST("/:"+urlParamId+"/", renameDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", deleteDocument)
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
@@ -200,6 +206,25 @@ func createDocument(c echo.Context) (err error) {
 		return returnError(c, err)
 	}
 
+	return c.JSONPretty(http.StatusOK, document, " ")
+}
+
+func renameDocument(c echo.Context) (err error) {
+	id := c.Param(urlParamId)
+	r := new(RenameDocumentRequest)
+	if err = c.Bind(r); err != nil {
+		return returnError(c, err)
+	}
+
+	d := GetDocument(id)
+	if d == nil {
+		return returnNotFound(c, id)
+	}
+
+	document, err := RenameDocument(d, r.Name)
+	if err != nil {
+		return returnError(c, err)
+	}
 	return c.JSONPretty(http.StatusOK, document, " ")
 }
 
