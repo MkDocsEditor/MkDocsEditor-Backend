@@ -16,7 +16,7 @@ const (
 )
 
 type (
-	Result struct {
+	ErrorResult struct {
 		Name    string `json:"name" xml:"name" form:"name" query:"name"`
 		Message string `json:"message" xml:"message" form:"message" query:"message"`
 	}
@@ -286,7 +286,7 @@ func uploadNewResource(c echo.Context) (err error) {
 
 // return the error message of an error
 func returnError(c echo.Context, e error) (err error) {
-	return c.JSONPretty(http.StatusInternalServerError, &Result{
+	return c.JSONPretty(http.StatusInternalServerError, &ErrorResult{
 		Name:    "Unknown Error",
 		Message: e.Error(),
 	}, indentationChar)
@@ -294,7 +294,7 @@ func returnError(c echo.Context, e error) (err error) {
 
 // return a "not found" message
 func returnNotFound(c echo.Context, id string) (err error) {
-	return c.JSONPretty(http.StatusNotFound, &Result{
+	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
 		Name:    "Not found",
 		Message: "No item with id '" + id + "' found",
 	}, indentationChar)
