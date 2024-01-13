@@ -389,6 +389,24 @@ func RenameDocument(document *Document, name string) (doc *Document, err error) 
 	return document, err
 }
 
+func RenameResource(resource *Resource, name string) (res *Resource, err error) {
+	var newFilePath = filepath.Join(filepath.Dir(resource.Path), name)
+	exists, err := fileExists(newFilePath)
+	if exists {
+		return nil, errors.New("Target resource " + resource.Name + " already exists!")
+	}
+
+	err = os.Rename(resource.Path, newFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	CreateItemTree()
+	resource = GetResource(generateId(newFilePath))
+
+	return resource, err
+}
+
 func fileExists(filePath string) (exists bool, err error) {
 	if _, err := os.Stat(filePath); err == nil {
 		// path/to/whatever exists

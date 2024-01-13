@@ -36,6 +36,10 @@ type (
 	RenameDocumentRequest struct {
 		Name string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
+
+	RenameResourceRequest struct {
+		Name string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
+	}
 )
 
 func CreateRestService() *echo.Echo {
@@ -103,6 +107,7 @@ func CreateRestService() *echo.Echo {
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
+	groupResources.PUT("/:"+urlParamId+"/", renameResource)
 	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
@@ -227,6 +232,25 @@ func renameDocument(c echo.Context) (err error) {
 		return returnError(c, err)
 	}
 	return c.JSONPretty(http.StatusOK, document, " ")
+}
+
+func renameResource(c echo.Context) (err error) {
+	id := c.Param(urlParamId)
+	r := new(RenameResourceRequest)
+	if err = c.Bind(r); err != nil {
+		return returnError(c, err)
+	}
+
+	d := GetResource(id)
+	if d == nil {
+		return returnNotFound(c, id)
+	}
+
+	resource, err := RenameResource(d, r.Name)
+	if err != nil {
+		return returnError(c, err)
+	}
+	return c.JSONPretty(http.StatusOK, resource, " ")
 }
 
 // deletes an existing section
