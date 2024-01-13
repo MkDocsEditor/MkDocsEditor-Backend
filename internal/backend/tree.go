@@ -331,6 +331,12 @@ func DeleteItem(id string, itemType string) (success bool, err error) {
 		s := findSectionRecursive(&DocumentTree, id)
 		if s != nil {
 			path = s.Path
+
+			// check if any documents in this section are currently being edited
+			err = IsItemBeingEditedRecursive(s)
+			if err != nil {
+				return false, err
+			}
 		} else {
 			return false, nil
 		}
@@ -338,6 +344,9 @@ func DeleteItem(id string, itemType string) (success bool, err error) {
 		d := findDocumentRecursive(&DocumentTree, id)
 		if d != nil {
 			path = d.Path
+			if IsClientConnected(id) {
+				return false, errors.New("document is currently being edited by another user")
+			}
 		} else {
 			return false, nil
 		}
@@ -350,8 +359,55 @@ func DeleteItem(id string, itemType string) (success bool, err error) {
 		}
 	}
 
-	// TODO: check if anyone is editing files in here before actually deleting it
+	success, err = DeleteFileOrFolder(path)
+	if !success || err != nil {
+		return success, err
+	}
 
-	// TODO: remove the deleted item from document tree
-	return DeleteFileOrFolder(path)
+	err = removeNodeFromTree(&DocumentTree, id)
+
+	return success, err
+}
+
+func IsItemBeingEditedRecursive(s *Section) (err error) {
+	for _, doc := range *s.Documents {
+		if IsClientConnected(doc.ID) {
+			return errors.New("a document within this section is currently being edited by another user")
+		}
+	}
+
+	for _, subsection := range *s.Subsections {
+		err = IsItemBeingEditedRecursive(subsection)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func removeNodeFromTree(s *Section, id string) (err error) {
+	for i, subsection := range *s.Subsections {
+		if subsection.ID == id {
+			*s.Subsections = append((*s.Subsections)[:i], (*s.Subsections)[i+1:]...)
+			return nil
+		}
+		err = removeNodeFromTree(subsection, id)
+		if err == nil {
+			return nil
+		}
+	}
+	for i, document := range *s.Documents {
+		if document.ID == id {
+			*s.Documents = append((*s.Documents)[:i], (*s.Documents)[i+1:]...)
+			return nil
+		}
+	}
+	for i, resource := range *s.Resources {
+		if resource.ID == id {
+			*s.Resources = append((*s.Resources)[:i], (*s.Resources)[i+1:]...)
+			return nil
+		}
+	}
+	return err
 }

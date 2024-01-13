@@ -29,6 +29,12 @@ var (
 	connectionsPerDocument = make(map[string]uint)
 )
 
+func IsClientConnected(documentId string) bool {
+	lock.RLock()
+	defer lock.RUnlock()
+	return connectionsPerDocument[documentId] > 0
+}
+
 // handle new websocket connections
 func handleNewConnection(c echo.Context) (err error) {
 	documentId := c.Param(urlParamId)
