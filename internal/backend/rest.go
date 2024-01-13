@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	urlParamId      = "id"
-	indentationChar = "  "
+	urlParamParentId = "parentId"
+	urlParamId       = "id"
+	urlParamName     = "name"
+	indentationChar  = "  "
 
 	EndpointPathAlive = "/alive/"
 )
@@ -101,7 +103,7 @@ func CreateRestService() *echo.Echo {
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
-	groupResources.POST("/", uploadNewResource)
+	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", uploadNewResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
 	return echoRest
@@ -255,7 +257,7 @@ func deleteItem(c echo.Context, itemType string) (err error) {
 		return returnNotFound(c, id)
 	} else {
 		CreateItemTree()
-		return c.String(http.StatusOK, "Section '"+id+"' deleted")
+		return c.NoContent(http.StatusOK)
 	}
 }
 
@@ -280,8 +282,34 @@ func getResourceContent(c echo.Context) (err error) {
 
 // uploads a new resource file
 func uploadNewResource(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-	return c.String(http.StatusOK, "Resource ID: "+id)
+	parentId := c.Param(urlParamParentId)
+	name := c.Param(urlParamName)
+
+	content := []byte{}
+	_, err = c.Request().Body.Read(content)
+	if err != nil {
+		return err
+	}
+
+	fileContent := c.FormValue("file")
+
+	//file, err := c.FormFile("file")
+	//if err != nil {
+	//	return err
+	//}
+	//src, err := file.Open()
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//resource, err := CreateResource(parentId, name, src)
+
+	resource, err := CreateResource(parentId, name, fileContent)
+	if err != nil {
+		return returnError(c, err)
+	}
+
+	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }
 
 // return the error message of an error

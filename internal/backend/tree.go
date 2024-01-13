@@ -4,8 +4,10 @@ import (
 	"errors"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -190,6 +192,81 @@ func GetDocument(id string) *Document {
 // GetResource finds a resource with the given id in the document tree
 func GetResource(id string) *Resource {
 	return findResourceRecursive(&DocumentTree, id)
+}
+
+func CreateResource(parentSectionId string, resourceName string, content string) (resource *Resource, err error) {
+	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+
+	if parent == nil {
+		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
+	}
+
+	var fileName = resourceName
+	filePath := filepath.Join(parent.Path, fileName)
+
+	exists, err := fileExists(filePath)
+	if exists {
+		return nil, errors.New("Target resource " + resourceName + " already exists!")
+	}
+
+	dst, err := os.Create(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer dst.Close()
+
+	if _, err = io.WriteString(dst, content); err != nil {
+		return nil, err
+	}
+
+	fileInfo, err := dst.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	newResourceTreeItem := createResourceForTree(parent.Path, fileInfo)
+	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
+
+	return &newResourceTreeItem, err
+}
+
+func CreateResourceFromMultipart(parentSectionId string, resourceName string, src multipart.File) (resource *Resource, err error) {
+	defer src.Close()
+
+	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+
+	if parent == nil {
+		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
+	}
+
+	var fileName = resourceName
+
+	filePath := filepath.Join(parent.Path, fileName)
+
+	exists, err := fileExists(filePath)
+	if exists {
+		return nil, errors.New("Target resource " + resourceName + " already exists!")
+	}
+
+	dst, err := os.Create(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer dst.Close()
+
+	if _, err = io.Copy(dst, src); err != nil {
+		return nil, err
+	}
+
+	fileInfo, err := dst.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	newResourceTreeItem := createResourceForTree(parent.Path, fileInfo)
+	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
+
+	return &newResourceTreeItem, err
 }
 
 // traverses the tree and searches for a document with the given id
