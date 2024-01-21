@@ -33,6 +33,10 @@ type (
 		Name   string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
 
+	RenameSectionRequest struct {
+		Name string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
+	}
+
 	RenameDocumentRequest struct {
 		Name string `json:"name" xml:"name" form:"name" query:"name" validate:"required"`
 	}
@@ -96,6 +100,7 @@ func CreateRestService() *echo.Echo {
 	groupSections.GET("/", getTree)
 	groupSections.GET("/:"+urlParamId+"/", getSectionDescription)
 	groupSections.POST("/", createSection)
+	groupSections.PUT("/:"+urlParamId+"/", renameSection)
 	groupSections.DELETE("/:"+urlParamId+"/", deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", getDocumentDescription)
@@ -168,8 +173,6 @@ func getDocumentContent(c echo.Context) (err error) {
 	d := GetDocument(id)
 
 	if d != nil {
-		// TODO: return file again
-		//return c.File(d.Path)
 		return c.String(http.StatusOK, d.Content)
 	} else {
 		return returnNotFound(c, id)
@@ -189,6 +192,27 @@ func createSection(c echo.Context) (err error) {
 	}
 
 	section, err := CreateSection(s, r.Name)
+	if err != nil {
+		return returnError(c, err)
+	}
+
+	return c.JSONPretty(http.StatusOK, section, " ")
+}
+
+// renames an existing section
+func renameSection(c echo.Context) (err error) {
+	id := c.Param(urlParamId)
+	r := new(RenameSectionRequest)
+	if err = c.Bind(r); err != nil {
+		return returnError(c, err)
+	}
+
+	s := GetSection(id)
+	if s == nil {
+		return returnNotFound(c, id)
+	}
+
+	section, err := RenameSection(s, r.Name)
 	if err != nil {
 		return returnError(c, err)
 	}

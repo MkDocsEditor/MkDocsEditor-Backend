@@ -369,6 +369,24 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 	return &newDocumentTreeItem, err
 }
 
+func RenameSection(section *Section, name string) (sec *Section, err error) {
+	var newFilePath = filepath.Join(filepath.Dir(section.Path), name)
+	exists, err := fileExists(newFilePath)
+	if exists {
+		return nil, errors.New("Target section " + section.Name + " already exists!")
+	}
+
+	err = os.Rename(section.Path, newFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	CreateItemTree()
+	section = GetSection(generateId(newFilePath))
+
+	return section, err
+}
+
 func RenameDocument(document *Document, name string) (doc *Document, err error) {
 	var fileName = name + markdownFileExtension
 	var newFilePath = filepath.Join(filepath.Dir(document.Path), fileName)
