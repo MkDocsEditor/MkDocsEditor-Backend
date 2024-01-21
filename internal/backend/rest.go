@@ -112,8 +112,8 @@ func CreateRestService() *echo.Echo {
 
 	groupResources.GET("/:"+urlParamId+"/", getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", getResourceContent)
-	groupResources.PUT("/:"+urlParamId+"/", renameResource)
 	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", uploadNewResource)
+	groupResources.PUT("/:"+urlParamId+"/", renameResource)
 	groupResources.DELETE("/:"+urlParamId+"/", deleteResource)
 
 	return echoRest
