@@ -3,14 +3,13 @@ package backend
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"os"
 )
 
 // ReadFile read the content of a file
 func ReadFile(path string) (string, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if isError(err) {
 		return "", err
 	}
@@ -19,7 +18,7 @@ func ReadFile(path string) (string, error) {
 }
 
 func WriteFile(path string, data []byte) (err error) {
-	err = ioutil.WriteFile(path, data, 0x660)
+	err = os.WriteFile(path, data, 0x660)
 	isError(err)
 	return err
 }

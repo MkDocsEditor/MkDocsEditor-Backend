@@ -1,7 +1,7 @@
 GO_FLAGS   ?=
-NAME       := fan2go
+NAME       := mkdocseditor-backend
 OUTPUT_BIN ?= bin/${NAME}
-PACKAGE    := github.com/markusressel/$(NAME)
+PACKAGE    := github.com/mkdocseditor/$(NAME)
 GIT_REV    ?= $(shell git rev-parse --short HEAD)
 SOURCE_DATE_EPOCH ?= $(shell date +%s)
 DATE       ?= $(shell date -u -d @${SOURCE_DATE_EPOCH} +"%Y-%m-%dT%H:%M:%SZ")

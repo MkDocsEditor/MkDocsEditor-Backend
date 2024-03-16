@@ -5,7 +5,9 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"gopkg.in/yaml.v3"
 	"net/http"
+	"os"
 )
 
 const (
@@ -93,9 +95,12 @@ func CreateRestService() *echo.Echo {
 
 	// Authentication
 	// Group level middleware
+	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")
 	groupDocuments := echoRest.Group("/document")
 	groupResources := echoRest.Group("/resource")
+
+	groupMkDocs.GET("/config/", getMkDocsConfig)
 
 	groupSections.GET("/", getTree)
 	groupSections.GET("/:"+urlParamId+"/", getSectionDescription)
@@ -122,6 +127,18 @@ func CreateRestService() *echo.Echo {
 // returns an empty "ok" answer
 func isAlive(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
+}
+
+func getMkDocsConfig(c echo.Context) error {
+	mkDocsConfigFileContent, err := os.ReadFile(configuration.CurrentConfig.MkDocs.ConfigFile)
+
+	var config map[string]interface{}
+	// Unmarshal the YAML data into the map
+	err = yaml.Unmarshal(mkDocsConfigFileContent, &config)
+	if err != nil {
+		return returnError(c, err)
+	}
+	return c.JSONPretty(http.StatusOK, config, indentationChar)
 }
 
 // returns the complete file tree

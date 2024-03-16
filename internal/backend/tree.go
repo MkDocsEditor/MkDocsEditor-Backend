@@ -5,7 +5,6 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
 	"io"
-	"io/ioutil"
 	"log"
 	"mime/multipart"
 	"net/url"
@@ -76,7 +75,7 @@ func CreateItemTree() {
 
 // recursive function that creates a subtree of the complete item tree
 func populateItemTree(section *Section, path string) {
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,6 +88,7 @@ func populateItemTree(section *Section, path string) {
 			// recursive call
 			populateItemTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
+			f, _ := f.Info()
 			if strings.HasSuffix(f.Name(), markdownFileExtension) {
 				var document = createDocumentForTree(path, f)
 				*section.Documents = append(*section.Documents, &document)
@@ -102,13 +102,13 @@ func populateItemTree(section *Section, path string) {
 
 // creates a (non-cryptographic) hash of the given string
 func createHash(s string) string {
-	var pathHash = xxhash.ChecksumString64(s)
+	pathHash := xxhash.ChecksumString64(s)
 	return strconv.FormatUint(pathHash, 10)
 }
 
 // creates a section object for storing in the tree
 func createSectionForTree(path string, name string, id string) Section {
-	var sectionPath = filepath.Join(path, name)
+	sectionPath := filepath.Join(path, name)
 
 	if id == "" {
 		id = generateId(sectionPath)
@@ -132,12 +132,12 @@ func generateId(path string) string {
 
 // creates a document object for storing in the tree
 func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Document) {
-	var fileName = f.Name()
-	var fileSize = f.Size()
-	var fileModTime = f.ModTime()
-	var documentPath = filepath.Join(parentFolderPath, f.Name())
+	fileName := f.Name()
+	fileSize := f.Size()
+	fileModTime := f.ModTime()
+	documentPath := filepath.Join(parentFolderPath, f.Name())
 
-	var subUrl = ""
+	subUrl := ""
 	for _, element := range strings.Split(strings.TrimPrefix(documentPath, rootPath), string(filepath.Separator)) {
 		element = strings.TrimSuffix(element, markdownFileExtension)
 		if len(element) > 0 {
@@ -164,10 +164,10 @@ func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Doc
 
 // creates a resource object for storing in the tree
 func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
-	var fileName = f.Name()
-	var fileSize = f.Size()
-	var fileModTime = f.ModTime()
-	var resourcePath = filepath.Join(parentFolderPath, f.Name())
+	fileName := f.Name()
+	fileSize := f.Size()
+	fileModTime := f.ModTime()
+	resourcePath := filepath.Join(parentFolderPath, f.Name())
 
 	return Resource{
 		Type:     TypeResource,
