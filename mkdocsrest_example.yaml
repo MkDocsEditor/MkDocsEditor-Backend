@@ -1,12 +1,22 @@
+# REST API server related configuration options
 server:
+  # Host and port the REST API server should listen on
   host: "0.0.0.0"
+  # Port the REST API server should listen on
+  # (optional) defaults to 7413
   port: 7413
-  basicAuth:                # optional
-    user: "mkdocsrest"      # optional
-    password: "mypassword"  # optional, recommended
-  cors:                     # optional
+  # (optional) Basic authentication credentials
+  basicAuth:
+    # (optional) Username
+    user: "mkdocsrest"
+    # (optional) Password
+    password: "mypassword"
+  # (optional) Cross-origin resource sharing (CORS) configuration
+  cors:
+    # (optional) List of allowed origins
     allowedOrigins:
       - "https://wiki.mycompany.com"
+    # (optional) List of allowed methods
     allowedMethods:
       - HEAD
       - GET
@@ -14,7 +24,13 @@ server:
       - POST
       - DELETE
 
+# MkDocs related configuration options
 mkdocs:
+  # Path to the directory containing the mkdocs.yml file
   projectPath: "/home/markus/documents/Wiki"
   configFile: "/home/markus/.config/mkdocsrest.yaml"  # optional
+  # (optional) Path to the directory containing the documents
+  # defaults to <projectPath>/docs
   docsPath: "/home/markus/documents/Wiki/docs"        # optional
+  # (optional) List of files and directories to exclude from the document tree
+  blacklist: [ ]  # optional
