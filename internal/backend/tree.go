@@ -116,6 +116,8 @@ func isOnIgnoreList(path string) bool {
 	pathInRootPath = strings.TrimPrefix(pathInRootPath, "/")
 
 	shouldIgnore := slices.Contains(mkDocsConfig.ExtraCss, pathInRootPath)
+	shouldIgnore = shouldIgnore || slices.Contains(configuration.CurrentConfig.MkDocs.Blacklist, pathInRootPath)
+
 	return shouldIgnore
 }
 
