@@ -10,8 +10,8 @@ import (
 const mkdocsConfigFileDefaultName = "mkdocsrest.yaml"
 
 type Configuration struct {
-	Server ServerConfiguration
-	MkDocs MkDocsConfiguration
+	Server ServerConfiguration `yaml:"server"`
+	MkDocs MkDocsConfiguration `yaml:"mkdocs"`
 }
 
 var CurrentConfig Configuration

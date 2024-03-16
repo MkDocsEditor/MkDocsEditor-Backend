@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,11 @@ func populateItemTree(section *Section, path string) {
 	}
 
 	for _, f := range files {
+		totalPath := filepath.Join(path, f.Name())
+		if isOnIgnoreList(totalPath) {
+			continue
+		}
+
 		if f.IsDir() {
 			var subSection = createSectionForTree(path, f.Name(), "")
 			*section.Subsections = append(*section.Subsections, &subSection)
@@ -98,6 +104,19 @@ func populateItemTree(section *Section, path string) {
 			}
 		}
 	}
+}
+
+func isOnIgnoreList(path string) bool {
+	mkDocsConfig, err := readMkDocsConfig()
+	if err != nil {
+		return false
+	}
+
+	pathInRootPath := strings.TrimPrefix(path, rootPath)
+	pathInRootPath = strings.TrimPrefix(pathInRootPath, "/")
+
+	shouldIgnore := slices.Contains(mkDocsConfig.ExtraCss, pathInRootPath)
+	return shouldIgnore
 }
 
 // creates a (non-cryptographic) hash of the given string

@@ -5,9 +5,9 @@ server:
     user: "mkdocsrest"      # optional
     password: "mypassword"  # optional, recommended
   cors:                     # optional
-    allowedorigins:
+    allowedOrigins:
       - "https://wiki.mycompany.com"
-    allowedmethods:
+    allowedMethods:
       - HEAD
       - GET
       - PUT

@@ -1,7 +1,7 @@
 package configuration
 
 type MkDocsConfiguration struct {
-	ProjectPath string
-	ConfigFile  string
-	DocsPath    string
+	ProjectPath string `yaml:"projectPath"`
+	ConfigFile  string `yaml:"configFile"`
+	DocsPath    string `yaml:"docsPath"`
 }
