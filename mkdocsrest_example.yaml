@@ -26,11 +26,13 @@ server:
 
 # MkDocs related configuration options
 mkdocs:
-  # Path to the directory containing the mkdocs.yml file
+  # Path to the root of the mkdocs project
   projectPath: "/home/markus/documents/Wiki"
+  # (optional) Path to the mkdocs.yml file
+  # defaults to "<projectPath>/mkdocs.yml"
   configFile: "/home/markus/documents/Wiki/mkdocs.yml"
   # (optional) Path to the directory containing the documents
-  # defaults to <projectPath>/docs
+  # defaults to "<projectPath>/docs"
   docsPath: "/home/markus/documents/Wiki/docs"
   # (optional) List of files and directories to exclude from the document tree
   blacklist:
