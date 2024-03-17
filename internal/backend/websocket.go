@@ -79,6 +79,8 @@ func handleNewConnection(c echo.Context) (err error) {
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			break
 		}
+
+		saveCurrentDocumentContent(documentId)
 	}
 
 	return nil
@@ -119,15 +121,20 @@ func disconnectClient(conn *websocket.Conn) {
 	lock.Unlock()
 
 	if connectedClientsAfterDisconnect <= 0 {
-		d := GetDocument(documentId)
-		if d == nil {
-			log.Printf("Unable to write document content for document %s: Document was nil", documentId)
-			return
-		}
+		saveCurrentDocumentContent(documentId)
+	}
+}
 
-		err := WriteFile(d.Path, []byte(d.Content))
-		if err != nil {
-			log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
-		}
+func saveCurrentDocumentContent(documentId string) {
+	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
+	d := GetDocument(documentId)
+	if d == nil {
+		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
+		return
+	}
+
+	err := WriteFile(d.Path, []byte(d.Content))
+	if err != nil {
+		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
 	}
 }
