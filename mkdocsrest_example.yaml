@@ -28,9 +28,10 @@ server:
 mkdocs:
   # Path to the directory containing the mkdocs.yml file
   projectPath: "/home/markus/documents/Wiki"
-  configFile: "/home/markus/.config/mkdocsrest.yaml"  # optional
+  configFile: "/home/markus/documents/Wiki/mkdocs.yml"
   # (optional) Path to the directory containing the documents
   # defaults to <projectPath>/docs
-  docsPath: "/home/markus/documents/Wiki/docs"        # optional
+  docsPath: "/home/markus/documents/Wiki/docs"
   # (optional) List of files and directories to exclude from the document tree
-  blacklist: [ ]  # optional
+  blacklist:
+    - "stylesheets"
