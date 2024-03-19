@@ -8,6 +8,7 @@ import (
 	"golang.org/x/text/encoding/unicode"
 	"log"
 	"strings"
+	mutexSync "sync"
 )
 
 type (
@@ -34,6 +35,9 @@ type SyncManager struct {
 
 	// ServerShadows client connection -> server shadow
 	ServerShadows map[*websocket.Conn]string
+
+	// lock for synchronizing the tree to the disk
+	lock mutexSync.RWMutex
 }
 
 func NewSyncManager(
@@ -102,6 +106,9 @@ func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest Edi
 		// reset err variable as we can recover from this error
 		err = nil
 	} else {
+		if d.Content != patchedText {
+			defer sm.saveCurrentDocumentContent(documentId)
+		}
 		d.Content = patchedText
 	}
 
@@ -183,7 +190,11 @@ func (sm *SyncManager) calculateChecksum(text string) string {
 }
 
 func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
-	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
+	sm.lock.RLock()
+	defer sm.lock.RUnlock()
+
+	log.Printf("Synchronizing document '%s' synchronized to disk", documentId)
+
 	d := sm.treeManager.GetDocument(documentId)
 	if d == nil {
 		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
@@ -194,6 +205,8 @@ func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
 	if err != nil {
 		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
 	}
+
+	log.Printf("Document '%s' synchronized to disk successfully", documentId)
 }
 
 func (sm *SyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectionManager) {
