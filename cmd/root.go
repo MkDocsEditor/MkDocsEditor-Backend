@@ -35,7 +35,9 @@ var rootCmd = &cobra.Command{
 		printStartupInfo()
 
 		treeManager := backend.NewTreeManager()
-		backend.InitFileWatcher(treeManager)
+
+		action := func(s string) { treeManager.CreateItemTree() }
+		backend.InitFileWatcher(action)
 
 		syncManager := backend.NewSyncManager(treeManager)
 		restService := backend.NewRestService(treeManager, syncManager)

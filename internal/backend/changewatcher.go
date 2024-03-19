@@ -11,8 +11,7 @@ import (
 // file watcher
 var watcher *fsnotify.Watcher
 
-func InitFileWatcher(treeManager *TreeManager) {
-	action := func(s string) { treeManager.CreateItemTree() }
+func InitFileWatcher(action func(s string)) {
 	watchDirRecursive(configuration.CurrentConfig.MkDocs.DocsPath, action)
 }
 
