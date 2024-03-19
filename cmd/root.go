@@ -37,10 +37,18 @@ var rootCmd = &cobra.Command{
 		treeManager := backend.NewTreeManager()
 
 		action := func(s string) { treeManager.CreateItemTree() }
-		backend.InitFileWatcher(action)
+		path := configuration.CurrentConfig.MkDocs.DocsPath
+		fileWatcher := backend.NewFileWatcher(path, action)
+		fileWatcher.WatchDirRecursive()
 
 		syncManager := backend.NewSyncManager(treeManager)
+
 		restService := backend.NewRestService(treeManager, syncManager)
+		websocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
+
+		restService.RegisterWebsocketHandler(websocketConnectionManager)
+		syncManager.SetWebsocketConnectionManager(websocketConnectionManager)
+
 		restService.Start()
 	},
 }

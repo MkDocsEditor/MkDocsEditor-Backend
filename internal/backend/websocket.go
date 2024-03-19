@@ -14,7 +14,7 @@ const (
 	TypeEditRequest    = "edit-request"
 )
 
-type WebsockerConnectionManager struct {
+type WebsocketConnectionManager struct {
 	treeManager *TreeManager
 
 	upgrader websocket.Upgrader
@@ -25,16 +25,13 @@ type WebsockerConnectionManager struct {
 
 	onNewClient          func(client *websocket.Conn, document *Document) error
 	onIncomingMessage    func(client *websocket.Conn, request EditRequest) error
-	onClientDisconnected func(client *websocket.Conn, remainingConnections uint)
+	onClientDisconnected func(client *websocket.Conn, documentId string, remainingConnections uint)
 }
 
 func NewWebsocketConnectionManager(
 	treeManager *TreeManager,
-	onNewClient func(client *websocket.Conn, document *Document) error,
-	onIncomingMessage func(client *websocket.Conn, request EditRequest) error,
-	onClientDisconnected func(client *websocket.Conn, remainingConnections uint),
-) *WebsockerConnectionManager {
-	return &WebsockerConnectionManager{
+) *WebsocketConnectionManager {
+	return &WebsocketConnectionManager{
 		treeManager: treeManager,
 
 		upgrader: websocket.Upgrader{
@@ -47,21 +44,17 @@ func NewWebsocketConnectionManager(
 		lock:                   mutexSync.RWMutex{},
 		clients:                make(map[*websocket.Conn]string), // connected clients (websocket -> document id)
 		connectionsPerDocument: make(map[string]uint),
-
-		onNewClient:          onNewClient,
-		onIncomingMessage:    onIncomingMessage,
-		onClientDisconnected: onClientDisconnected,
 	}
 }
 
-func (wcm *WebsockerConnectionManager) IsClientConnected(documentId string) bool {
+func (wcm *WebsocketConnectionManager) IsClientConnected(documentId string) bool {
 	wcm.lock.RLock()
 	defer wcm.lock.RUnlock()
 	return wcm.connectionsPerDocument[documentId] > 0
 }
 
 // handle new websocket connections
-func (wcm *WebsockerConnectionManager) handleNewConnection(c echo.Context, documentId string) (err error) {
+func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, documentId string) (err error) {
 	d := wcm.treeManager.GetDocument(documentId)
 	if d == nil {
 		return echo.ErrNotFound
@@ -72,7 +65,7 @@ func (wcm *WebsockerConnectionManager) handleNewConnection(c echo.Context, docum
 		return err
 	}
 
-	// Make sure we close the connection when the function returns
+	// Make sure we Close the connection when the function returns
 	defer wcm.disconnectClient(client)
 
 	wcm.lock.Lock()
@@ -108,14 +101,14 @@ func (wcm *WebsockerConnectionManager) handleNewConnection(c echo.Context, docum
 }
 
 // processes incoming messages from connected clients
-func (wcm *WebsockerConnectionManager) handleIncomingMessage(client *websocket.Conn, request EditRequest) (err error) {
+func (wcm *WebsocketConnectionManager) handleIncomingMessage(client *websocket.Conn, request EditRequest) (err error) {
 	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
 	err = wcm.onIncomingMessage(client, request)
 	return err
 }
 
 // sends an EditRequest to the specified connection
-func (wcm *WebsockerConnectionManager) sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
+func (wcm *WebsocketConnectionManager) sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
 	err = connection.WriteJSON(editRequest)
 	if err != nil {
 		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
@@ -124,7 +117,7 @@ func (wcm *WebsockerConnectionManager) sendToClient(connection *websocket.Conn, 
 }
 
 // disconnects a client
-func (wcm *WebsockerConnectionManager) disconnectClient(conn *websocket.Conn) {
+func (wcm *WebsocketConnectionManager) disconnectClient(conn *websocket.Conn) {
 	err := conn.Close()
 	if err != nil {
 		log.Printf("%v: error closing websocket connection: %v", conn.RemoteAddr(), err)
@@ -136,8 +129,20 @@ func (wcm *WebsockerConnectionManager) disconnectClient(conn *websocket.Conn) {
 	connectedClientsAfterDisconnect := wcm.connectionsPerDocument[documentId] - 1
 
 	wcm.connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
-	wcm.onClientDisconnected(conn, connectedClientsAfterDisconnect)
+	wcm.onClientDisconnected(conn, documentId, connectedClientsAfterDisconnect)
 	delete(wcm.clients, conn)
 
 	wcm.lock.Unlock()
+}
+
+func (wcm *WebsocketConnectionManager) SetOnNewClientListener(f func(client *websocket.Conn, document *Document) error) {
+	wcm.onNewClient = f
+}
+
+func (wcm *WebsocketConnectionManager) SetOnIncomingMessageListener(f func(client *websocket.Conn, request EditRequest) error) {
+	wcm.onIncomingMessage = f
+}
+
+func (wcm *WebsocketConnectionManager) SetOnClientDisconnectedListener(f func(client *websocket.Conn, documentId string, remainingConnections uint)) {
+	wcm.onClientDisconnected = f
 }

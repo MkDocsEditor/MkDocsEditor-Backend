@@ -29,8 +29,8 @@ type (
 
 // SyncManager manages processing of EditRequests from clients
 type SyncManager struct {
-	TreeManager                *TreeManager
-	websocketConnectionManager *WebsockerConnectionManager
+	treeManager                *TreeManager
+	websocketConnectionManager *WebsocketConnectionManager
 
 	// ServerShadows client connection -> server shadow
 	ServerShadows map[*websocket.Conn]string
@@ -40,42 +40,16 @@ func NewSyncManager(
 	treeManager *TreeManager,
 ) *SyncManager {
 	syncManager := &SyncManager{
-		TreeManager:   treeManager,
+		treeManager:   treeManager,
 		ServerShadows: make(map[*websocket.Conn]string),
 	}
-
-	onNewClient := func(client *websocket.Conn, document *Document) error {
-		fmt.Println("New client connected", client)
-		return syncManager.sendInitialTextResponse(client, document)
-	}
-	onIncomingMessage := func(client *websocket.Conn, request EditRequest) error {
-		fmt.Println("Incoming message from client", client)
-		return syncManager.handleEditRequest(client, request)
-	}
-	onClientDisconnected := func(client *websocket.Conn, remainingConnections uint) {
-		fmt.Println("Client disconnected", client)
-		syncManager.removeClient(client)
-
-		if remainingConnections <= 0 {
-			// TODO
-			// syncManager.saveCurrentDocumentContent(documentId)
-		}
-	}
-
-	websocketConnectionManager := NewWebsocketConnectionManager(treeManager, onNewClient, onIncomingMessage, onClientDisconnected)
-
-	syncManager.websocketConnectionManager = websocketConnectionManager
 
 	return syncManager
 }
 
-func (sm *SyncManager) IsClientConnected(id string) bool {
-	return sm.websocketConnectionManager.IsClientConnected(id)
-}
-
 func (sm *SyncManager) IsItemBeingEditedRecursive(s *Section) (err error) {
 	for _, doc := range *s.Documents {
-		if sm.IsClientConnected(doc.ID) {
+		if sm.websocketConnectionManager.IsClientConnected(doc.ID) {
 			return errors.New("a document within this section is currently being edited by another user")
 		}
 	}
@@ -108,7 +82,7 @@ func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest Edi
 	checksum := sm.calculateChecksum(sm.ServerShadows[client])
 	if checksum != editRequest.ShadowChecksum {
 		log.Printf("%v: shadow out of sync (got %v but expected %v", client.RemoteAddr(), editRequest.ShadowChecksum, checksum)
-		err = sm.sendInitialTextResponse(client, sm.TreeManager.GetDocument(documentId)) // force resync
+		err = sm.sendInitialTextResponse(client, sm.treeManager.GetDocument(documentId)) // force resync
 		if err != nil {
 			log.Printf("%v: unable to resync with client: %v", client.RemoteAddr(), err)
 			return err
@@ -120,7 +94,7 @@ func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest Edi
 	sm.ServerShadows[client], err = ApplyPatch(sm.ServerShadows[client], editRequest.Patches)
 
 	// then patch the server document version
-	d := sm.TreeManager.GetDocument(documentId)
+	d := sm.treeManager.GetDocument(documentId)
 	patchedText, err := ApplyPatch(d.Content, editRequest.Patches)
 	if err != nil {
 		// if fuzzy patch fails, drop client changes
@@ -162,7 +136,7 @@ func (sm *SyncManager) sendInitialTextResponse(client *websocket.Conn, document 
 
 // responds to a client with the changes from the server site document version
 func (sm *SyncManager) sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
-	d := sm.TreeManager.GetDocument(documentId)
+	d := sm.treeManager.GetDocument(documentId)
 
 	shadow := sm.ServerShadows[client]
 	shadowChecksum := sm.calculateChecksum(shadow)
@@ -210,7 +184,7 @@ func (sm *SyncManager) calculateChecksum(text string) string {
 
 func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
 	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
-	d := sm.TreeManager.GetDocument(documentId)
+	d := sm.treeManager.GetDocument(documentId)
 	if d == nil {
 		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
 		return
@@ -220,4 +194,36 @@ func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
 	if err != nil {
 		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
 	}
+}
+
+func (sm *SyncManager) HandleNewClient(client *websocket.Conn, document *Document) error {
+	return sm.sendInitialTextResponse(client, document)
+}
+
+func (sm *SyncManager) HandleEditRequest(client *websocket.Conn, request EditRequest) error {
+	return sm.handleEditRequest(client, request)
+}
+
+func (sm *SyncManager) HandleClientDisconnected(client *websocket.Conn, documentId string, remainingConnections uint) {
+	sm.removeClient(client)
+	if remainingConnections <= 0 {
+		sm.saveCurrentDocumentContent(documentId)
+	}
+}
+
+func (sm *SyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectionManager) {
+	sm.websocketConnectionManager = manager
+
+	sm.websocketConnectionManager.SetOnNewClientListener(func(client *websocket.Conn, document *Document) error {
+		fmt.Println("New client connected", client)
+		return sm.HandleNewClient(client, document)
+	})
+	sm.websocketConnectionManager.SetOnIncomingMessageListener(func(client *websocket.Conn, request EditRequest) error {
+		fmt.Println("Incoming message from client", client)
+		return sm.HandleEditRequest(client, request)
+	})
+	sm.websocketConnectionManager.SetOnClientDisconnectedListener(func(client *websocket.Conn, documentId string, remainingConnections uint) {
+		fmt.Println("Client disconnected", client)
+		sm.HandleClientDisconnected(client, documentId, remainingConnections)
+	})
 }

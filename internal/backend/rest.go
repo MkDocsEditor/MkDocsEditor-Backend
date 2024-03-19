@@ -50,9 +50,10 @@ type (
 )
 
 type RestService struct {
-	echoRest    *echo.Echo
-	treeManager *TreeManager
-	syncManager *SyncManager
+	echoRest                   *echo.Echo
+	treeManager                *TreeManager
+	syncManager                *SyncManager
+	websocketConnectionManager *WebsocketConnectionManager
 }
 
 func NewRestService(
@@ -149,10 +150,6 @@ func (rs *RestService) Start() {
 	rs.echoRest.Logger.Fatal(rs.echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
 }
 
-func (rs *RestService) IsClientConnected(documentId string) bool {
-	return rs.syncManager.IsClientConnected(documentId)
-}
-
 // returns an empty "ok" answer
 func (rs *RestService) isAlive(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
@@ -165,7 +162,7 @@ func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 	// Unmarshal the YAML data into the map
 	err = yaml.Unmarshal(mkDocsConfigFileContent, &config)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 	return c.JSONPretty(http.StatusOK, config, indentationChar)
 }
@@ -185,19 +182,6 @@ func (rs *RestService) getDocumentDescription(c echo.Context) error {
 	return rs.getItemDescription(c, TypeDocument)
 }
 
-func (rs *RestService) handleNewConnection(c echo.Context) (err error) {
-	documentId := c.Param(urlParamId)
-	err = rs.syncManager.websocketConnectionManager.handleNewConnection(c, documentId)
-	if err != nil {
-		if errors.Is(err, echo.ErrNotFound) {
-			return rs.returnNotFound(c, documentId)
-		} else {
-			return rs.returnError(c, err)
-		}
-	}
-	return nil
-}
-
 // returns the description of a single document (if found)
 func (rs *RestService) getResourceDescription(c echo.Context) error {
 	return rs.getItemDescription(c, TypeResource)
@@ -215,13 +199,13 @@ func (rs *RestService) getItemDescription(c echo.Context, itemType string) (err 
 	case TypeResource:
 		result = rs.treeManager.GetResource(id)
 	default:
-		return rs.returnError(c, errors.New("Unknown itemType '"+itemType+"'"))
+		return rs.ReturnError(c, errors.New("Unknown itemType '"+itemType+"'"))
 	}
 
 	if result != nil {
 		return c.JSONPretty(http.StatusOK, result, indentationChar)
 	} else {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 }
 
@@ -234,7 +218,7 @@ func (rs *RestService) getDocumentContent(c echo.Context) (err error) {
 	if d != nil {
 		return c.String(http.StatusOK, d.Content)
 	} else {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 }
 
@@ -242,17 +226,17 @@ func (rs *RestService) getDocumentContent(c echo.Context) (err error) {
 func (rs *RestService) createSection(c echo.Context) (err error) {
 	r := new(NewSectionRequest)
 	if err = c.Bind(r); err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	s := rs.treeManager.GetSection(r.Parent)
 	if s == nil {
-		return rs.returnNotFound(c, r.Parent)
+		return rs.ReturnNotFound(c, r.Parent)
 	}
 
 	section, err := rs.treeManager.CreateSection(s, r.Name)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	return c.JSONPretty(http.StatusOK, section, " ")
@@ -263,17 +247,17 @@ func (rs *RestService) renameSection(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	r := new(RenameSectionRequest)
 	if err = c.Bind(r); err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	s := rs.treeManager.GetSection(id)
 	if s == nil {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 
 	section, err := rs.treeManager.RenameSection(s, r.Name)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	return c.JSONPretty(http.StatusOK, section, " ")
@@ -283,16 +267,16 @@ func (rs *RestService) renameSection(c echo.Context) (err error) {
 func (rs *RestService) createDocument(c echo.Context) (err error) {
 	r := new(NewDocumentRequest)
 	if err = c.Bind(r); err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	s := rs.treeManager.GetSection(r.Parent)
 	if s == nil {
-		return rs.returnNotFound(c, r.Parent)
+		return rs.ReturnNotFound(c, r.Parent)
 	}
 	document, err := rs.treeManager.CreateDocument(r.Parent, r.Name)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	return c.JSONPretty(http.StatusOK, document, " ")
@@ -302,17 +286,17 @@ func (rs *RestService) renameDocument(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	r := new(RenameDocumentRequest)
 	if err = c.Bind(r); err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 
 	document, err := rs.treeManager.RenameDocument(d, r.Name)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 	return c.JSONPretty(http.StatusOK, document, " ")
 }
@@ -321,17 +305,17 @@ func (rs *RestService) renameResource(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 	r := new(RenameResourceRequest)
 	if err = c.Bind(r); err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	d := rs.treeManager.GetResource(id)
 	if d == nil {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 
 	resource, err := rs.treeManager.RenameResource(d, r.Name)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 	return c.JSONPretty(http.StatusOK, resource, " ")
 }
@@ -359,10 +343,10 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 	case TypeSection:
 		err = rs.syncManager.IsItemBeingEditedRecursive(rs.treeManager.GetSection(id))
 		if err != nil {
-			return rs.returnError(c, err)
+			return rs.ReturnError(c, err)
 		}
 	case TypeDocument:
-		if rs.IsClientConnected(id) {
+		if rs.websocketConnectionManager.IsClientConnected(id) {
 			return c.JSONPretty(http.StatusConflict, &ErrorResult{
 				Name:    "Conflict",
 				Message: "There are still clients connected to the document",
@@ -372,11 +356,11 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 
 	success, err := rs.treeManager.DeleteItem(id, itemType)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	if !success {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	} else {
 		rs.treeManager.CreateItemTree()
 		return c.NoContent(http.StatusOK)
@@ -398,7 +382,7 @@ func (rs *RestService) getResourceContent(c echo.Context) (err error) {
 	if d != nil {
 		return c.File(d.Path)
 	} else {
-		return rs.returnNotFound(c, id)
+		return rs.ReturnNotFound(c, id)
 	}
 }
 
@@ -428,14 +412,14 @@ func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 
 	resource, err := rs.treeManager.CreateResource(parentId, name, fileContent)
 	if err != nil {
-		return rs.returnError(c, err)
+		return rs.ReturnError(c, err)
 	}
 
 	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }
 
 // return the error message of an error
-func (rs *RestService) returnError(c echo.Context, e error) (err error) {
+func (rs *RestService) ReturnError(c echo.Context, e error) (err error) {
 	return c.JSONPretty(http.StatusInternalServerError, &ErrorResult{
 		Name:    "Unknown Error",
 		Message: e.Error(),
@@ -443,9 +427,19 @@ func (rs *RestService) returnError(c echo.Context, e error) (err error) {
 }
 
 // return a "not found" message
-func (rs *RestService) returnNotFound(c echo.Context, id string) (err error) {
+func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
 		Name:    "Not found",
 		Message: "No item with id '" + id + "' found",
 	}, indentationChar)
+}
+
+func (rs *RestService) RegisterWebsocketHandler(websocketConnectionManager *WebsocketConnectionManager) {
+	rs.websocketConnectionManager = websocketConnectionManager
+	rs.echoRest.GET("/:"+urlParamId+"/ws/", rs.handleNewConnection)
+}
+
+func (rs *RestService) handleNewConnection(c echo.Context) (err error) {
+	documentId := c.Param(urlParamId)
+	return rs.websocketConnectionManager.HandleNewConnection(c, documentId)
 }
