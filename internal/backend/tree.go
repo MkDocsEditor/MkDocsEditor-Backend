@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	mutexSync "sync"
 	"time"
 )
 
@@ -57,6 +58,8 @@ type (
 )
 
 type TreeManager struct {
+	lock mutexSync.RWMutex
+
 	rootPath string
 	// DocumentTree an in memory representation of the mkdocs file structure
 	DocumentTree Section
@@ -73,6 +76,8 @@ func NewTreeManager() *TreeManager {
 
 // CreateItemTree traverses the mkdocs directory and puts all files into a tree representation
 func (tm *TreeManager) CreateItemTree() {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	path, file := filepath.Split(tm.rootPath)
 
 	tm.DocumentTree = tm.createSectionForTree(path, file, "root")
@@ -208,20 +213,28 @@ func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileI
 
 // GetSection finds a document with the given id in the document tree
 func (tm *TreeManager) GetSection(id string) *Section {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	return tm.findSectionRecursive(&tm.DocumentTree, id)
 }
 
 // GetDocument finds a document with the given id in the document tree
 func (tm *TreeManager) GetDocument(id string) *Document {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	return tm.findDocumentRecursive(&tm.DocumentTree, id)
 }
 
 // GetResource finds a resource with the given id in the document tree
 func (tm *TreeManager) GetResource(id string) *Resource {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	return tm.findResourceRecursive(&tm.DocumentTree, id)
 }
 
 func (tm *TreeManager) CreateResource(parentSectionId string, resourceName string, content string) (resource *Resource, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
 
 	if parent == nil {
@@ -258,6 +271,8 @@ func (tm *TreeManager) CreateResource(parentSectionId string, resourceName strin
 }
 
 func (tm *TreeManager) CreateResourceFromMultipart(parentSectionId string, resourceName string, src multipart.File) (resource *Resource, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	defer src.Close()
 
 	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
@@ -350,6 +365,8 @@ func (tm *TreeManager) findResourceRecursive(section *Section, id string) *Resou
 
 // CreateSection creates a new section with the given name as a child of the given parent section
 func (tm *TreeManager) CreateSection(parentSection *Section, sectionName string) (section *Section, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	newSection := tm.createSectionForTree(parentSection.Path, sectionName, "")
 
 	// create folder
@@ -366,6 +383,8 @@ func (tm *TreeManager) CreateSection(parentSection *Section, sectionName string)
 
 // CreateDocument creates a new document as a child of the given parent section id and the given name
 func (tm *TreeManager) CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
 
 	if parent == nil {
@@ -397,6 +416,8 @@ func (tm *TreeManager) CreateDocument(parentSectionId string, documentName strin
 }
 
 func (tm *TreeManager) RenameSection(section *Section, name string) (sec *Section, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	var newFilePath = filepath.Join(filepath.Dir(section.Path), name)
 	exists, err := tm.fileExists(newFilePath)
 	if exists {
@@ -415,6 +436,8 @@ func (tm *TreeManager) RenameSection(section *Section, name string) (sec *Sectio
 }
 
 func (tm *TreeManager) RenameDocument(document *Document, name string) (doc *Document, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	var fileName = name + markdownFileExtension
 	var newFilePath = filepath.Join(filepath.Dir(document.Path), fileName)
 
@@ -435,6 +458,8 @@ func (tm *TreeManager) RenameDocument(document *Document, name string) (doc *Doc
 }
 
 func (tm *TreeManager) RenameResource(resource *Resource, name string) (res *Resource, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	var newFilePath = filepath.Join(filepath.Dir(resource.Path), name)
 	exists, err := tm.fileExists(newFilePath)
 	if exists {
@@ -465,6 +490,8 @@ func (tm *TreeManager) fileExists(filePath string) (exists bool, err error) {
 
 // DeleteItem deletes a file/folder with the given ID and type from disk
 func (tm *TreeManager) DeleteItem(id string, itemType string) (success bool, err error) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
 	var path string
 	switch itemType {
 	case TypeSection:
