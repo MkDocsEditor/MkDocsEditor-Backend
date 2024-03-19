@@ -196,34 +196,22 @@ func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
 	}
 }
 
-func (sm *SyncManager) HandleNewClient(client *websocket.Conn, document *Document) error {
-	return sm.sendInitialTextResponse(client, document)
-}
-
-func (sm *SyncManager) HandleEditRequest(client *websocket.Conn, request EditRequest) error {
-	return sm.handleEditRequest(client, request)
-}
-
-func (sm *SyncManager) HandleClientDisconnected(client *websocket.Conn, documentId string, remainingConnections uint) {
-	sm.removeClient(client)
-	if remainingConnections <= 0 {
-		sm.saveCurrentDocumentContent(documentId)
-	}
-}
-
 func (sm *SyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectionManager) {
 	sm.websocketConnectionManager = manager
 
 	sm.websocketConnectionManager.SetOnNewClientListener(func(client *websocket.Conn, document *Document) error {
 		fmt.Println("New client connected", client)
-		return sm.HandleNewClient(client, document)
+		return sm.sendInitialTextResponse(client, document)
 	})
 	sm.websocketConnectionManager.SetOnIncomingMessageListener(func(client *websocket.Conn, request EditRequest) error {
 		fmt.Println("Incoming message from client", client)
-		return sm.HandleEditRequest(client, request)
+		return sm.handleEditRequest(client, request)
 	})
 	sm.websocketConnectionManager.SetOnClientDisconnectedListener(func(client *websocket.Conn, documentId string, remainingConnections uint) {
 		fmt.Println("Client disconnected", client)
-		sm.HandleClientDisconnected(client, documentId, remainingConnections)
+		sm.removeClient(client)
+		if remainingConnections <= 0 {
+			sm.saveCurrentDocumentContent(documentId)
+		}
 	})
 }
