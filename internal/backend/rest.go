@@ -110,9 +110,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 
-	sectionRootCallback := func(c echo.Context) error { return rs.getTree(c, rs.treeManager) }
-
-	echoRest.GET("/tree/", sectionRootCallback)
+	echoRest.GET("/tree/", rs.getTree)
 
 	// Authentication
 	// Group level middleware
@@ -123,7 +121,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	groupMkDocs.GET("/config/", rs.getMkDocsConfig)
 
-	groupSections.GET("/", sectionRootCallback)
+	groupSections.GET("/", rs.getTree)
 	groupSections.GET("/:"+urlParamId+"/", rs.getSectionDescription)
 	groupSections.POST("/", rs.createSection)
 	groupSections.PUT("/:"+urlParamId+"/", rs.renameSection)
@@ -173,8 +171,8 @@ func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 }
 
 // returns the complete file tree
-func (rs *RestService) getTree(c echo.Context, treeManager *TreeManager) error {
-	return c.JSONPretty(http.StatusOK, treeManager.DocumentTree, " ")
+func (rs *RestService) getTree(c echo.Context) error {
+	return c.JSONPretty(http.StatusOK, rs.treeManager.DocumentTree, " ")
 }
 
 // returns the description of a single section (if found)

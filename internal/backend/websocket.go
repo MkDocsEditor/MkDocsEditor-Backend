@@ -25,14 +25,14 @@ type WebsockerConnectionManager struct {
 
 	onNewClient          func(client *websocket.Conn, document *Document) error
 	onIncomingMessage    func(client *websocket.Conn, request EditRequest) error
-	onClientDisconnected func(client *websocket.Conn)
+	onClientDisconnected func(client *websocket.Conn, remainingConnections uint)
 }
 
 func NewWebsocketConnectionManager(
 	treeManager *TreeManager,
 	onNewClient func(client *websocket.Conn, document *Document) error,
 	onIncomingMessage func(client *websocket.Conn, request EditRequest) error,
-	onClientDisconnected func(client *websocket.Conn),
+	onClientDisconnected func(client *websocket.Conn, remainingConnections uint),
 ) *WebsockerConnectionManager {
 	return &WebsockerConnectionManager{
 		treeManager: treeManager,
@@ -102,8 +102,6 @@ func (wcm *WebsockerConnectionManager) handleNewConnection(c echo.Context, docum
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			break
 		}
-
-		wcm.saveCurrentDocumentContent(documentId)
 	}
 
 	return nil
@@ -138,26 +136,8 @@ func (wcm *WebsockerConnectionManager) disconnectClient(conn *websocket.Conn) {
 	connectedClientsAfterDisconnect := wcm.connectionsPerDocument[documentId] - 1
 
 	wcm.connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
-	wcm.onClientDisconnected(conn)
+	wcm.onClientDisconnected(conn, connectedClientsAfterDisconnect)
 	delete(wcm.clients, conn)
 
 	wcm.lock.Unlock()
-
-	if connectedClientsAfterDisconnect <= 0 {
-		wcm.saveCurrentDocumentContent(documentId)
-	}
-}
-
-func (wcm *WebsockerConnectionManager) saveCurrentDocumentContent(documentId string) {
-	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
-	d := wcm.treeManager.GetDocument(documentId)
-	if d == nil {
-		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
-		return
-	}
-
-	err := WriteFile(d.Path, []byte(d.Content))
-	if err != nil {
-		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
-	}
 }

@@ -27,7 +27,7 @@ type (
 	}
 )
 
-// Manages processing of EditRequests from clients
+// SyncManager manages processing of EditRequests from clients
 type SyncManager struct {
 	TreeManager                *TreeManager
 	websocketConnectionManager *WebsockerConnectionManager
@@ -52,9 +52,14 @@ func NewSyncManager(
 		fmt.Println("Incoming message from client", client)
 		return syncManager.handleEditRequest(client, request)
 	}
-	onClientDisconnected := func(client *websocket.Conn) {
+	onClientDisconnected := func(client *websocket.Conn, remainingConnections uint) {
 		fmt.Println("Client disconnected", client)
 		syncManager.removeClient(client)
+
+		if remainingConnections <= 0 {
+			// TODO
+			// syncManager.saveCurrentDocumentContent(documentId)
+		}
 	}
 
 	websocketConnectionManager := NewWebsocketConnectionManager(treeManager, onNewClient, onIncomingMessage, onClientDisconnected)
@@ -201,4 +206,18 @@ func (sm *SyncManager) calculateChecksum(text string) string {
 	hash := md5.Sum([]byte(utf16))
 	checksum := fmt.Sprintf("%02x", hash[:])
 	return strings.ToLower(checksum)
+}
+
+func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
+	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
+	d := sm.TreeManager.GetDocument(documentId)
+	if d == nil {
+		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
+		return
+	}
+
+	err := WriteFile(d.Path, []byte(d.Content))
+	if err != nil {
+		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
+	}
 }
