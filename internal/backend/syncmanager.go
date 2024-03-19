@@ -2,17 +2,12 @@ package backend
 
 import (
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"golang.org/x/text/encoding/unicode"
 	"log"
 	"strings"
-)
-
-// Manages processing of EditRequests from clients
-var (
-	// ServerShadows client connection -> server shadow
-	ServerShadows = make(map[*websocket.Conn]string)
 )
 
 type (
@@ -32,25 +27,83 @@ type (
 	}
 )
 
+// Manages processing of EditRequests from clients
+type SyncManager struct {
+	TreeManager                *TreeManager
+	websocketConnectionManager *WebsockerConnectionManager
+
+	// ServerShadows client connection -> server shadow
+	ServerShadows map[*websocket.Conn]string
+}
+
+func NewSyncManager(
+	treeManager *TreeManager,
+) *SyncManager {
+	syncManager := &SyncManager{
+		TreeManager:   treeManager,
+		ServerShadows: make(map[*websocket.Conn]string),
+	}
+
+	onNewClient := func(client *websocket.Conn, document *Document) error {
+		fmt.Println("New client connected", client)
+		return syncManager.sendInitialTextResponse(client, document)
+	}
+	onIncomingMessage := func(client *websocket.Conn, request EditRequest) error {
+		fmt.Println("Incoming message from client", client)
+		return syncManager.handleEditRequest(client, request)
+	}
+	onClientDisconnected := func(client *websocket.Conn) {
+		fmt.Println("Client disconnected", client)
+		syncManager.removeClient(client)
+	}
+
+	websocketConnectionManager := NewWebsocketConnectionManager(treeManager, onNewClient, onIncomingMessage, onClientDisconnected)
+
+	syncManager.websocketConnectionManager = websocketConnectionManager
+
+	return syncManager
+}
+
+func (sm *SyncManager) IsClientConnected(id string) bool {
+	return sm.websocketConnectionManager.IsClientConnected(id)
+}
+
+func (sm *SyncManager) IsItemBeingEditedRecursive(s *Section) (err error) {
+	for _, doc := range *s.Documents {
+		if sm.IsClientConnected(doc.ID) {
+			return errors.New("a document within this section is currently being edited by another user")
+		}
+	}
+
+	for _, subsection := range *s.Subsections {
+		err = sm.IsItemBeingEditedRecursive(subsection)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // sets the initial server shadow for a new client connection
-func initClient(conn *websocket.Conn, shadowContent string) {
-	ServerShadows[conn] = shadowContent
+func (sm *SyncManager) initClient(conn *websocket.Conn, shadowContent string) {
+	sm.ServerShadows[conn] = shadowContent
 }
 
 // removes the shadow for the given client
-func removeClient(conn *websocket.Conn) {
-	delete(ServerShadows, conn)
+func (sm *SyncManager) removeClient(conn *websocket.Conn) {
+	delete(sm.ServerShadows, conn)
 }
 
 // handles incoming edit requests from the client
-func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
+func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
 	documentId := editRequest.DocumentId
 
 	// check if the server shadow matches the client shadow before the patch has been applied
-	checksum := calculateChecksum(ServerShadows[client])
+	checksum := sm.calculateChecksum(sm.ServerShadows[client])
 	if checksum != editRequest.ShadowChecksum {
 		log.Printf("%v: shadow out of sync (got %v but expected %v", client.RemoteAddr(), editRequest.ShadowChecksum, checksum)
-		err = sendInitialTextResponse(client, GetDocument(documentId)) // force resync
+		err = sm.sendInitialTextResponse(client, sm.TreeManager.GetDocument(documentId)) // force resync
 		if err != nil {
 			log.Printf("%v: unable to resync with client: %v", client.RemoteAddr(), err)
 			return err
@@ -59,10 +112,10 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 	}
 
 	// patch the server shadow
-	ServerShadows[client], err = ApplyPatch(ServerShadows[client], editRequest.Patches)
+	sm.ServerShadows[client], err = ApplyPatch(sm.ServerShadows[client], editRequest.Patches)
 
 	// then patch the server document version
-	d := GetDocument(documentId)
+	d := sm.TreeManager.GetDocument(documentId)
 	patchedText, err := ApplyPatch(d.Content, editRequest.Patches)
 	if err != nil {
 		// if fuzzy patch fails, drop client changes
@@ -73,7 +126,7 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 		d.Content = patchedText
 	}
 
-	err = sendEditRequestResponse(client, documentId)
+	err = sm.sendEditRequestResponse(client, documentId)
 	if err != nil {
 		log.Printf("%v: error sending response: %v", client.RemoteAddr(), err)
 		return err
@@ -83,9 +136,9 @@ func handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err err
 }
 
 // send the full document text to a client
-func sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
+func (sm *SyncManager) sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
 	// set initial state in backend
-	initClient(client, document.Content)
+	sm.initClient(client, document.Content)
 
 	// Write current document state to the client
 	err = client.WriteJSON(InitialContentRequest{
@@ -103,25 +156,25 @@ func sendInitialTextResponse(client *websocket.Conn, document *Document) (err er
 }
 
 // responds to a client with the changes from the server site document version
-func sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
-	d := GetDocument(documentId)
+func (sm *SyncManager) sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
+	d := sm.TreeManager.GetDocument(documentId)
 
-	shadow := ServerShadows[client]
-	shadowChecksum := calculateChecksum(shadow)
+	shadow := sm.ServerShadows[client]
+	shadowChecksum := sm.calculateChecksum(shadow)
 
 	patches, err := CreatePatch(shadow, d.Content)
 	if err != nil {
 		log.Printf("Error creating patch: %v", err)
 		return err
 	}
-	ServerShadows[client] = d.Content
+	sm.ServerShadows[client] = d.Content
 
 	// we can skip this if there are no changes that need to be passed to the client
 	if len(patches) <= 0 {
 		return
 	}
 
-	return sendToClient(client,
+	return sm.websocketConnectionManager.sendToClient(client,
 		EditRequest{
 			Type:           TypeEditRequest,
 			RequestId:      "",
@@ -138,7 +191,7 @@ func sendEditRequestResponse(client *websocket.Conn, documentId string) (err err
 //     this will ensure the bytes are the same on all clients
 //   - the checksum string must include leading zeros
 //   - all characters are lowercase
-func calculateChecksum(text string) string {
+func (sm *SyncManager) calculateChecksum(text string) string {
 	encoder := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewEncoder()
 	utf16, err := encoder.String(text)
 	if err != nil {

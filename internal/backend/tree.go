@@ -56,26 +56,32 @@ type (
 	}
 )
 
-// DocumentTree an in memory representation of the mkdocs file structure
-var DocumentTree Section
-var rootPath string
+type TreeManager struct {
+	rootPath string
+	// DocumentTree an in memory representation of the mkdocs file structure
+	DocumentTree Section
+}
 
-func InitWikiTree() {
-	rootPath = configuration.CurrentConfig.MkDocs.DocsPath
-	CreateItemTree()
+func NewTreeManager() *TreeManager {
+	rootPath := configuration.CurrentConfig.MkDocs.DocsPath
+	treeManager := &TreeManager{
+		rootPath: rootPath,
+	}
+	treeManager.CreateItemTree()
+	return treeManager
 }
 
 // CreateItemTree traverses the mkdocs directory and puts all files into a tree representation
-func CreateItemTree() {
-	path, file := filepath.Split(rootPath)
+func (tm *TreeManager) CreateItemTree() {
+	path, file := filepath.Split(tm.rootPath)
 
-	DocumentTree = createSectionForTree(path, file, "root")
-	searchDir := DocumentTree.Path
-	populateItemTree(&DocumentTree, searchDir)
+	tm.DocumentTree = tm.createSectionForTree(path, file, "root")
+	searchDir := tm.DocumentTree.Path
+	tm.populateItemTree(&tm.DocumentTree, searchDir)
 }
 
 // recursive function that creates a subtree of the complete item tree
-func populateItemTree(section *Section, path string) {
+func (tm *TreeManager) populateItemTree(section *Section, path string) {
 	files, err := os.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
@@ -83,36 +89,36 @@ func populateItemTree(section *Section, path string) {
 
 	for _, f := range files {
 		totalPath := filepath.Join(path, f.Name())
-		if isOnIgnoreList(totalPath) {
+		if tm.isOnIgnoreList(totalPath) {
 			continue
 		}
 
 		if f.IsDir() {
-			var subSection = createSectionForTree(path, f.Name(), "")
+			var subSection = tm.createSectionForTree(path, f.Name(), "")
 			*section.Subsections = append(*section.Subsections, &subSection)
 
 			// recursive call
-			populateItemTree(&subSection, filepath.Join(path, subSection.Name))
+			tm.populateItemTree(&subSection, filepath.Join(path, subSection.Name))
 		} else {
 			f, _ := f.Info()
 			if strings.HasSuffix(f.Name(), markdownFileExtension) {
-				var document = createDocumentForTree(path, f)
+				var document = tm.createDocumentForTree(path, f)
 				*section.Documents = append(*section.Documents, &document)
 			} else {
-				var resource = createResourceForTree(path, f)
+				var resource = tm.createResourceForTree(path, f)
 				*section.Resources = append(*section.Resources, &resource)
 			}
 		}
 	}
 }
 
-func isOnIgnoreList(path string) bool {
+func (tm *TreeManager) isOnIgnoreList(path string) bool {
 	mkDocsConfig, err := readMkDocsConfig()
 	if err != nil {
 		return false
 	}
 
-	pathInRootPath := strings.TrimPrefix(path, rootPath)
+	pathInRootPath := strings.TrimPrefix(path, tm.rootPath)
 	pathInRootPath = strings.TrimPrefix(pathInRootPath, "/")
 
 	shouldIgnore := slices.Contains(mkDocsConfig.ExtraCss, pathInRootPath)
@@ -122,17 +128,17 @@ func isOnIgnoreList(path string) bool {
 }
 
 // creates a (non-cryptographic) hash of the given string
-func createHash(s string) string {
+func (tm *TreeManager) createHash(s string) string {
 	pathHash := xxhash.ChecksumString64(s)
 	return strconv.FormatUint(pathHash, 10)
 }
 
 // creates a section object for storing in the tree
-func createSectionForTree(path string, name string, id string) Section {
+func (tm *TreeManager) createSectionForTree(path string, name string, id string) Section {
 	sectionPath := filepath.Join(path, name)
 
 	if id == "" {
-		id = generateId(sectionPath)
+		id = tm.generateId(sectionPath)
 	}
 
 	return Section{
@@ -147,19 +153,19 @@ func createSectionForTree(path string, name string, id string) Section {
 }
 
 // generates an item id from its path
-func generateId(path string) string {
-	return createHash(path)
+func (tm *TreeManager) generateId(path string) string {
+	return tm.createHash(path)
 }
 
 // creates a document object for storing in the tree
-func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Document) {
+func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Document) {
 	fileName := f.Name()
 	fileSize := f.Size()
 	fileModTime := f.ModTime()
 	documentPath := filepath.Join(parentFolderPath, f.Name())
 
 	subUrl := ""
-	for _, element := range strings.Split(strings.TrimPrefix(documentPath, rootPath), string(filepath.Separator)) {
+	for _, element := range strings.Split(strings.TrimPrefix(documentPath, tm.rootPath), string(filepath.Separator)) {
 		element = strings.TrimSuffix(element, markdownFileExtension)
 		if len(element) > 0 {
 			subUrl += url.PathEscape(element) + "/"
@@ -173,7 +179,7 @@ func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Doc
 
 	return Document{
 		Type:     TypeDocument,
-		ID:       generateId(documentPath),
+		ID:       tm.generateId(documentPath),
 		Name:     fileName[0 : len(fileName)-len(markdownFileExtension)],
 		Path:     documentPath,
 		Filesize: fileSize,
@@ -184,7 +190,7 @@ func createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Doc
 }
 
 // creates a resource object for storing in the tree
-func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
+func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 	fileName := f.Name()
 	fileSize := f.Size()
 	fileModTime := f.ModTime()
@@ -192,7 +198,7 @@ func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 
 	return Resource{
 		Type:     TypeResource,
-		ID:       generateId(resourcePath),
+		ID:       tm.generateId(resourcePath),
 		Name:     fileName,
 		Path:     resourcePath,
 		Filesize: fileSize,
@@ -201,22 +207,22 @@ func createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
 }
 
 // GetSection finds a document with the given id in the document tree
-func GetSection(id string) *Section {
-	return findSectionRecursive(&DocumentTree, id)
+func (tm *TreeManager) GetSection(id string) *Section {
+	return tm.findSectionRecursive(&tm.DocumentTree, id)
 }
 
 // GetDocument finds a document with the given id in the document tree
-func GetDocument(id string) *Document {
-	return findDocumentRecursive(&DocumentTree, id)
+func (tm *TreeManager) GetDocument(id string) *Document {
+	return tm.findDocumentRecursive(&tm.DocumentTree, id)
 }
 
 // GetResource finds a resource with the given id in the document tree
-func GetResource(id string) *Resource {
-	return findResourceRecursive(&DocumentTree, id)
+func (tm *TreeManager) GetResource(id string) *Resource {
+	return tm.findResourceRecursive(&tm.DocumentTree, id)
 }
 
-func CreateResource(parentSectionId string, resourceName string, content string) (resource *Resource, err error) {
-	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+func (tm *TreeManager) CreateResource(parentSectionId string, resourceName string, content string) (resource *Resource, err error) {
+	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
 
 	if parent == nil {
 		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
@@ -225,7 +231,7 @@ func CreateResource(parentSectionId string, resourceName string, content string)
 	var fileName = resourceName
 	filePath := filepath.Join(parent.Path, fileName)
 
-	exists, err := fileExists(filePath)
+	exists, err := tm.fileExists(filePath)
 	if exists {
 		return nil, errors.New("Target resource " + resourceName + " already exists!")
 	}
@@ -245,16 +251,16 @@ func CreateResource(parentSectionId string, resourceName string, content string)
 		return nil, err
 	}
 
-	newResourceTreeItem := createResourceForTree(parent.Path, fileInfo)
+	newResourceTreeItem := tm.createResourceForTree(parent.Path, fileInfo)
 	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
 
 	return &newResourceTreeItem, err
 }
 
-func CreateResourceFromMultipart(parentSectionId string, resourceName string, src multipart.File) (resource *Resource, err error) {
+func (tm *TreeManager) CreateResourceFromMultipart(parentSectionId string, resourceName string, src multipart.File) (resource *Resource, err error) {
 	defer src.Close()
 
-	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
 
 	if parent == nil {
 		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
@@ -264,7 +270,7 @@ func CreateResourceFromMultipart(parentSectionId string, resourceName string, sr
 
 	filePath := filepath.Join(parent.Path, fileName)
 
-	exists, err := fileExists(filePath)
+	exists, err := tm.fileExists(filePath)
 	if exists {
 		return nil, errors.New("Target resource " + resourceName + " already exists!")
 	}
@@ -284,20 +290,20 @@ func CreateResourceFromMultipart(parentSectionId string, resourceName string, sr
 		return nil, err
 	}
 
-	newResourceTreeItem := createResourceForTree(parent.Path, fileInfo)
+	newResourceTreeItem := tm.createResourceForTree(parent.Path, fileInfo)
 	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
 
 	return &newResourceTreeItem, err
 }
 
 // traverses the tree and searches for a document with the given id
-func findSectionRecursive(section *Section, id string) *Section {
+func (tm *TreeManager) findSectionRecursive(section *Section, id string) *Section {
 	if section.ID == id {
 		return section
 	}
 
 	for _, subsection := range *section.Subsections {
-		d := findSectionRecursive(subsection, id)
+		d := tm.findSectionRecursive(subsection, id)
 		if d != nil {
 			return d
 		}
@@ -307,7 +313,7 @@ func findSectionRecursive(section *Section, id string) *Section {
 }
 
 // traverses the tree and searches for a document with the given id
-func findDocumentRecursive(section *Section, id string) *Document {
+func (tm *TreeManager) findDocumentRecursive(section *Section, id string) *Document {
 	for _, document := range *section.Documents {
 		if document.ID == id {
 			return document
@@ -315,7 +321,7 @@ func findDocumentRecursive(section *Section, id string) *Document {
 	}
 
 	for _, subsection := range *section.Subsections {
-		d := findDocumentRecursive(subsection, id)
+		d := tm.findDocumentRecursive(subsection, id)
 		if d != nil {
 			return d
 		}
@@ -325,7 +331,7 @@ func findDocumentRecursive(section *Section, id string) *Document {
 }
 
 // traverses the tree and searches for a resource with the given id
-func findResourceRecursive(section *Section, id string) *Resource {
+func (tm *TreeManager) findResourceRecursive(section *Section, id string) *Resource {
 	for _, resource := range *section.Resources {
 		if resource.ID == id {
 			return resource
@@ -333,7 +339,7 @@ func findResourceRecursive(section *Section, id string) *Resource {
 	}
 
 	for _, subsection := range *section.Subsections {
-		r := findResourceRecursive(subsection, id)
+		r := tm.findResourceRecursive(subsection, id)
 		if r != nil {
 			return r
 		}
@@ -343,8 +349,8 @@ func findResourceRecursive(section *Section, id string) *Resource {
 }
 
 // CreateSection creates a new section with the given name as a child of the given parent section
-func CreateSection(parentSection *Section, sectionName string) (section *Section, err error) {
-	newSection := createSectionForTree(parentSection.Path, sectionName, "")
+func (tm *TreeManager) CreateSection(parentSection *Section, sectionName string) (section *Section, err error) {
+	newSection := tm.createSectionForTree(parentSection.Path, sectionName, "")
 
 	// create folder
 	err = os.MkdirAll(newSection.Path, os.ModePerm)
@@ -359,8 +365,8 @@ func CreateSection(parentSection *Section, sectionName string) (section *Section
 }
 
 // CreateDocument creates a new document as a child of the given parent section id and the given name
-func CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
-	parent := findSectionRecursive(&DocumentTree, parentSectionId)
+func (tm *TreeManager) CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
+	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
 
 	if parent == nil {
 		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
@@ -370,7 +376,7 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 
 	filePath := filepath.Join(parent.Path, fileName)
 
-	exists, err := fileExists(filePath)
+	exists, err := tm.fileExists(filePath)
 	if exists {
 		return nil, errors.New("Target document " + documentName + " already exists!")
 	}
@@ -384,15 +390,15 @@ func CreateDocument(parentSectionId string, documentName string) (document *Docu
 		return nil, err
 	}
 
-	newDocumentTreeItem := createDocumentForTree(parent.Path, fileInfo)
+	newDocumentTreeItem := tm.createDocumentForTree(parent.Path, fileInfo)
 	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
 
 	return &newDocumentTreeItem, err
 }
 
-func RenameSection(section *Section, name string) (sec *Section, err error) {
+func (tm *TreeManager) RenameSection(section *Section, name string) (sec *Section, err error) {
 	var newFilePath = filepath.Join(filepath.Dir(section.Path), name)
-	exists, err := fileExists(newFilePath)
+	exists, err := tm.fileExists(newFilePath)
 	if exists {
 		return nil, errors.New("Target section " + section.Name + " already exists!")
 	}
@@ -402,17 +408,17 @@ func RenameSection(section *Section, name string) (sec *Section, err error) {
 		return nil, err
 	}
 
-	CreateItemTree()
-	section = GetSection(generateId(newFilePath))
+	tm.CreateItemTree()
+	section = tm.GetSection(tm.generateId(newFilePath))
 
 	return section, err
 }
 
-func RenameDocument(document *Document, name string) (doc *Document, err error) {
+func (tm *TreeManager) RenameDocument(document *Document, name string) (doc *Document, err error) {
 	var fileName = name + markdownFileExtension
 	var newFilePath = filepath.Join(filepath.Dir(document.Path), fileName)
 
-	exists, err := fileExists(newFilePath)
+	exists, err := tm.fileExists(newFilePath)
 	if exists {
 		return nil, errors.New("Target document " + document.Name + " already exists!")
 	}
@@ -422,15 +428,15 @@ func RenameDocument(document *Document, name string) (doc *Document, err error) 
 		return nil, err
 	}
 
-	CreateItemTree()
-	document = GetDocument(generateId(newFilePath))
+	tm.CreateItemTree()
+	document = tm.GetDocument(tm.generateId(newFilePath))
 
 	return document, err
 }
 
-func RenameResource(resource *Resource, name string) (res *Resource, err error) {
+func (tm *TreeManager) RenameResource(resource *Resource, name string) (res *Resource, err error) {
 	var newFilePath = filepath.Join(filepath.Dir(resource.Path), name)
-	exists, err := fileExists(newFilePath)
+	exists, err := tm.fileExists(newFilePath)
 	if exists {
 		return nil, errors.New("Target resource " + resource.Name + " already exists!")
 	}
@@ -440,13 +446,13 @@ func RenameResource(resource *Resource, name string) (res *Resource, err error) 
 		return nil, err
 	}
 
-	CreateItemTree()
-	resource = GetResource(generateId(newFilePath))
+	tm.CreateItemTree()
+	resource = tm.GetResource(tm.generateId(newFilePath))
 
 	return resource, err
 }
 
-func fileExists(filePath string) (exists bool, err error) {
+func (tm *TreeManager) fileExists(filePath string) (exists bool, err error) {
 	if _, err := os.Stat(filePath); err == nil {
 		// path/to/whatever exists
 		return true, nil
@@ -458,34 +464,25 @@ func fileExists(filePath string) (exists bool, err error) {
 }
 
 // DeleteItem deletes a file/folder with the given ID and type from disk
-func DeleteItem(id string, itemType string) (success bool, err error) {
+func (tm *TreeManager) DeleteItem(id string, itemType string) (success bool, err error) {
 	var path string
 	switch itemType {
 	case TypeSection:
-		s := findSectionRecursive(&DocumentTree, id)
+		s := tm.findSectionRecursive(&tm.DocumentTree, id)
 		if s != nil {
 			path = s.Path
-
-			// check if any documents in this section are currently being edited
-			err = IsItemBeingEditedRecursive(s)
-			if err != nil {
-				return false, err
-			}
 		} else {
 			return false, nil
 		}
 	case TypeDocument:
-		d := findDocumentRecursive(&DocumentTree, id)
+		d := tm.findDocumentRecursive(&tm.DocumentTree, id)
 		if d != nil {
 			path = d.Path
-			if IsClientConnected(id) {
-				return false, errors.New("document is currently being edited by another user")
-			}
 		} else {
 			return false, nil
 		}
 	case TypeResource:
-		r := findResourceRecursive(&DocumentTree, id)
+		r := tm.findResourceRecursive(&tm.DocumentTree, id)
 		if r != nil {
 			path = r.Path
 		} else {
@@ -498,35 +495,18 @@ func DeleteItem(id string, itemType string) (success bool, err error) {
 		return success, err
 	}
 
-	err = removeNodeFromTree(&DocumentTree, id)
+	err = tm.removeNodeFromTree(&tm.DocumentTree, id)
 
 	return success, err
 }
 
-func IsItemBeingEditedRecursive(s *Section) (err error) {
-	for _, doc := range *s.Documents {
-		if IsClientConnected(doc.ID) {
-			return errors.New("a document within this section is currently being edited by another user")
-		}
-	}
-
-	for _, subsection := range *s.Subsections {
-		err = IsItemBeingEditedRecursive(subsection)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func removeNodeFromTree(s *Section, id string) (err error) {
+func (tm *TreeManager) removeNodeFromTree(s *Section, id string) (err error) {
 	for i, subsection := range *s.Subsections {
 		if subsection.ID == id {
 			*s.Subsections = append((*s.Subsections)[:i], (*s.Subsections)[i+1:]...)
 			return nil
 		}
-		err = removeNodeFromTree(subsection, id)
+		err = tm.removeNodeFromTree(subsection, id)
 		if err == nil {
 			return nil
 		}

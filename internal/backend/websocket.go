@@ -14,53 +14,76 @@ const (
 	TypeEditRequest    = "edit-request"
 )
 
-var (
-	upgrader = websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			return true
+type WebsockerConnectionManager struct {
+	treeManager *TreeManager
+
+	upgrader websocket.Upgrader
+	lock     mutexSync.RWMutex
+	// connected clients (websocket -> document id)
+	clients                map[*websocket.Conn]string
+	connectionsPerDocument map[string]uint
+
+	onNewClient          func(client *websocket.Conn, document *Document) error
+	onIncomingMessage    func(client *websocket.Conn, request EditRequest) error
+	onClientDisconnected func(client *websocket.Conn)
+}
+
+func NewWebsocketConnectionManager(
+	treeManager *TreeManager,
+	onNewClient func(client *websocket.Conn, document *Document) error,
+	onIncomingMessage func(client *websocket.Conn, request EditRequest) error,
+	onClientDisconnected func(client *websocket.Conn),
+) *WebsockerConnectionManager {
+	return &WebsockerConnectionManager{
+		treeManager: treeManager,
+
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
 		},
+		lock:                   mutexSync.RWMutex{},
+		clients:                make(map[*websocket.Conn]string), // connected clients (websocket -> document id)
+		connectionsPerDocument: make(map[string]uint),
+
+		onNewClient:          onNewClient,
+		onIncomingMessage:    onIncomingMessage,
+		onClientDisconnected: onClientDisconnected,
 	}
+}
 
-	lock = mutexSync.RWMutex{}
-
-	clients                = make(map[*websocket.Conn]string) // connected clients (websocket -> document id)
-	connectionsPerDocument = make(map[string]uint)
-)
-
-func IsClientConnected(documentId string) bool {
-	lock.RLock()
-	defer lock.RUnlock()
-	return connectionsPerDocument[documentId] > 0
+func (wcm *WebsockerConnectionManager) IsClientConnected(documentId string) bool {
+	wcm.lock.RLock()
+	defer wcm.lock.RUnlock()
+	return wcm.connectionsPerDocument[documentId] > 0
 }
 
 // handle new websocket connections
-func handleNewConnection(c echo.Context) (err error) {
-	documentId := c.Param(urlParamId)
-
-	d := GetDocument(documentId)
+func (wcm *WebsockerConnectionManager) handleNewConnection(c echo.Context, documentId string) (err error) {
+	d := wcm.treeManager.GetDocument(documentId)
 	if d == nil {
-		return returnNotFound(c, documentId)
+		return echo.ErrNotFound
 	}
 
-	client, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	client, err := wcm.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		return returnError(c, err)
+		return err
 	}
 
 	// Make sure we close the connection when the function returns
-	defer disconnectClient(client)
+	defer wcm.disconnectClient(client)
 
-	lock.Lock()
+	wcm.lock.Lock()
 	// Register our new client
-	clients[client] = documentId
-	connectionsPerDocument[documentId] = connectionsPerDocument[documentId] + 1
-	lock.Unlock()
+	wcm.clients[client] = documentId
+	wcm.connectionsPerDocument[documentId] = wcm.connectionsPerDocument[documentId] + 1
+	wcm.lock.Unlock()
 
-	err = sendInitialTextResponse(client, d)
+	err = wcm.onNewClient(client, d)
 	if err != nil {
-		return returnError(c, err)
+		return err
 	}
 
 	for {
@@ -74,27 +97,27 @@ func handleNewConnection(c echo.Context) (err error) {
 		}
 
 		// Send the newly received message to the broadcast channel
-		err = handleIncomingMessage(client, editRequest)
+		err = wcm.handleIncomingMessage(client, editRequest)
 		if err != nil {
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			break
 		}
 
-		saveCurrentDocumentContent(documentId)
+		wcm.saveCurrentDocumentContent(documentId)
 	}
 
 	return nil
 }
 
 // processes incoming messages from connected clients
-func handleIncomingMessage(client *websocket.Conn, request EditRequest) (err error) {
+func (wcm *WebsockerConnectionManager) handleIncomingMessage(client *websocket.Conn, request EditRequest) (err error) {
 	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
-	err = handleEditRequest(client, request)
+	err = wcm.onIncomingMessage(client, request)
 	return err
 }
 
 // sends an EditRequest to the specified connection
-func sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
+func (wcm *WebsockerConnectionManager) sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
 	err = connection.WriteJSON(editRequest)
 	if err != nil {
 		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
@@ -103,31 +126,31 @@ func sendToClient(connection *websocket.Conn, editRequest EditRequest) (err erro
 }
 
 // disconnects a client
-func disconnectClient(conn *websocket.Conn) {
+func (wcm *WebsockerConnectionManager) disconnectClient(conn *websocket.Conn) {
 	err := conn.Close()
 	if err != nil {
 		log.Printf("%v: error closing websocket connection: %v", conn.RemoteAddr(), err)
 	}
 
-	lock.Lock()
-	documentId := clients[conn]
+	wcm.lock.Lock()
+	documentId := wcm.clients[conn]
 
-	connectedClientsAfterDisconnect := connectionsPerDocument[documentId] - 1
+	connectedClientsAfterDisconnect := wcm.connectionsPerDocument[documentId] - 1
 
-	connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
-	removeClient(conn)
-	delete(clients, conn)
+	wcm.connectionsPerDocument[documentId] = connectedClientsAfterDisconnect
+	wcm.onClientDisconnected(conn)
+	delete(wcm.clients, conn)
 
-	lock.Unlock()
+	wcm.lock.Unlock()
 
 	if connectedClientsAfterDisconnect <= 0 {
-		saveCurrentDocumentContent(documentId)
+		wcm.saveCurrentDocumentContent(documentId)
 	}
 }
 
-func saveCurrentDocumentContent(documentId string) {
+func (wcm *WebsockerConnectionManager) saveCurrentDocumentContent(documentId string) {
 	// TODO: possibly needs locking to avoid writing the same document when multiple clients are connected and triggering edits
-	d := GetDocument(documentId)
+	d := wcm.treeManager.GetDocument(documentId)
 	if d == nil {
 		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
 		return
