@@ -1,6 +1,8 @@
 ---
 
 openapi: "3.0.0"
+servers:
+  - url: "http://localhost:7413"
 info:
   title: "MkDocsRest API"
   version: 1.0.0
@@ -9,7 +11,7 @@ info:
 paths:
   /alive/:
     get:
-      summary: "Can be used to check the status of the service"
+      summary: "Check the status of the service"
       operationId: alive
       tags:
       - Status
