@@ -111,8 +111,6 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 
-	echoRest.GET("/tree/", rs.getTree)
-
 	// Authentication
 	// Group level middleware
 	groupMkDocs := echoRest.Group("/mkdocs")

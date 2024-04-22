@@ -28,31 +28,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /tree/:
-    get:
-      summary: "Returns the description of the head of the document tree, including all subsections, documents and resources in it."
-      operationId: tree
-      tags:
-      - Tree
-      responses:
-        '200':
-          description: "The root section"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Section"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
   /section/:
     get:
