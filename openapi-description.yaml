@@ -12,6 +12,7 @@ paths:
   /alive/:
     get:
       summary: "Check the status of the service"
+      description: "This endpoint can be used to check if the service is up and running."
       operationId: alive
       tags:
         - Status
@@ -33,7 +34,8 @@ paths:
 
   /section/:
     get:
-      summary: "Returns the description of the head of the section tree, including all subsections, documents and resources in it."
+      summary: "Returns the root section"
+      description: "Returns the description of the head of the section tree, including all subsections, documents and resources in it."
       operationId: getRootSection
       tags:
         - Sections
@@ -58,6 +60,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       summary: "Creates a new section"
+      description: "The response will contain the metadata of the section, but not the section itself."
       operationId: createSection
       tags:
         - Sections
@@ -90,6 +93,7 @@ paths:
   /section/{sectionId}:
     get:
       summary: "Returns the description of a section"
+      description: "The response will contain the metadata of the section as well its direct subsections, documents and resources."
       operationId: showSectionById
       tags:
         - Sections
@@ -127,6 +131,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       summary: "Updates a section"
+      description: "The response will contain the metadata of the section, but not the section itself."
       operationId: updateSectionById
       tags:
         - Sections
@@ -163,7 +168,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
     delete:
-      summary: "Deletes a section and all of the subsections, documents and resources that it contains."
+      summary: "Deletes a section (and all of its children)"
+      description: "Deletes a section and all of the subsections, documents and resources that it contains. This action cannot be undone."
       operationId: deleteSectionById
       tags:
         - Sections
@@ -200,6 +206,7 @@ paths:
   /document/:
     post:
       summary: "Creates a new document"
+      description: "The response will contain the metadata of the document, but not the document itself."
       operationId: createDocument
       tags:
         - Documents
@@ -232,6 +239,7 @@ paths:
   /document/{documentId}:
     get:
       summary: "Returns the description of a document"
+      description: "The response will contain the metadata of the document, but not the document itself."
       operationId: showDocumentById
       tags:
         - Documents
@@ -269,6 +277,7 @@ paths:
                 $ref: "#/components/schemas/Error"
     delete:
       summary: "Deletes a document"
+      description: "The document file itself will be deleted from the project. This action cannot be undone."
       operationId: deleteDocumentById
       tags:
         - Documents
@@ -304,6 +313,7 @@ paths:
   /document/{documentId}/content/:
     get:
       summary: "Returns the current content of the given document"
+      description: "The content will be returned as plain text."
       operationId: showDocumentContent
       tags:
         - Documents
@@ -343,7 +353,8 @@ paths:
 
   /document/{documentId}/ws/:
     get:
-      summary: "Endpoint for creating a new websocket connection for the given document"
+      summary: "Documnt Websocket"
+      description: "Opens a websocket for the given document to engage in realtime editing."
       operationId: getDocumentWebsocket
       tags:
         - Documents
