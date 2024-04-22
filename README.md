@@ -3,7 +3,13 @@ Server backend for MkDocsEditor clients.
 
 ## How to use
 
+### Configuration
+
+Create a `mkdocsrest.yaml` file similar to the [mkdocsrest_example.yaml](mkdocsrest_example.yaml).
+
 ### Docker
+
+Run the service using Docker and mount the configuration file and the wiki folder:
 
 ```bash
 docker run -d \
