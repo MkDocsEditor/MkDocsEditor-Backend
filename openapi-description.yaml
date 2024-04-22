@@ -14,7 +14,7 @@ paths:
       summary: "Check the status of the service"
       operationId: alive
       tags:
-      - Status
+        - Status
       responses:
         '200':
           description: "Service is up and running."
@@ -36,7 +36,7 @@ paths:
       summary: "Returns the description of the head of the section tree, including all subsections, documents and resources in it."
       operationId: getRootSection
       tags:
-      - Sections
+        - Sections
       responses:
         '200':
           description: "The root section"
@@ -60,7 +60,7 @@ paths:
       summary: "Creates a new section"
       operationId: createSection
       tags:
-      - Sections
+        - Sections
       requestBody:
         description: "The data used to create a new section"
         content:
@@ -89,17 +89,54 @@ paths:
 
   /section/{sectionId}:
     get:
-      summary: "Returns the description of a specific section"
+      summary: "Returns the description of a section"
       operationId: showSectionById
       tags:
-      - Sections
+        - Sections
       parameters:
-      - name: sectionId
-        in: path
-        required: true
-        description: "The id of the section to retrieve"
-        schema:
-          type: string
+        - name: sectionId
+          in: path
+          required: true
+          description: "The id of the section to retrieve"
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "Expected response to a valid request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Section"
+        '401':
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '404':
+          description: "The section could not be found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: "unexpected error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: "Updates a section"
+      operationId: updateSectionById
+      tags:
+        - Sections
+      parameters:
+        - name: sectionId
+          in: path
+          required: true
+          description: "The id of the section to update"
+          schema:
+            type: string
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -129,14 +166,14 @@ paths:
       summary: "Deletes a section and all of the subsections, documents and resources that it contains."
       operationId: deleteSectionById
       tags:
-      - Sections
+        - Sections
       parameters:
-      - name: sectionId
-        in: path
-        required: true
-        description: "The id of the section to delete"
-        schema:
-          type: string
+        - name: sectionId
+          in: path
+          required: true
+          description: "The id of the section to delete"
+          schema:
+            type: string
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -165,7 +202,7 @@ paths:
       summary: "Creates a new document"
       operationId: createDocument
       tags:
-      - Documents
+        - Documents
       requestBody:
         description: "The data used to create a new document"
         content:
@@ -194,17 +231,17 @@ paths:
 
   /document/{documentId}:
     get:
-      summary: "Returns the description of a specific document"
+      summary: "Returns the description of a document"
       operationId: showDocumentById
       tags:
-      - Documents
+        - Documents
       parameters:
-      - name: documentId
-        in: path
-        required: true
-        description: "The id of the document to retrieve"
-        schema:
-          type: string
+        - name: documentId
+          in: path
+          required: true
+          description: "The id of the document to retrieve"
+          schema:
+            type: string
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -234,14 +271,14 @@ paths:
       summary: "Deletes a document"
       operationId: deleteDocumentById
       tags:
-      - Documents
+        - Documents
       parameters:
-      - name: documentId
-        in: path
-        required: true
-        description: "The id of the document to delete"
-        schema:
-          type: string
+        - name: documentId
+          in: path
+          required: true
+          description: "The id of the document to delete"
+          schema:
+            type: string
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -269,15 +306,15 @@ paths:
       summary: "Returns the current content of the given document"
       operationId: showDocumentContent
       tags:
-      - Documents
+        - Documents
       parameters:
-      - name: documentId
-        in: path
-        required: true
-        description: "The id of the user to retrieve the profile image for"
-        schema:
-          type: integer
-          format: int64
+        - name: documentId
+          in: path
+          required: true
+          description: "The id of the user to retrieve the profile image for"
+          schema:
+            type: integer
+            format: int64
       responses:
         '200':
           description: "The current content of the document"
@@ -309,15 +346,15 @@ paths:
       summary: "Endpoint for creating a new websocket connection for the given document"
       operationId: getDocumentWebsocket
       tags:
-      - Documents
+        - Documents
       parameters:
-      - name: documentId
-        in: path
-        required: true
-        description: "The id of the document to open a websocket for"
-        schema:
-          type: integer
-          format: int64
+        - name: documentId
+          in: path
+          required: true
+          description: "The id of the document to open a websocket for"
+          schema:
+            type: integer
+            format: int64
       responses:
         '200':
           description: "The current content of the document"
@@ -348,9 +385,10 @@ paths:
   /resource/:
     post:
       summary: "Upload a new resource"
+      description: "The response will contain the metadata of the resource, but not the resource itself."
       operationId: uploadResource
       tags:
-      - Resources
+        - Resources
       requestBody:
         description: "The resource file content"
         content:
@@ -380,17 +418,55 @@ paths:
 
   /resource/{resourceId}:
     get:
-      summary: "Returns the description of a specific resource"
+      summary: "Returns the description of a resource"
+      description: "The response will contain the metadata of the resource, but not the resource itself."
       operationId: showResourceById
       tags:
-      - Resources
+        - Resources
       parameters:
-      - name: resourceId
-        in: path
-        required: true
-        description: "The id of the resource to retrieve"
-        schema:
-          type: string
+        - name: resourceId
+          in: path
+          required: true
+          description: "The id of the resource to retrieve"
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "Expected response to a valid request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Resource"
+        '401':
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '404':
+          description: "The resource could not be found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: "unexpected error"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      summary: "Updates a resource"
+      description: "The response will contain the metadata of the resource, but not the resource itself."
+      operationId: updateResourceById
+      tags:
+        - Resources
+      requestBody:
+        description: "The new metadata of the resource"
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Resource"
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -418,16 +494,17 @@ paths:
                 $ref: "#/components/schemas/Error"
     delete:
       summary: "Deletes a resource"
+      description: "The resource file itself will be deleted from the project. This action cannot be undone."
       operationId: deleteResourceById
       tags:
-      - Resources
+        - Resources
       parameters:
-      - name: resourceId
-        in: path
-        required: true
-        description: "The id of the resource to delete"
-        schema:
-          type: string
+        - name: resourceId
+          in: path
+          required: true
+          description: "The id of the resource to delete"
+          schema:
+            type: string
       responses:
         '200':
           description: "Expected response to a valid request"
@@ -451,24 +528,24 @@ paths:
                 $ref: "#/components/schemas/Error"
 
 security:
-- basicAuth: []
+  - basicAuth: [ ]
 
 components:
 
   securitySchemes:
-    basicAuth:     # <-- arbitrary name for the security scheme
+    basicAuth: # <-- arbitrary name for the security scheme
       type: http
       scheme: basic
 
   schemas:
     Section:
       required:
-      - id
-      - type
-      - name
-      - subsections
-      - documents
-      - resources
+        - id
+        - type
+        - name
+        - subsections
+        - documents
+        - resources
       properties:
         id:
           description: "A unique identifier for this section"
@@ -476,7 +553,7 @@ components:
         type:
           description: "The type of this object in the document tree"
           type: string
-          enum: ["Section"]
+          enum: [ "Section" ]
         name:
           description: "The name of this section"
           type: string
@@ -499,12 +576,12 @@ components:
 
     Document:
       required:
-      - id
-      - type
-      - name
-      - filesize
-      - modtime
-      - url
+        - id
+        - type
+        - name
+        - filesize
+        - modtime
+        - url
       properties:
         id:
           description: "A unique identifier for this document"
@@ -512,7 +589,7 @@ components:
         type:
           description: "The type of this object in the document tree"
           type: string
-          enum: ["Document"]
+          enum: [ "Document" ]
         name:
           description: "The name of this section"
           type: string
@@ -532,11 +609,11 @@ components:
 
     Resource:
       required:
-      - id
-      - type
-      - name
-      - filesize
-      - modtime
+        - id
+        - type
+        - name
+        - filesize
+        - modtime
       properties:
         id:
           description: "A unique identifier for this document"
@@ -544,7 +621,7 @@ components:
         type:
           description: "The type of this object in the document tree"
           type: string
-          enum: ["Resource"]
+          enum: [ "Resource" ]
         name:
           description: "The name of this section"
           type: string
@@ -560,8 +637,8 @@ components:
 
     NewSectionRequest:
       required:
-      - parent
-      - name
+        - parent
+        - name
       properties:
         id:
           description: "The id of the parent section in which the new section should be created"
@@ -573,8 +650,8 @@ components:
 
     NewDocumentRequest:
       required:
-      - parent
-      - name
+        - parent
+        - name
       properties:
         id:
           description: "The id of the parent section in which the document should be created"
@@ -586,8 +663,8 @@ components:
 
     Error:
       required:
-      - code
-      - message
+        - code
+        - message
       properties:
         code:
           description: "A code for the error"
