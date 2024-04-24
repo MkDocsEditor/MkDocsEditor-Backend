@@ -31,6 +31,8 @@ Use a client to connect to the service.
 
 ## API
 
+[OpenAPI Documentation](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml)
+
 ### General
 
 | Method | Path           | Description                                 |
