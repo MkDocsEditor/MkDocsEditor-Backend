@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/OneOfOne/xxhash v1.2.8
+	github.com/automerge/automerge-go v0.0.0-20240213171625-b7d9d510d501
 	github.com/fatih/color v1.16.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gorilla/websocket v1.5.1
