@@ -52,13 +52,13 @@ type (
 type RestService struct {
 	echoRest                   *echo.Echo
 	treeManager                *TreeManager
-	syncManager                *SyncManager
+	syncManager                SyncManager
 	websocketConnectionManager *WebsocketConnectionManager
 }
 
 func NewRestService(
 	treeManager *TreeManager,
-	syncManager *SyncManager,
+	syncManager SyncManager,
 ) *RestService {
 	rs := &RestService{
 		treeManager: treeManager,

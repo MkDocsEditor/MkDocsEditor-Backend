@@ -138,10 +138,7 @@ func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, 
 	automergeDocument := automerge.New()
 	syncState := automerge.NewSyncState(automergeDocument)
 
-	documentContentText, err := automerge.As[*automerge.Text](automergeDocument.RootMap().Get("content"))
-	if err != nil {
-		return err
-	}
+	documentContentText := automergeDocument.Path("content").Text()
 	err = documentContentText.Set(document.Content)
 	if err != nil {
 		return err

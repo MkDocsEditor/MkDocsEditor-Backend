@@ -41,13 +41,16 @@ var rootCmd = &cobra.Command{
 		fileWatcher := backend.NewFileWatcher(path, action)
 		fileWatcher.WatchDirRecursive()
 
-		syncManager := backend.NewSyncManager(treeManager)
+		//syncManager := backend.NewSyncManager(treeManager)
+		automergeSyncManager := backend.NewAutomergeSyncManager(treeManager)
 
-		restService := backend.NewRestService(treeManager, syncManager)
-		websocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
+		restService := backend.NewRestService(treeManager, automergeSyncManager)
+		//websocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
+		automergeWebsocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
 
-		restService.RegisterWebsocketHandler(websocketConnectionManager)
-		syncManager.SetWebsocketConnectionManager(websocketConnectionManager)
+		restService.RegisterWebsocketHandler(automergeWebsocketConnectionManager)
+		//syncManager.SetWebsocketConnectionManager(websocketConnectionManager)
+		automergeSyncManager.SetWebsocketConnectionManager(automergeWebsocketConnectionManager)
 
 		restService.Start()
 	},

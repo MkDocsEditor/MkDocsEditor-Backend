@@ -28,8 +28,12 @@ type (
 	}
 )
 
-// SyncManager manages processing of EditRequests from clients
-type SyncManager struct {
+type SyncManager interface {
+	IsItemBeingEditedRecursive(s *Section) (err error)
+}
+
+// DSSyncManager manages processing of EditRequests from clients
+type DSSyncManager struct {
 	treeManager                *TreeManager
 	websocketConnectionManager *WebsocketConnectionManager
 
@@ -42,8 +46,8 @@ type SyncManager struct {
 
 func NewSyncManager(
 	treeManager *TreeManager,
-) *SyncManager {
-	syncManager := &SyncManager{
+) *DSSyncManager {
+	syncManager := &DSSyncManager{
 		treeManager:   treeManager,
 		ServerShadows: make(map[*websocket.Conn]string),
 	}
@@ -51,7 +55,7 @@ func NewSyncManager(
 	return syncManager
 }
 
-func (sm *SyncManager) IsItemBeingEditedRecursive(s *Section) (err error) {
+func (sm *DSSyncManager) IsItemBeingEditedRecursive(s *Section) (err error) {
 	for _, doc := range *s.Documents {
 		if sm.websocketConnectionManager.IsClientConnected(doc.ID) {
 			return errors.New("a document within this section is currently being edited by another user")
@@ -69,17 +73,17 @@ func (sm *SyncManager) IsItemBeingEditedRecursive(s *Section) (err error) {
 }
 
 // sets the initial server shadow for a new client connection
-func (sm *SyncManager) initClient(conn *websocket.Conn, shadowContent string) {
+func (sm *DSSyncManager) initClient(conn *websocket.Conn, shadowContent string) {
 	sm.ServerShadows[conn] = shadowContent
 }
 
 // removes the shadow for the given client
-func (sm *SyncManager) removeClient(conn *websocket.Conn) {
+func (sm *DSSyncManager) removeClient(conn *websocket.Conn) {
 	delete(sm.ServerShadows, conn)
 }
 
 // handles incoming edit requests from the client
-func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
+func (sm *DSSyncManager) handleEditRequest(client *websocket.Conn, editRequest EditRequest) (err error) {
 	documentId := editRequest.DocumentId
 
 	// check if the server shadow matches the client shadow before the patch has been applied
@@ -122,7 +126,7 @@ func (sm *SyncManager) handleEditRequest(client *websocket.Conn, editRequest Edi
 }
 
 // send the full document text to a client
-func (sm *SyncManager) sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
+func (sm *DSSyncManager) sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
 	// set initial state in backend
 	sm.initClient(client, document.Content)
 
@@ -142,7 +146,7 @@ func (sm *SyncManager) sendInitialTextResponse(client *websocket.Conn, document 
 }
 
 // responds to a client with the changes from the server site document version
-func (sm *SyncManager) sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
+func (sm *DSSyncManager) sendEditRequestResponse(client *websocket.Conn, documentId string) (err error) {
 	d := sm.treeManager.GetDocument(documentId)
 
 	shadow := sm.ServerShadows[client]
@@ -177,7 +181,7 @@ func (sm *SyncManager) sendEditRequestResponse(client *websocket.Conn, documentI
 //     this will ensure the bytes are the same on all clients
 //   - the checksum string must include leading zeros
 //   - all characters are lowercase
-func (sm *SyncManager) calculateChecksum(text string) string {
+func (sm *DSSyncManager) calculateChecksum(text string) string {
 	encoder := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewEncoder()
 	utf16, err := encoder.String(text)
 	if err != nil {
@@ -189,7 +193,7 @@ func (sm *SyncManager) calculateChecksum(text string) string {
 	return strings.ToLower(checksum)
 }
 
-func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
+func (sm *DSSyncManager) saveCurrentDocumentContent(documentId string) {
 	sm.lock.RLock()
 	defer sm.lock.RUnlock()
 
@@ -209,7 +213,7 @@ func (sm *SyncManager) saveCurrentDocumentContent(documentId string) {
 	log.Printf("Document '%s' synchronized to disk successfully", documentId)
 }
 
-func (sm *SyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectionManager) {
+func (sm *DSSyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectionManager) {
 	sm.websocketConnectionManager = manager
 
 	sm.websocketConnectionManager.SetOnNewClientListener(func(client *websocket.Conn, document *Document) error {
