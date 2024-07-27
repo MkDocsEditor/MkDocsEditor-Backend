@@ -216,7 +216,7 @@ func (sm *SyncManager) SetWebsocketConnectionManager(manager *WebsocketConnectio
 		fmt.Println("New client connected", client)
 		return sm.sendInitialTextResponse(client, document)
 	})
-	sm.websocketConnectionManager.SetOnIncomingMessageListener(func(client *websocket.Conn, request EditRequest) error {
+	sm.websocketConnectionManager.SetOnIncomingEditRequestMessageListener(func(client *websocket.Conn, request EditRequest) error {
 		fmt.Println("Incoming message from client", client)
 		return sm.handleEditRequest(client, request)
 	})

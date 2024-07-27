@@ -12,6 +12,7 @@ import (
 const (
 	TypeInitialContent = "initial-content"
 	TypeEditRequest    = "edit-request"
+	TypeSyncRequest    = "sync-request"
 )
 
 type WebsocketConnectionManager struct {
@@ -25,6 +26,7 @@ type WebsocketConnectionManager struct {
 
 	onNewClient          func(client *websocket.Conn, document *Document) error
 	onIncomingMessage    func(client *websocket.Conn, request EditRequest) error
+	onSyncRequest        func(client *websocket.Conn, request SyncRequest) error
 	onClientDisconnected func(client *websocket.Conn, documentId string, remainingConnections uint)
 }
 
@@ -80,24 +82,52 @@ func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, docum
 	}
 
 	for {
-		// Read incoming edit requests
-		var editRequest EditRequest
-		// Read in a new message as JSON and map it to a Message object
-		err := client.ReadJSON(&editRequest)
+		request, err := wcm.parseRequestBody(client)
 		if err != nil {
 			log.Printf("%v: error: %v", client.RemoteAddr(), err)
 			break
 		}
 
-		// Send the newly received message to the broadcast channel
-		err = wcm.handleIncomingMessage(client, editRequest)
-		if err != nil {
-			log.Printf("%v: error: %v", client.RemoteAddr(), err)
+		switch request.(type) {
+		case EditRequest:
+			// Send the newly received message to the broadcast channel
+			err = wcm.handleIncomingMessage(client, request.(EditRequest))
+			if err != nil {
+				log.Printf("%v: error: %v", client.RemoteAddr(), err)
+				break
+			}
+		case SyncRequest:
+			err = wcm.handleSyncRequest(client, request.(SyncRequest))
+			if err != nil {
+				log.Printf("%v: error: %v", client.RemoteAddr(), err)
+				break
+			}
+		default:
+			log.Printf("%v: error: invalid message type: %v", client.RemoteAddr(), request)
 			break
 		}
 	}
 
 	return nil
+}
+
+func (wcm *WebsocketConnectionManager) parseRequestBody(
+	client *websocket.Conn,
+) (request interface{}, err error) {
+	var editRequest EditRequest
+	//Read in a new message as JSON and map it to a Message object
+	err = client.ReadJSON(&editRequest)
+	if err != nil {
+		// try next type
+	}
+
+	var syncRequest SyncRequest
+	err = client.ReadJSON(&syncRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	return editRequest, nil
 }
 
 // processes incoming messages from connected clients
@@ -110,6 +140,21 @@ func (wcm *WebsocketConnectionManager) handleIncomingMessage(client *websocket.C
 // sends an EditRequest to the specified connection
 func (wcm *WebsocketConnectionManager) sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
 	err = connection.WriteJSON(editRequest)
+	if err != nil {
+		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
+	}
+	return err
+}
+
+func (wcm *WebsocketConnectionManager) handleSyncRequest(client *websocket.Conn, request SyncRequest) (err error) {
+	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
+	err = wcm.onSyncRequest(client, request)
+	return err
+}
+
+// sends an SyncRequest to the specified connection
+func (wcm *WebsocketConnectionManager) syncStateToClient(connection *websocket.Conn, syncStateRequest SyncRequest) (err error) {
+	err = connection.WriteJSON(syncStateRequest)
 	if err != nil {
 		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
 	}
@@ -139,8 +184,12 @@ func (wcm *WebsocketConnectionManager) SetOnNewClientListener(f func(client *web
 	wcm.onNewClient = f
 }
 
-func (wcm *WebsocketConnectionManager) SetOnIncomingMessageListener(f func(client *websocket.Conn, request EditRequest) error) {
+func (wcm *WebsocketConnectionManager) SetOnIncomingEditRequestMessageListener(f func(client *websocket.Conn, request EditRequest) error) {
 	wcm.onIncomingMessage = f
+}
+
+func (wcm *WebsocketConnectionManager) SetOnSyncRequestMessageListener(f func(client *websocket.Conn, request SyncRequest) error) {
+	wcm.onSyncRequest = f
 }
 
 func (wcm *WebsocketConnectionManager) SetOnClientDisconnectedListener(f func(client *websocket.Conn, documentId string, remainingConnections uint)) {
