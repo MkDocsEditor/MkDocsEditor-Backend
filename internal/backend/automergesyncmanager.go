@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	automerge "github.com/automerge/automerge-go"
@@ -11,12 +12,23 @@ import (
 
 type (
 	SyncRequest struct {
-		Type       string                 `json:"type" xml:"type" form:"type" query:"type"`
-		RequestId  string                 `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
-		DocumentId string                 `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
-		SyncState  *automerge.SyncMessage `json:"syncState" xml:"syncState" form:"syncState" query:"syncState"`
+		Type       string `json:"type" xml:"type" form:"type" query:"type"`
+		RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
+		DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
+		// *automerge.Doc as base64 encoded string
+		DocumentState string `json:"documentState" xml:"documentState" form:"documentState" query:"documentState"`
+		// *automerge.SyncMessage as base64 encoded string
+		SyncMessage string `json:"syncMessage" xml:"syncMessage" form:"syncMessage" query:"syncMessage"`
 	}
 )
+
+func (s SyncRequest) GetSyncMessageBytes() ([]byte, error) {
+	decodedBytes, err := base64.StdEncoding.DecodeString(s.SyncMessage)
+	if err != nil {
+		return nil, err
+	}
+	return decodedBytes, nil
+}
 
 // AutomergeSyncManager manages processing of SyncRequests from clients
 type AutomergeSyncManager struct {
@@ -24,7 +36,7 @@ type AutomergeSyncManager struct {
 	websocketConnectionManager *WebsocketConnectionManager
 
 	// automergeDocuments client connection -> automerge.Doc
-	automergeDocuments map[*websocket.Conn]string
+	automergeDocuments map[*websocket.Conn]*automerge.Doc
 
 	// lock for synchronizing the tree to the disk
 	lock mutexSync.RWMutex
@@ -35,7 +47,7 @@ func NewAutomergeSyncManager(
 ) *AutomergeSyncManager {
 	s := &AutomergeSyncManager{
 		treeManager:        treeManager,
-		automergeDocuments: make(map[*websocket.Conn]string),
+		automergeDocuments: make(map[*websocket.Conn]*automerge.Doc),
 	}
 
 	return s
@@ -59,8 +71,8 @@ func (sm *AutomergeSyncManager) IsItemBeingEditedRecursive(s *Section) (err erro
 }
 
 // sets the initial server shadow for a new client connection
-func (sm *AutomergeSyncManager) initClient(conn *websocket.Conn, shadowContent string) {
-	sm.automergeDocuments[conn] = shadowContent
+func (sm *AutomergeSyncManager) initClient(conn *websocket.Conn, document *automerge.Doc) {
+	sm.automergeDocuments[conn] = document
 }
 
 // removes the shadow for the given client
@@ -98,19 +110,25 @@ func (sm *AutomergeSyncManager) handleSyncRequest(client *websocket.Conn, syncRe
 	syncState := automerge.NewSyncState(automergeDocument)
 	// sm.automergeDocuments[client]
 
-	_, err = syncState.ReceiveMessage(syncRequest.SyncState.Bytes())
+	syncMessageBytes, err := syncRequest.GetSyncMessageBytes()
+	if err != nil {
+		log.Printf("%v: error getting sync message bytes: %v", client.RemoteAddr(), err)
+		return err
+	}
+	_, err = syncState.ReceiveMessage(syncMessageBytes)
 	if err != nil {
 		log.Printf("%v: error receiving sync state: %v", client.RemoteAddr(), err)
 		return err
 	}
 
+	// NOTE: this is not needed when using the SyncState API
 	// apply patches to the automerge document
-	for _, change := range syncRequest.SyncState.Changes() {
-		err := automergeDocument.Apply(change)
-		if err != nil {
-			return err
-		}
-	}
+	//for _, change := range syncRequest.SyncMessage.Changes() {
+	//	err := automergeDocument.Apply(change)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 
 	// then patch the server document version
 	d := sm.treeManager.GetDocument(documentId)
@@ -121,21 +139,21 @@ func (sm *AutomergeSyncManager) handleSyncRequest(client *websocket.Conn, syncRe
 	}
 	d.Content = patchedText
 
-	err = sm.sendSyncRequestResponse(client, documentId)
-	if err != nil {
-		log.Printf("%v: error sending response: %v", client.RemoteAddr(), err)
-		return err
-	}
+	//err = sm.sendSyncRequestResponse(client, documentId)
+	//if err != nil {
+	//	log.Printf("%v: error sending response: %v", client.RemoteAddr(), err)
+	//	return err
+	//}
 
 	return err
 }
 
 // send the latest document state to the client
 func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
-	// set initial state in backend
-	sm.initClient(client, document.Content)
+	automergeDocument, err := sm.getDocument(document.ID)
 
-	automergeDocument := automerge.New()
+	heads := automergeDocument.Heads()
+
 	syncState := automerge.NewSyncState(automergeDocument)
 
 	documentContentText := automergeDocument.Path("content").Text()
@@ -144,12 +162,18 @@ func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, 
 		return err
 	}
 
-	commitMessage := "Initial commit"
+	commitMessage := "Initial Text"
 	commit, err := automergeDocument.Commit(commitMessage)
 	log.Printf("Commit: %v", commit)
 	if err != nil {
 		return err
 	}
+
+	changes, err := automergeDocument.Changes(heads...)
+	changes[0].Save()
+
+	// set initial state in backend
+	sm.initClient(client, automergeDocument)
 
 	syncStateMessage, valid := syncState.GenerateMessage()
 	if valid == false {
@@ -158,18 +182,24 @@ func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, 
 	}
 
 	// Write current document state to the client
-	err = client.WriteJSON(SyncRequest{
-		Type:       TypeInitialContent,
-		DocumentId: document.ID,
-		RequestId:  "",
-		SyncState:  syncStateMessage,
-	})
+	request := SyncRequest{
+		Type:          TypeInitialContent,
+		DocumentId:    document.ID,
+		RequestId:     "",
+		DocumentState: encodeBase64(automergeDocument.Save()),
+		SyncMessage:   encodeBase64(syncStateMessage.Bytes()),
+	}
+	err = client.WriteJSON(request)
 	if err != nil {
 		log.Printf("%v: error writing initial content response: %v", client.RemoteAddr(), err)
 		return err
 	}
 
 	return
+}
+
+func encodeBase64(buffer []byte) string {
+	return base64.StdEncoding.EncodeToString(buffer)
 }
 
 // responds to a client with the changes from the server site document version
@@ -192,10 +222,11 @@ func (sm *AutomergeSyncManager) sendSyncRequestResponse(client *websocket.Conn, 
 	return sm.websocketConnectionManager.syncStateToClient(
 		client,
 		SyncRequest{
-			Type:       TypeSyncRequest,
-			RequestId:  "",
-			DocumentId: documentId,
-			SyncState:  syncStateMessage,
+			Type:          TypeSyncRequest,
+			RequestId:     "",
+			DocumentId:    documentId,
+			DocumentState: encodeBase64(automergeDocument.Save()),
+			SyncMessage:   encodeBase64(syncStateMessage.Bytes()),
 		})
 }
 

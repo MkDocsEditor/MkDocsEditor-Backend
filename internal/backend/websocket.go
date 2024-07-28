@@ -3,7 +3,6 @@ package backend
 import (
 	"fmt"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
 	"log"
 	"net/http"
 	mutexSync "sync"
@@ -89,6 +88,7 @@ func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, docum
 		}
 
 		switch request.(type) {
+		//case InitialContentRequest:
 		case EditRequest:
 			// Send the newly received message to the broadcast channel
 			err = wcm.handleIncomingMessage(client, request.(EditRequest))
@@ -111,23 +111,45 @@ func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, docum
 	return nil
 }
 
+type SocketEntityBase struct {
+	Type       string `json:"type" xml:"type" form:"type" query:"type"`
+	RequestId  string `json:"requestId" xml:"requestId" form:"requestId" query:"requestId"`
+	DocumentId string `json:"documentId" xml:"documentId" form:"documentId" query:"documentId"`
+}
+
 func (wcm *WebsocketConnectionManager) parseRequestBody(
 	client *websocket.Conn,
 ) (request interface{}, err error) {
-	var editRequest EditRequest
-	//Read in a new message as JSON and map it to a Message object
-	err = client.ReadJSON(&editRequest)
-	if err != nil {
-		// try next type
-	}
+	var baseRequest SocketEntityBase
 
-	var syncRequest SyncRequest
-	err = client.ReadJSON(&syncRequest)
+	err = client.ReadJSON(&baseRequest)
 	if err != nil {
 		return nil, err
 	}
-
-	return editRequest, nil
+	switch baseRequest.Type {
+	case TypeInitialContent:
+		var initialContentRequest InitialContentRequest
+		err = client.ReadJSON(&initialContentRequest)
+		if err != nil {
+			return nil, err
+		}
+		return initialContentRequest, nil
+	case TypeEditRequest:
+		var editRequest EditRequest
+		err = client.ReadJSON(&editRequest)
+		if err != nil {
+			return nil, err
+		}
+		return editRequest, nil
+	case TypeSyncRequest:
+		var syncRequest SyncRequest
+		err = client.ReadJSON(&syncRequest)
+		if err != nil {
+			return nil, err
+		}
+		return syncRequest, nil
+	}
+	return nil, nil
 }
 
 // processes incoming messages from connected clients
