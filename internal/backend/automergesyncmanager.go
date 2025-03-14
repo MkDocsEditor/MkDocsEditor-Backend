@@ -22,6 +22,10 @@ type (
 	}
 )
 
+const (
+	ContentPath = "content"
+)
+
 func (s SyncRequest) GetSyncMessageBytes() ([]byte, error) {
 	decodedBytes, err := base64.StdEncoding.DecodeString(s.SyncMessage)
 	if err != nil {
@@ -87,7 +91,7 @@ func (sm *AutomergeSyncManager) getDocument(documentId string) (doc *automerge.D
 
 	d := sm.treeManager.GetDocument(documentId)
 
-	text := doc.Path("content").Text()
+	text := doc.Path(ContentPath).Text()
 	err = text.Set(d.Content)
 	if err != nil {
 		return nil, err
@@ -106,7 +110,7 @@ func (sm *AutomergeSyncManager) handleSyncRequest(client *websocket.Conn, syncRe
 		log.Printf("%v: error getting document: %v", client.RemoteAddr(), err)
 		return err
 	}
-	text := automergeDocument.Path("content").Text()
+	text := automergeDocument.Path(ContentPath).Text()
 	syncState := automerge.NewSyncState(automergeDocument)
 	// sm.automergeDocuments[client]
 
@@ -156,7 +160,7 @@ func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, 
 
 	syncState := automerge.NewSyncState(automergeDocument)
 
-	documentContentText := automergeDocument.Path("content").Text()
+	documentContentText := automergeDocument.Path(ContentPath).Text()
 	err = documentContentText.Set(document.Content)
 	if err != nil {
 		return err
