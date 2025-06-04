@@ -35,10 +35,10 @@ Use a client to connect to the service.
 
 ### General
 
-| Method | Path           | Description                                 |
-|--------|----------------|---------------------------------------------|
-| GET    | /alive         | Liveness probe endpoint                     |
-| GET    | /mkdocs/config | Retrieve the `mkdocsrest.yaml` configurtion |
+| Method | Path           | Description                                  |
+|--------|----------------|----------------------------------------------|
+| GET    | /alive         | Liveness probe endpoint                      |
+| GET    | /mkdocs/config | Retrieve the `mkdocsrest.yaml` configuration |
 
 ### Sections
 
@@ -46,7 +46,7 @@ Use a client to connect to the service.
 |--------|----------------------|-------------------------------------------------------|
 | GET    | /section             | Retrieve the whole section tree                       |
 | GET    | /section/<sectionId> | Retrieve the section with the given `sectionId`       |
-| POST   | /section             | Create a new secton                                   |
+| POST   | /section             | Create a new section                                  |
 | PUT    | /section/<sectionId> | Update an existing section with the given `sectionId` |
 | DELETE | /section/<sectionId> | Delete the section with the given `sectionId`         |
 
@@ -58,7 +58,7 @@ Use a client to connect to the service.
 | GET    | /document/<documentId>/ws      | Websocket endpoint for realtime communication regarding updates of the document with the given `documentId` |
 | GET    | /document/<documentId>/content | Retrieve the current content of the document with the given `documentId`                                    |
 | POST   | /document                      | Create a new document                                                                                       |
-| PUT    | /document/<documentId>         | Rename an exsiting document with the given `documentId`                                                     |
+| PUT    | /document/<documentId>         | Rename an existing document with the given `documentId`                                                     |
 | DELETE | /document/<documentId>         | Delete the document with the given `documentId`                                                             |
 
 ### Resources
@@ -68,7 +68,7 @@ Use a client to connect to the service.
 | GET    | /resource/<resourceId>         | Retrieve the resource with the given `resourceId`                        |
 | GET    | /resource/<resourceId>/content | Retrieve the current content of the resource with the given `resourceId` |
 | POST   | /resource                      | Upload a new resource                                                    |
-| PUT    | /resource/<resourceId>         | Rename an exsiting resource with the given `resourceId`                  |
+| PUT    | /resource/<resourceId>         | Rename an existing resource with the given `resourceId`                  |
 | DELETE | /resource/<resourceId>         | Delete the resource with the given `resourceId`                          |
 
 # Contributing

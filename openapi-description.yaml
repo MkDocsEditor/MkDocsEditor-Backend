@@ -353,7 +353,7 @@ paths:
 
   /document/{documentId}/ws/:
     get:
-      summary: "Documnt Websocket"
+      summary: "Document Websocket"
       description: "Opens a websocket for the given document to engage in realtime editing."
       operationId: getDocumentWebsocket
       tags:
