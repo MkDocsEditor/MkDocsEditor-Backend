@@ -30,6 +30,12 @@ sessions of that account.
 | `editor` | read and change documents, sections and resources |
 | `reader` | read everything and follow live edits, change nothing |
 
+With `server.auth.clientUrl` (or `server.auth.webauthn.rpId`) set, users can register and
+log in with passkeys from any provider (Bitwarden, Google Password Manager, iCloud
+Keychain and others), also from the Android app; see
+[docs/auth.md](docs/auth.md#12-passkeys-rp-id-origins-and-android) for the RP ID and
+the `assetlinks.json` the app needs.
+
 Passwords need at least 10 characters and must not be on a list of common passwords.
 They are stored as Argon2id hashes. Users can add TOTP (any authenticator app or password
 manager) with 10 single-use recovery codes. Sensitive changes ask for the password again

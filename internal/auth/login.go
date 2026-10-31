@@ -151,6 +151,20 @@ func (s *Service) challengeAttempt(token string) (*challenge, error) {
 	return c, nil
 }
 
+// challengeAccount returns the account of a challenge without counting an attempt
+func (s *Service) challengeAccount(token string) (string, error) {
+	if !validTokenFormat(token, PrefixChallenge) {
+		return "", ErrChallengeExpired
+	}
+	s.challengesMu.Lock()
+	defer s.challengesMu.Unlock()
+	c := s.challenges[string(tokenHash(token))]
+	if c == nil || !s.now().Before(c.expires) || c.attempts >= challengeMaxAttempts {
+		return "", ErrChallengeExpired
+	}
+	return c.accountID, nil
+}
+
 func (s *Service) endChallenge(token string) {
 	s.challengesMu.Lock()
 	delete(s.challenges, string(tokenHash(token)))
