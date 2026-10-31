@@ -58,5 +58,5 @@ fi
 # the backend wrote the merged text to disk on shutdown
 grep -q "Bob äöü" "$work/wiki/docs/index.md"
 grep -q "Alice 😀" "$work/wiki/docs/index.md"
-test -f "$work/wiki/.mkdocseditor/actors.json"
+test -f "$work/wiki/.mkdocseditor/auth.db"
 echo "disk content OK"
