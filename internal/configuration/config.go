@@ -10,6 +10,9 @@ import (
 // default name of the MkDocs configuration file inside the project folder
 const mkdocsConfigFileDefaultName = "mkdocs.yml"
 
+// DefaultStateDirName is the name of the state folder inside the project folder
+const DefaultStateDirName = ".mkdocseditor"
+
 type Configuration struct {
 	Server ServerConfiguration `yaml:"server"`
 	MkDocs MkDocsConfiguration `yaml:"mkdocs"`
@@ -54,6 +57,9 @@ func InitConfig(cfgFile string) {
 func setDefaultValues() {
 	if CurrentConfig.MkDocs.DocsPath == "" {
 		CurrentConfig.MkDocs.DocsPath = filepath.Join(CurrentConfig.MkDocs.ProjectPath, "docs")
+	}
+	if CurrentConfig.MkDocs.StateDir == "" {
+		CurrentConfig.MkDocs.StateDir = filepath.Join(CurrentConfig.MkDocs.ProjectPath, DefaultStateDirName)
 	}
 	if CurrentConfig.MkDocs.ConfigFile == "" {
 		CurrentConfig.MkDocs.ConfigFile = filepath.Join(CurrentConfig.MkDocs.ProjectPath, mkdocsConfigFileDefaultName)

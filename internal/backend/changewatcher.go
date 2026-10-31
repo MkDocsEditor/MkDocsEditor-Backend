@@ -1,71 +1,101 @@
 package backend
 
 import (
-	"fmt"
-	"github.com/fsnotify/fsnotify"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
-// file watcher
-var watcher *fsnotify.Watcher
+// debounce delay: a burst of events (git pull, editor save) triggers one rebuild
+const watcherDebounce = 200 * time.Millisecond
 
+// FileWatcher watches the docs folder recursively and calls onChange (debounced) after changes
 type FileWatcher struct {
-	path   string
-	action func(s string)
+	path     string
+	onChange func()
+	watcher  *fsnotify.Watcher
+	done     chan struct{}
 }
 
-func NewFileWatcher(path string, action func(s string)) *FileWatcher {
-	return &FileWatcher{
-		path:   path,
-		action: action,
+// NewFileWatcher starts watching path and all folders below it
+func NewFileWatcher(path string, onChange func()) (*FileWatcher, error) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
 	}
+	fw := &FileWatcher{path: path, onChange: onChange, watcher: w, done: make(chan struct{})}
+	fw.addRecursive(path)
+	go fw.loop()
+	return fw, nil
 }
 
-// watches all files and folders in the given path recursively
-func (fw *FileWatcher) WatchDirRecursive() {
-	// creates a new file watcher
-	watcher, _ = fsnotify.NewWatcher()
-
-	go func() {
-		for {
-			select {
-			// watch for events
-			case event := <-watcher.Events:
-				//if (event.Op == fsnotify.Write) {
-				fmt.Printf("EVENT! %#v\n", event)
-				fw.action(event.Name)
-				//}
-
-				// watch for errors
-			case err := <-watcher.Errors:
-				fmt.Println("ERROR", err)
+func (fw *FileWatcher) addRecursive(root string) {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			if err := fw.watcher.Add(p); err != nil {
+				log.Printf("Unable to watch %s: %v", p, err)
 			}
 		}
-	}()
-
-	// starting at the root of the project, walk each file/directory searching for directories
-	if err := filepath.Walk(fw.path, fw.addFolderWatch); err != nil {
-		fmt.Println("ERROR", err)
-	}
-}
-
-// adds a path to the watcher
-func (fw *FileWatcher) addFolderWatch(path string, fi os.FileInfo, err error) error {
-	// since fsnotify can watch all the files in a directory, watchers only need
-	// to be added to each nested directory
+		return nil
+	})
 	if err != nil {
-		return err
+		log.Printf("Unable to watch %s: %v", root, err)
 	}
-
-	if fi.Mode().IsDir() {
-		return watcher.Add(path)
-	}
-
-	return nil
 }
 
-// stop watching any files
+func (fw *FileWatcher) loop() {
+	var timer *time.Timer
+	fire := make(chan struct{}, 1)
+	for {
+		select {
+		case <-fw.done:
+			if timer != nil {
+				timer.Stop()
+			}
+			return
+		case event, ok := <-fw.watcher.Events:
+			if !ok {
+				return
+			}
+			if event.Has(fsnotify.Create) {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					fw.addRecursive(event.Name)
+				}
+			}
+			if timer == nil {
+				timer = time.AfterFunc(watcherDebounce, func() {
+					select {
+					case fire <- struct{}{}:
+					default:
+					}
+				})
+			} else {
+				timer.Reset(watcherDebounce)
+			}
+		case <-fire:
+			fw.onChange()
+		case err, ok := <-fw.watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("File watcher error: %v", err)
+		}
+	}
+}
+
+// Close stops watching
 func (fw *FileWatcher) Close() {
-	_ = watcher.Close()
+	close(fw.done)
+	_ = fw.watcher.Close()
 }

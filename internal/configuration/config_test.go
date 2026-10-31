@@ -50,6 +50,9 @@ mkdocs:
 	if c.MkDocs.ConfigFile != "/wiki/mkdocs.yml" {
 		t.Errorf("config file = %q", c.MkDocs.ConfigFile)
 	}
+	if c.MkDocs.StateDir != "/wiki/.mkdocseditor" {
+		t.Errorf("state dir = %q", c.MkDocs.StateDir)
+	}
 	if len(c.MkDocs.Blacklist) != 1 {
 		t.Errorf("blacklist = %v", c.MkDocs.Blacklist)
 	}

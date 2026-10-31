@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -11,6 +12,9 @@ import (
 	"github.com/spf13/cobra"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 const banner = `       _     _                         _   
@@ -37,17 +41,10 @@ var rootCmd = &cobra.Command{
 		setupUi()
 		printStartupInfo()
 
+		conf := configuration.CurrentConfig
 		treeManager := backend.NewTreeManager()
 
-		action := func(s string) { treeManager.CreateItemTree() }
-		path := configuration.CurrentConfig.MkDocs.DocsPath
-		fileWatcher := backend.NewFileWatcher(path, action)
-		fileWatcher.WatchDirRecursive()
-
-		//syncManager := backend.NewSyncManager(treeManager)
-		automergeSyncManager := backend.NewAutomergeSyncManager(treeManager)
-
-		authenticator, err := auth.NewAuthenticator(configuration.CurrentConfig.Server)
+		authenticator, err := auth.NewAuthenticator(conf.Server)
 		if err != nil {
 			log.Fatalf("Invalid authentication configuration: %v", err)
 		}
@@ -55,15 +52,36 @@ var rootCmd = &cobra.Command{
 			_, _ = color.New(color.FgYellow).Println("WARNING: No users configured (server.auth.users), unauthorized access to all files in document path is possible!")
 		}
 
-		restService := backend.NewRestService(treeManager, automergeSyncManager, authenticator)
-		//websocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
-		automergeWebsocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
+		syncServer, err := backend.NewSyncServer(treeManager, authenticator, conf.MkDocs.StateDir, conf.Server.CORS.AllowedOrigins)
+		if err != nil {
+			log.Fatalf("Unable to open the state directory: %v", err)
+		}
+		if err = backend.ExcludeFromGit(conf.MkDocs.ProjectPath, conf.MkDocs.StateDir); err != nil {
+			log.Printf("Unable to add the state directory to .git/info/exclude: %v", err)
+		}
 
-		restService.RegisterWebsocketHandler(automergeWebsocketConnectionManager)
-		//syncManager.SetWebsocketConnectionManager(websocketConnectionManager)
-		automergeSyncManager.SetWebsocketConnectionManager(automergeWebsocketConnectionManager)
+		fileWatcher, err := backend.NewFileWatcher(conf.MkDocs.DocsPath, treeManager.CreateItemTree)
+		if err != nil {
+			log.Fatalf("Unable to watch the docs folder: %v", err)
+		}
+		defer fileWatcher.Close()
+
+		restService := backend.NewRestService(treeManager, syncServer, authenticator)
+
+		// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		go func() {
+			<-ctx.Done()
+			log.Printf("Shutting down")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			restService.Shutdown(shutdownCtx)
+		}()
 
 		restService.Start()
+		syncServer.Close()
+		log.Printf("All documents saved")
 	},
 }
 

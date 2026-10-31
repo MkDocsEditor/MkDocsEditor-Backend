@@ -5,7 +5,10 @@ realtime collaborative editing. It covers authentication, the document websocket
 (Automerge sync, presence, authorship), revision history, and how the backend stores
 documents and commits them to git.
 
-Status: **design, version 1**. The REST API reference is
+Status: **version 1**. Implemented: authentication, roles, the document websocket,
+presence, persistence, external changes, readers, rename and delete. Not yet
+implemented: authorship (section 7), git integration (section 10), revision history
+(section 11). The REST API reference is
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
@@ -83,34 +86,39 @@ so permissions can be added there without changing the protocol.
 Every Automerge change carries the actor id of the document that made it. The protocol
 uses actor ids to attribute changes to users, so they follow these rules:
 
-- **One actor id per client installation**: per app install on Android (app storage),
-  per browser profile on the web (`localStorage`). The client generates it once (16
-  random bytes, lower-case hex, the format of `Automerge.getActorId`). It keeps the
-  same id for every document and every connection, and sets it on every Automerge
-  document it loads (`Automerge.load(bytes, { actor })` / `clone(doc, { actor })`).
-- The client sends its actor id in the `hello` message. On first use the server
-  **binds** the actor id to the authenticated user and stores the binding durably
-  (`actors.json` in the state directory, see [Storage](#9-storage)). The binding
-  survives restarts and epochs and is never removed.
+- **One actor id per document copy.** Automerge requires that two copies of a
+  document which can change concurrently never share an actor id, because their
+  sequence numbers would collide and break sync. Two browser tabs, or two devices,
+  must use different actor ids. So:
+  - When a client loads a fresh copy from `documentState`, it generates a new actor id
+    (16 random bytes, lower-case hex, like `Automerge.getActorId`) and sets it on the
+    copy (`Automerge.load(bytes, { actor })` in JS, `Document.load(bytes).fork(actor)`
+    in automerge-java).
+  - When a client persists its copy for offline use, it persists the actor id with
+    it and keeps using that pair. One copy, one actor.
+- The client sends the actor id of its copy in the `hello` message. On first use the
+  server **binds** the actor id to the authenticated user and stores the binding
+  durably (`actors.json` in the state directory, see [Storage](#9-storage)). The
+  binding survives restarts and epochs and is never removed. A user can have any number
+  of actor ids; authorship maps all of them to the user.
 - An actor id bound to another user is refused (close code `4003`).
 - Every change in an incoming sync message is checked before it is applied. Its actor
   must be bound to the authenticated user, or be unbound (it is then bound to this
   user). If any change in the message belongs to another user's actor, the whole message
   is rejected (an `error` message with code `foreign-actor`, then the socket is closed
   with `4003`).
-- The server uses fixed actor ids for its own changes. These are listed in the actor
-  map with the pseudo user `server`:
-  - `00000000000000000000000000000001`, **disk**: external changes of the file (git
-    pull, manual edits), see [External changes](#8-external-changes)
-  - `00000000000000000000000000000002`, **server**: the initial import of a file and
-    restores of old revisions
+- The server makes its own changes with a fresh random actor id for each change. It
+  binds these ids to two pseudo users, which never clash with real usernames because
+  real usernames cannot contain `:`:
+  - `:disk` (display name "External change"): external changes of the file (git pull,
+    manual edits), see [External changes](#8-external-changes)
+  - `:server` (display name "Server"): the initial import of a file and restores of
+    old revisions
 
-Two different server-created documents can both contain changes by the server actors
-with the same sequence numbers. This does not matter, because a document is only ever
-synced with copies of itself (same epoch).
-
-The actor map is available over REST (`GET /actors/`) and in the websocket (the
-`actors` field of `initial-content`, then `actor` messages for new bindings). Entry:
+The actor map is available over REST (`GET /actors/`) and in the websocket. The
+`actors` field of `initial-content` has the whole map. An `actor` message follows when a
+connection joins (its actor) and when a new actor id appears in a document (a new client
+actor, or a `:disk` change). Entry:
 
 ```json
 { "actorId": "5f3c…", "username": "markus", "displayName": "Markus", "color": "#e8590c" }
@@ -377,24 +385,30 @@ Future work: an events websocket (`/events/ws/`) that pushes tree changes
 
 ## 7. Authorship
 
-The server provides the actor map (`GET /actors/` and the websocket messages). Clients
-compute per-character authorship from the document they hold, because automerge-go
-does not expose operation ids. With the JS API:
+The server computes per-character authorship, so clients do not need a history API
+(automerge-java has none, see below):
 
-1. `changes = Automerge.getAllChanges(doc)`, decoded with `Automerge.decodeChange`, give
-   each change's `actor`, `hash`, `deps` and `time`.
-2. Replay the changes in causal order on an empty document. After each step, compute
-   `Automerge.diff(scratch, headsBefore, headsAfter)` for the `content` path. The
-   result is a list of `splice` and `del` patches with indices.
-3. Keep an array of author runs over the text. A `splice` inserts a run with the
-   change's actor at the patch index. A `del` removes the range.
-4. Map each actor to a username and colour with the actor map. The **disk** and
-   **server** actors are shown as "external" or "server".
+```
+GET /document/{id}/authorship/
+{
+  "heads": ["<hex change hash>", …],
+  "runs": [ { "start": 0, "end": 12, "actorId": "…", "username": "markus" }, … ]
+}
+```
 
-This costs one pass over the history. A client computes it once on open and then
-extends it incrementally from the diffs of incoming changes. For a coarser, line-based
-view of the committed history, the [revision history](#11-revision-history) endpoints
-return the git authors per commit.
+- `runs` covers the text at `heads` without gaps. `start` is inclusive and `end`
+  exclusive. Both are positions in **Unicode code points**; JS clients convert them to
+  UTF-16 indices.
+- The server replays the document history in causal order and attributes every
+  inserted text range to the change's actor (a text diff per change). `username` comes
+  from the actor map. `:disk` and `:server` runs are external or imported text.
+- Clients fetch it when they open a document and then update it themselves: text a
+  local or remote change inserts belongs to that change's actor (from the sync
+  messages, or from `Automerge.diff` in JS). Fetch it again after a reconnect, or when
+  the local bookkeeping gets out of step.
+
+For a coarser view of the committed history, the
+[revision history](#11-revision-history) endpoints return the git authors per commit.
 
 ## 8. External changes
 

@@ -1,0 +1,12 @@
+{
+  "name": "mkdocseditor-backend-interop",
+  "private": true,
+  "type": "module",
+  "description": "Interop test of the sync protocol with the JS Automerge implementation",
+  "scripts": {
+    "test": "node sync-interop.mjs"
+  },
+  "dependencies": {
+    "@automerge/automerge": "3.5.0"
+  }
+}

@@ -4,3 +4,4 @@ bin
 build
 dist
 mkdocsrest.yaml
+interop/node_modules
