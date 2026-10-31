@@ -111,6 +111,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthStatus"
 
+  /server-info/:
+    get:
+      summary: "Describe the instance for onboarding screens"
+      description: "Instance name, versions, URLs and login methods. Nothing secret and nothing about accounts. A superset of /auth/status/ for onboarding."
+      operationId: serverInfo
+      tags: [ Auth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The server info"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerInfo"
+
+  /auth/device-link/redeem/:
+    post:
+      summary: "Exchange a device link token for a session"
+      description: |
+        Pairs a new device (the Android app) with the account that created the device link.
+        The second factor counts as satisfied. The new session is not recently
+        authenticated, except that it may add a passkey during its first 10 minutes.
+        Unknown, used, expired and revoked tokens and a wrong username give `invalid-link`.
+        Rate limited per IP.
+      operationId: redeemDeviceLink
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceLinkRedeemRequest"
+      responses:
+        "200":
+          description: "A session"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /auth/login/:
     post:
       summary: "Log in with username and password"
@@ -801,6 +848,84 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /account/device-links/:
+    get:
+      summary: "The device links of the signed-in user"
+      operationId: listDeviceLinks
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "Pending device links and those that expired less than 24 hours ago, newest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      summary: "Create a device link to connect the Android app (step-up)"
+      description: "A single-use mdd_ token valid for 5 minutes. connectUrl is {clientUrl}/connect#<base64url JSON payload>, see docs/auth.md. At most 5 pending links per account; a sixth revokes the oldest."
+      operationId: createDeviceLink
+      tags: [ Account ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceLinkRequest"
+      responses:
+        "200":
+          description: "The token, returned only now"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedDeviceLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/device-links/{deviceLinkId}/:
+    parameters:
+      - $ref: "#/components/parameters/deviceLinkId"
+    get:
+      summary: "One device link, to show when it was redeemed"
+      operationId: getDeviceLink
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "The device link"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      summary: "Revoke a pending device link"
+      operationId: revokeDeviceLink
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "Revoked (expired and revoked links stay as they are)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /account/sessions/:
     get:
@@ -1840,6 +1965,13 @@ components:
       description: "Id of an account"
       schema:
         type: string
+    deviceLinkId:
+      name: deviceLinkId
+      in: path
+      required: true
+      description: "Id of a device link"
+      schema:
+        type: string
     tokenId:
       name: tokenId
       in: path
@@ -2059,10 +2191,13 @@ components:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [ secondFactorSetupRequired ]
+          required: [ secondFactorSetupRequired, passkeyCount ]
           properties:
             secondFactorSetupRequired:
               type: boolean
+            passkeyCount:
+              type: integer
+              description: "Number of passkeys of the account, to offer a passkey right after sign-in"
 
     AuthStatus:
       type: object
@@ -2472,6 +2607,120 @@ components:
         provider:
           type: string
           description: "Known passkey provider of the AAGUID, for example Bitwarden"
+
+    ServerInfo:
+      type: object
+      required: [ name, version, protocolVersion, backendUrl, wikiUrl, webClientUrl, setupRequired, authDisabled, passkeys, loginMethods, require2FA ]
+      properties:
+        name:
+          type: string
+          description: "server.instanceName, else the host of wikiUrl, webClientUrl or the request"
+        version:
+          type: string
+          description: "Backend build version (dev for local builds)"
+        protocolVersion:
+          type: integer
+          description: "Sync protocol version (docs/sync-protocol.md)"
+        backendUrl:
+          type: string
+          nullable: true
+        wikiUrl:
+          type: string
+          nullable: true
+        webClientUrl:
+          type: string
+          nullable: true
+        setupRequired:
+          type: boolean
+        authDisabled:
+          type: boolean
+        passkeys:
+          type: object
+          required: [ enabled ]
+          properties:
+            enabled:
+              type: boolean
+            rpId:
+              type: string
+        loginMethods:
+          type: array
+          items:
+            type: string
+            enum: [ password, passkey, device-link ]
+        require2FA:
+          type: boolean
+
+    DeviceLink:
+      type: object
+      required: [ id, deviceName, createdAt, expiresAt, status, redeemedAt, redeemedDeviceName, sessionId ]
+      properties:
+        id:
+          type: string
+        deviceName:
+          type: string
+          nullable: true
+          description: "Hint from the creator"
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ pending, redeemed, expired, revoked ]
+        redeemedAt:
+          type: string
+          format: date-time
+          nullable: true
+        redeemedDeviceName:
+          type: string
+          nullable: true
+        sessionId:
+          type: string
+          nullable: true
+          description: "The session created by the redeem"
+
+    DeviceLinkRequest:
+      type: object
+      properties:
+        deviceName:
+          type: string
+          maxLength: 64
+
+    CreatedDeviceLink:
+      type: object
+      required: [ deviceLink, token, expiresAt, connectUrl ]
+      properties:
+        deviceLink:
+          $ref: "#/components/schemas/DeviceLink"
+        token:
+          type: string
+          description: "mdd_..., returned only once"
+        expiresAt:
+          type: string
+          format: date-time
+        connectUrl:
+          type: string
+          nullable: true
+          description: "{clientUrl}/connect#<payload>; null without server.auth.clientUrl"
+
+    DeviceLinkRedeemRequest:
+      type: object
+      required: [ token ]
+      properties:
+        token:
+          type: string
+        username:
+          type: string
+          description: "Optional; must match the account when sent"
+        sessionType:
+          type: string
+          enum: [ cookie, bearer ]
+          default: bearer
+        deviceName:
+          type: string
+          maxLength: 64
 
     AppToken:
       type: object

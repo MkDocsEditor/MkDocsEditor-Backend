@@ -2,6 +2,9 @@ package backend
 
 import "encoding/json"
 
+// ProtocolVersion is the version of the sync protocol, see docs/sync-protocol.md
+const ProtocolVersion = 1
+
 // Websocket message types, see docs/sync-protocol.md
 const (
 	MsgHello            = "hello"

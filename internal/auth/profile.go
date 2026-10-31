@@ -207,6 +207,9 @@ func (s *Service) setPassword(u *User, sess *Session, hash, auditType string, ri
 	if err != nil {
 		return err
 	}
+	if err = revokeDeviceLinks(tx, u.ID, s.now()); err != nil {
+		return err
+	}
 	if _, err = tx.Exec("DELETE FROM app_tokens WHERE account_id = ?", u.ID); err != nil {
 		return err
 	}

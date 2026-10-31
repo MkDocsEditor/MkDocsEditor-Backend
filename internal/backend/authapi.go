@@ -40,6 +40,7 @@ type (
 	UserView struct {
 		auth.User
 		SecondFactorSetupRequired bool `json:"secondFactorSetupRequired"`
+		PasskeyCount              int  `json:"passkeyCount"`
 	}
 
 	SessionResponse struct {
@@ -135,7 +136,11 @@ func (rs *RestService) sessionParams(c echo.Context, f sessionRequestFields) aut
 }
 
 func (rs *RestService) userView(u *auth.User) *UserView {
-	return &UserView{User: *u, SecondFactorSetupRequired: rs.authenticator.SecondFactorSetupRequired(u)}
+	v := &UserView{User: *u, SecondFactorSetupRequired: rs.authenticator.SecondFactorSetupRequired(u)}
+	if u.ID != auth.AnonymousID {
+		v.PasskeyCount = rs.authenticator.PasskeyCount(u.ID)
+	}
+	return v
 }
 
 // writeLoginResult answers with a session (setting the cookie for cookie sessions) or the

@@ -208,8 +208,10 @@ func revokeAccess(tx *sql.Tx, accountID string, now time.Time) error {
 	if _, err := tx.Exec("DELETE FROM app_tokens WHERE account_id = ?", accountID); err != nil {
 		return err
 	}
-	_, err := tx.Exec("UPDATE links SET revoked_at = ? WHERE kind = 'reset' AND account_id = ? AND used_at = 0 AND revoked_at = 0", toMillis(now), accountID)
-	return err
+	if _, err := tx.Exec("UPDATE links SET revoked_at = ? WHERE kind = 'reset' AND account_id = ? AND used_at = 0 AND revoked_at = 0", toMillis(now), accountID); err != nil {
+		return err
+	}
+	return revokeDeviceLinks(tx, accountID, now)
 }
 
 // DeleteUser turns an account into a tombstone: id, username, display name and colour stay
