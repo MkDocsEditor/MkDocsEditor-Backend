@@ -29,8 +29,8 @@ type (
 		Disabled bool `yaml:"disabled"`
 		// ClientURL is the web client, used for setup, invite and reset links
 		ClientURL string `yaml:"clientUrl"`
-		// LegacyBasicAuth accepts HTTP Basic auth (transition from server.auth.users).
-		// Unset means true until the clients use sessions.
+		// LegacyBasicAuth accepts HTTP Basic auth with account passwords (transition from
+		// server.auth.users). Default false.
 		LegacyBasicAuth *bool `yaml:"legacyBasicAuth"`
 		// SessionIdleTimeout ends sessions that were not used for this long (default 720h)
 		SessionIdleTimeout time.Duration `yaml:"sessionIdleTimeout"`

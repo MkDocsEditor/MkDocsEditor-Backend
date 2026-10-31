@@ -41,7 +41,10 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 
-doc_id="$(curl -fs -u alice:alice-pw "http://127.0.0.1:$port/section/" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).documents[0].id))')"
+token="$(curl -fs -H 'Content-Type: application/json' -H 'X-Requested-With: XMLHttpRequest' \
+  -d '{"username":"alice","password":"alice-pw","sessionType":"bearer"}' "http://127.0.0.1:$port/auth/login/" |
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')"
+doc_id="$(curl -fs -H "Authorization: Bearer $token" "http://127.0.0.1:$port/section/" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).documents[0].id))')"
 
 cd "$repo/interop"
 status=0

@@ -33,9 +33,7 @@ func dialEvents(t *testing.T, e *syncEnv, user string, useTicket bool) *eventsCl
 		}
 		hello["ticket"] = ticket
 	} else if user != "" {
-		req, _ := http.NewRequest(http.MethodGet, "/", nil)
-		req.SetBasicAuth(user, testPasswords[user])
-		header.Set("Authorization", req.Header.Get("Authorization"))
+		header.Set("Authorization", authHeader(t, e.authn, user, testPasswords[user]))
 	}
 	ws, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(e.http.URL, "http")+"/events/ws/", header)
 	if resp != nil && resp.Body != nil {

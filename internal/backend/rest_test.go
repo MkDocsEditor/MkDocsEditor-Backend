@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -62,7 +64,7 @@ func (e *restTestEnv) do(method, path string, body io.Reader, contentType string
 		req.Header.Set("Content-Type", contentType)
 	}
 	if e.user != "" {
-		req.SetBasicAuth(e.user, e.pass)
+		req.Header.Set("Authorization", authHeader(e.t, e.rs.authenticator, e.user, e.pass))
 	}
 	rec := httptest.NewRecorder()
 	e.rs.echoRest.ServeHTTP(rec, req)
@@ -289,7 +291,7 @@ func newTestAuthenticator(t *testing.T, stateDir string) *auth.Service {
 }
 
 func TestRestLegacyBasicAuth(t *testing.T) {
-	e := newRestTestEnv(t, func(c *configuration.Configuration) {
+	e := newRestTestEnv(t, legacyBasicAuth, func(c *configuration.Configuration) {
 		c.Server.BasicAuth = configuration.AuthenticationConfiguration{User: "admin", Password: "secret"}
 	})
 
@@ -440,4 +442,37 @@ func TestWebsocketOriginCheck(t *testing.T) {
 	if !checkOrigin(nil)(httptest.NewRequest(http.MethodGet, "/", nil)) {
 		t.Error("no configured origins must allow everything")
 	}
+}
+
+// legacyBasicAuth enables HTTP basic auth with account passwords
+func legacyBasicAuth(c *configuration.Configuration) {
+	on := true
+	c.Server.Auth.LegacyBasicAuth = &on
+}
+
+// testSessions caches the bearer sessions of authHeader per authenticator and credentials
+var testSessions sync.Map
+
+type testSessionKey struct {
+	a          *auth.Service
+	user, pass string
+}
+
+// authHeader returns the Authorization header of a test user: HTTP basic while legacy basic
+// auth is on, otherwise a bearer session. Wrong credentials give a token that matches no session.
+func authHeader(t *testing.T, a *auth.Service, user, pass string) string {
+	t.Helper()
+	if a.LegacyBasicAuth() {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+	}
+	key := testSessionKey{a: a, user: user, pass: pass}
+	if token, ok := testSessions.Load(key); ok {
+		return "Bearer " + token.(string)
+	}
+	res, err := a.LoginPassword(user, pass, auth.SessionParams{Type: auth.SessionBearer, DeviceName: "test"})
+	if err != nil || res.Token == "" {
+		return "Bearer mds_" + strings.Repeat("A", 43)
+	}
+	testSessions.Store(key, res.Token)
+	return "Bearer " + res.Token
 }

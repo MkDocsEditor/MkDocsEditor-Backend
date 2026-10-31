@@ -59,9 +59,9 @@ a reset link.
 `server.auth.users` (and the old `server.basicAuth` user) are imported into the database
 once, with their roles and bcrypt hashes; a bcrypt hash is replaced by Argon2id on the
 next login. After that the configuration list is ignored and can be removed. HTTP basic
-auth with these passwords keeps working during the transition
-(`server.auth.legacyBasicAuth`). `mkdocsrest hash-password` still creates bcrypt hashes
-for that list.
+auth with these passwords is off by default; set `server.auth.legacyBasicAuth: true`
+while old clients are still in use. `mkdocsrest hash-password` still creates bcrypt
+hashes for that list.
 
 Clients:
 

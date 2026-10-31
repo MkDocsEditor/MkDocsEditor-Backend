@@ -55,7 +55,7 @@ func (e *accountEnv) clock() *testClock {
 }
 
 func TestAccountTOTPFlow(t *testing.T) {
-	e := newAccountEnv(t)
+	e := newAccountEnv(t, legacyBasicAuth)
 	clk := e.clock()
 	b := e.setupAdmin()
 

@@ -11,13 +11,28 @@ assert.ok(DOC_ID, "DOC_ID is required");
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 const unb64 = (s) => new Uint8Array(Buffer.from(s, "base64"));
-const basic = (user, pw) => "Basic " + Buffer.from(`${user}:${pw}`).toString("base64");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// bearer sessions per user, like the Android app
+const sessions = new Map();
+async function bearer(user, pw) {
+  if (!sessions.has(user)) {
+    const res = await fetch(BACKEND + "/auth/login/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+      body: JSON.stringify({ username: user, password: pw, sessionType: "bearer", deviceName: "interop-js" }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    sessions.set(user, body.token);
+  }
+  return "Bearer " + sessions.get(user);
+}
 
 async function rest(method, path, user, pw) {
   const res = await fetch(BACKEND + path, {
     method,
-    headers: { Authorization: basic(user, pw), "X-Requested-With": "XMLHttpRequest" },
+    headers: { Authorization: await bearer(user, pw), "X-Requested-With": "XMLHttpRequest" },
   });
   const text = await res.text();
   return { status: res.status, text, json: () => JSON.parse(text) };

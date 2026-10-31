@@ -319,7 +319,7 @@ func TestAccountCSRF(t *testing.T) {
 }
 
 func TestAccountBearerAndInvites(t *testing.T) {
-	e := newAccountEnv(t)
+	e := newAccountEnv(t, legacyBasicAuth)
 	admin := e.setupAdmin()
 
 	// invites are admin-only and need a session

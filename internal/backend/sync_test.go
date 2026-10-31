@@ -77,7 +77,7 @@ func TestSyncTwoClientsConverge(t *testing.T) {
 // do sends an authenticated REST request to the env
 func (e *syncEnv) do(method, path, user string) *httpRecorder {
 	req, _ := http.NewRequest(method, e.http.URL+path, nil)
-	req.SetBasicAuth(user, testPasswords[user])
+	req.Header.Set("Authorization", authHeader(e.t, e.authn, user, testPasswords[user]))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		e.t.Fatal(err)
@@ -331,7 +331,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	guide := e.tm.GetSection(e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")))
 	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth("alice", "alice-pw")
+	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("rename: %v %v", resp, err)
