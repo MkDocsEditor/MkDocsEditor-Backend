@@ -8,6 +8,45 @@ Server backend for MkDocsEditor clients.
 
 Create a `mkdocsrest.yaml` file similar to the [mkdocsrest_example.yaml](mkdocsrest_example.yaml).
 
+### Users and authentication
+
+Every request except `GET /alive/` needs HTTP basic auth against the users in
+`server.auth.users`. Each user has a bcrypt password hash and a role:
+
+| Role | Can |
+|---|---|
+| `admin` | everything |
+| `editor` | read and change documents, sections and resources |
+| `reader` | read everything and follow live edits, change nothing |
+
+Create a password hash with the backend itself (it asks for the password twice):
+
+```bash
+mkdocsrest hash-password
+# or with Docker
+docker run --rm -it ghcr.io/mkdocseditor/mkdocseditor-backend:latest /app/main hash-password
+# or non-interactively
+printf '%s' 'the password' | mkdocsrest hash-password
+```
+
+`htpasswd -nbB user password` also works (use the part after the colon).
+
+The old single-user configuration (`server.basicAuth.user` and `password`) still works;
+that user is an admin. Without any user, authentication is off and the backend warns at
+startup.
+
+Clients:
+
+- `GET /auth/whoami/` returns the authenticated user (`username`, `displayName`, `role`,
+  `color`).
+- Websockets: Android sends the basic auth header on the upgrade request. Browsers cannot
+  set headers on a websocket, so they get a single-use ticket, valid for 60 seconds, from
+  `POST /auth/ws-ticket/` and send it in the first websocket message. See
+  [docs/sync-protocol.md](docs/sync-protocol.md#3-authentication).
+- Browser clients on another origin must be listed in `server.cors.allowedOrigins`.
+  Scripts should send `X-Requested-With: XMLHttpRequest`, so a 401 does not make the
+  browser show its own login dialog.
+
 ### Docker
 
 Run the service using Docker and mount the configuration file and the wiki folder:
@@ -41,7 +80,9 @@ storage and git architecture are specified in [docs/sync-protocol.md](docs/sync-
 | Method | Path           | Description                                  |
 |--------|----------------|----------------------------------------------|
 | GET    | /alive         | Liveness probe endpoint                      |
-| GET    | /mkdocs/config | Retrieve the `mkdocsrest.yaml` configuration |
+| GET    | /mkdocs/config | Retrieve the MkDocs configuration (`mkdocs.yml`) |
+| GET    | /auth/whoami   | The authenticated user                       |
+| POST   | /auth/ws-ticket | A single-use websocket ticket (60 s)        |
 
 ### Sections
 

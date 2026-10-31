@@ -5,15 +5,35 @@ server:
   # Port the REST API server should listen on
   # (optional) defaults to 7413
   port: 7413
-  # (optional) Basic authentication credentials
-  basicAuth:
-    # (optional) Username
-    user: "mkdocsrest"
-    # (optional) Password
-    password: "mypassword"
+  # (optional) Users that may access the backend. Without any user (and without basicAuth),
+  # authentication is off and everyone has full access.
+  auth:
+    users:
+      # Username for HTTP basic auth
+      - username: "markus"
+        # bcrypt hash of the password, create it with: mkdocsrest hash-password
+        passwordHash: "$2a$12$replace.with.the.output.of.mkdocsrest.hash-password"
+        # (optional) Name shown to other users and used as git author name, defaults to the username
+        displayName: "Markus"
+        # (optional) Email for git commits
+        email: "markus@example.com"
+        # (optional) admin, editor or reader, defaults to editor
+        role: "admin"
+        # (optional) Colour of the user's cursor, derived from the username by default
+        color: "#e8590c"
+      - username: "kid"
+        passwordHash: "$2a$12$replace.with.the.output.of.mkdocsrest.hash-password"
+        role: "reader"
+  # (optional, deprecated) The old single-user configuration with a plain-text password.
+  # It still works; this user is an admin. Prefer server.auth.users.
+  #basicAuth:
+  #  user: "mkdocsrest"
+  #  password: "mypassword"
   # (optional) Cross-origin resource sharing (CORS) configuration
   cors:
-    # (optional) List of allowed origins
+    # (optional) Origins of web clients. With origins listed, browsers may send credentials from
+    # them, and websocket upgrades from other origins are refused. Without, every origin is
+    # allowed but browsers send no credentials cross-origin.
     allowedOrigins:
       - "https://wiki.mycompany.com"
     # (optional) List of allowed methods
