@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,27 @@ func (rs *RestService) commitTree(c echo.Context, format string, absPaths ...str
 	rs.git.CommitTreeChange(UserFromContext(c), fmt.Sprintf(format, args...), rels...)
 }
 
+// unescapePathParams decodes percent-encoded path parameters. Echo matches routes on the raw
+// path when it contains escapes, so "Strand%20(2).png" would otherwise arrive as is.
+func unescapePathParams(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		values := c.ParamValues()
+		decoded := make([]string, len(values))
+		for i, v := range values {
+			d, err := url.PathUnescape(v)
+			if err != nil {
+				return c.JSONPretty(http.StatusBadRequest, &ErrorResult{
+					Name:    "Bad Request",
+					Message: "invalid percent-encoding in the path",
+				}, indentationChar)
+			}
+			decoded[i] = d
+		}
+		c.SetParamValues(decoded...)
+		return next(c)
+	}
+}
+
 func (rs *RestService) createRestService() *echo.Echo {
 	echoRest := echo.New()
 	echoRest.HideBanner = true
@@ -136,6 +158,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	// global auth
 	echoRest.Use(rs.authMiddleware)
+	echoRest.Use(unescapePathParams)
 
 	echoRest.GET(EndpointPathWhoAmI, rs.whoAmI)
 	echoRest.POST(EndpointPathWsTicket, rs.issueWsTicket)
