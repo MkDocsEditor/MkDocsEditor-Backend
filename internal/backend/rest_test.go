@@ -227,6 +227,31 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 		t.Errorf("uploaded content = %q", b)
 	}
 
+	// percent-encoded names are decoded, also without the trailing slash
+	for _, tc := range []struct{ path, name string }{
+		{"/resource/" + RootSectionID + "/Strand%20(2).png/", "Strand (2).png"},
+		{"/resource/" + RootSectionID + "/Gr%C3%BC%C3%9Fe%20%C3%A4.txt", "Grüße ä.txt"},
+	} {
+		body.Reset()
+		mw = multipart.NewWriter(&body)
+		_ = mw.WriteField("file", "x")
+		_ = mw.Close()
+		rec = e.do(http.MethodPost, tc.path, &body, mw.FormDataContentType())
+		expectStatus(t, rec, http.StatusOK)
+		if got := decode[Resource](t, rec); got.Name != tc.name {
+			t.Errorf("resource name %q, want %q", got.Name, tc.name)
+		}
+		if _, err := os.Stat(filepath.Join(e.project, "docs", tc.name)); err != nil {
+			t.Errorf("file %q: %v", tc.name, err)
+		}
+	}
+	body.Reset()
+	mw = multipart.NewWriter(&body)
+	_ = mw.WriteField("file", "x")
+	_ = mw.Close()
+	// an encoded slash decodes into the name and is rejected, not used as a folder
+	expectStatus(t, e.do(http.MethodPost, "/resource/"+RootSectionID+"/a%2Fb.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
+
 	// missing field
 	body.Reset()
 	mw = multipart.NewWriter(&body)
