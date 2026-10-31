@@ -124,6 +124,7 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET | `/document/{id}/history/{revision}/content/` | The text at a revision |
 | GET | `/document/{id}/history/diff/?from=&to=` | Unified diff between revisions (`current` is the live text) |
 | POST | `/document/{id}/history/{revision}/restore/` | Restore a revision as a normal edit |
+| GET | `/events/ws/` | Events websocket: tree changes and who has which document open |
 | GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
 | POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
 | GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`), delete |

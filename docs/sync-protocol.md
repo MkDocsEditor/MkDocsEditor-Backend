@@ -7,8 +7,7 @@ documents and commits them to git.
 
 Status: **version 1**. Implemented: authentication, roles, the document websocket,
 presence, authorship, persistence, external changes, readers, rename and delete, git
-integration and revision history. Not yet implemented: the events websocket (future
-work in section 6). The REST API reference is
+integration, revision history and the events websocket. The REST API reference is
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
@@ -388,8 +387,34 @@ Presence is ephemeral. The server relays it and never stores it.
 - One user can have several connections (two devices, two tabs). The list of online
   users is the set of distinct usernames in the presence list.
 
-Future work: an events websocket (`/events/ws/`) that pushes tree changes
-(create/rename/delete) and "who is in which document" for the file browser.
+### Events websocket
+
+`GET /events/ws/` pushes changes for the file browser. It authenticates like the
+document websocket: a basic auth header on the upgrade request, or a ticket in the
+first message. The first message is always `hello`:
+
+```json
+{ "type": "hello", "ticket": "<optional ticket>", "client": "web 1.0" }
+```
+
+Every role may connect. The server then sends:
+
+- `{"type": "online", "documents": [{"documentId": "…", "users": [{"username", "displayName", "color"}]}]}`:
+  the users connected to each document. Each user is listed once per document, even
+  with several connections, and documents without users are left out. The server
+  sends this list right after `hello` and again whenever someone opens or leaves a
+  document (collected for 100 ms). Each message is the complete list, so the client
+  replaces its copy.
+- `{"type": "tree-changed"}`: the tree changed (create, rename, delete, upload, or a
+  change on disk). The client fetches the tree (`GET /section/`) again. Events can be lost
+  while a client is disconnected, so the client also fetches the tree after every
+  (re)connect.
+- `{"type": "heartbeat"}`, as on the document websocket.
+
+The client sends `{"type": "heartbeat"}` at least every 5 seconds. Without any
+message for 15 seconds the server closes with 4008. Other client messages are
+ignored. Close codes are those of the document websocket (4001 without valid
+authentication, 4400 for a bad first message, 1001 on shutdown).
 
 ## 7. Authorship
 
