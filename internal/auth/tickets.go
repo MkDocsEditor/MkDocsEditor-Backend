@@ -17,8 +17,9 @@ const (
 )
 
 type ticket struct {
-	user    *User
-	expires time.Time
+	user      *User
+	sessionID string
+	expires   time.Time
 }
 
 type cachedVerification struct {
@@ -27,8 +28,10 @@ type cachedVerification struct {
 	expires time.Time
 }
 
-// IssueTicket creates a single-use websocket ticket for the given user
-func (s *Service) IssueTicket(user *User) (string, time.Time, error) {
+// IssueTicket creates a single-use websocket ticket for the given user. sessionID is the
+// session the ticket is issued for (empty for other authentication methods); the ticket is
+// refused when that session has ended.
+func (s *Service) IssueTicket(user *User, sessionID string) (string, time.Time, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", time.Time{}, err
@@ -44,31 +47,36 @@ func (s *Service) IssueTicket(user *User) (string, time.Time, error) {
 			delete(s.tickets, k)
 		}
 	}
-	s.tickets[value] = ticket{user: user, expires: expires}
+	s.tickets[value] = ticket{user: user, sessionID: sessionID, expires: expires}
 	return value, expires, nil
 }
 
 // ErrInvalidTicket is returned for unknown, used or expired tickets
 var ErrInvalidTicket = errors.New("invalid or expired ticket")
 
-// RedeemTicket returns the user of a ticket and invalidates it. The user is read again, so a
-// disabled account or a changed role is taken into account.
-func (s *Service) RedeemTicket(value string) (*User, error) {
+// RedeemTicket returns the user and the session id of a ticket and invalidates it. The
+// user is read again, so a disabled account or a changed role is taken into account.
+func (s *Service) RedeemTicket(value string) (*User, string, error) {
 	s.ticketsMu.Lock()
 	t, ok := s.tickets[value]
 	delete(s.tickets, value)
 	s.ticketsMu.Unlock()
 	if !ok || !s.now().Before(t.expires) {
-		return nil, ErrInvalidTicket
+		return nil, "", ErrInvalidTicket
 	}
 	if t.user.ID == AnonymousID {
-		return t.user, nil
+		return t.user, "", nil
 	}
 	u := s.UserByID(t.user.ID)
 	if u == nil || u.Status != StatusActive {
-		return nil, ErrInvalidTicket
+		return nil, "", ErrInvalidTicket
 	}
-	return u, nil
+	if t.sessionID != "" {
+		if sess, err := s.SessionByID(t.sessionID); err != nil || sess.AccountID != u.ID || !s.now().Before(sess.IdleExpiresAt) {
+			return nil, "", ErrInvalidTicket
+		}
+	}
+	return u, t.sessionID, nil
 }
 
 // AuthenticateBasic checks a username and password for HTTP basic auth. It returns the
@@ -99,6 +107,10 @@ func (s *Service) AuthenticateBasic(username, password string) *User {
 
 	ok, rehash := VerifyPassword(hash, password)
 	if !ok {
+		return nil
+	}
+	// accounts with a second factor cannot use their password for basic auth
+	if len(s.secondFactorMethods(u.ID)) > 0 {
 		return nil
 	}
 	if rehash {

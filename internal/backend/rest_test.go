@@ -29,9 +29,20 @@ type restTestEnv struct {
 // newRestTestEnv creates a test wiki, applies the configuration changes and starts a RestService
 func newRestTestEnv(t *testing.T, configure ...func(c *configuration.Configuration)) *restTestEnv {
 	t.Helper()
+	return newRestTestEnvWithAuth(t, false, configure...)
+}
+
+// newRestTestEnvWithAuth is newRestTestEnv; without users in the configuration,
+// authentication is off unless accounts is true (setup mode)
+func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *configuration.Configuration)) *restTestEnv {
+	t.Helper()
 	project := newTestWiki(t)
 	for _, f := range configure {
 		f(&configuration.CurrentConfig)
+	}
+	if srv := &configuration.CurrentConfig.Server; !accounts && len(srv.Auth.Users) == 0 && srv.BasicAuth.User == "" {
+		// tests without users run without authentication, like before the account system
+		srv.Auth.Disabled = true
 	}
 	tm := NewTreeManager()
 	authenticator := newTestAuthenticator(t, filepath.Join(project, ".mkdocseditor"))
@@ -363,7 +374,8 @@ func TestRestNoWWWAuthenticateForScripts(t *testing.T) {
 
 func TestRestWsTicket(t *testing.T) {
 	e := newMultiUserEnv(t)
-	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusUnauthorized)
+	// without credentials: the CSRF check comes first (no X-Requested-With)
+	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusForbidden)
 
 	e.user, e.pass = "markus", "pw-markus"
 	rec := e.do(http.MethodPost, "/auth/ws-ticket/", nil, "")
@@ -372,11 +384,11 @@ func TestRestWsTicket(t *testing.T) {
 	if len(ticket.Ticket) < 32 || ticket.ExpiresAt.IsZero() {
 		t.Fatalf("ticket = %+v", ticket)
 	}
-	user, err := e.rs.authenticator.RedeemTicket(ticket.Ticket)
+	user, _, err := e.rs.authenticator.RedeemTicket(ticket.Ticket)
 	if err != nil || user.Username != "markus" || user.ID == "" {
 		t.Fatalf("redeem: %v %v", user, err)
 	}
-	if _, err = e.rs.authenticator.RedeemTicket(ticket.Ticket); err == nil {
+	if _, _, err = e.rs.authenticator.RedeemTicket(ticket.Ticket); err == nil {
 		t.Error("ticket could be used twice")
 	}
 }

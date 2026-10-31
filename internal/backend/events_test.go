@@ -27,7 +27,7 @@ func dialEvents(t *testing.T, e *syncEnv, user string, useTicket bool) *eventsCl
 	header := http.Header{}
 	hello := map[string]any{"type": "hello", "client": "test"}
 	if useTicket {
-		ticket, _, err := e.authn.IssueTicket(e.authn.UserByUsername(user))
+		ticket, _, err := e.authn.IssueTicket(e.authn.UserByUsername(user), "")
 		if err != nil {
 			t.Fatal(err)
 		}

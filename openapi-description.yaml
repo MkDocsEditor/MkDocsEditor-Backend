@@ -13,22 +13,32 @@ info:
     resources are derived from their path, so they change when an item (or a section
     above it) is renamed. The root section has the id `root`.
 
-    Every endpoint except `GET /alive/` requires HTTP basic auth when users are configured.
-    Users with the role `reader` get `403` on every method except `GET`, `HEAD` and
-    `POST /auth/ws-ticket/`. Requests with the header `X-Requested-With` get no
-    `WWW-Authenticate` header on a `401`.
+    Accounts, sessions and the login flows are specified in
+    [docs/auth.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/auth.md).
+    Requests authenticate with the session cookie (web), `Authorization: Bearer mds_…`
+    (Android) or, during the transition, HTTP basic auth (`server.auth.legacyBasicAuth`).
+    Every request with a method other than `GET`/`HEAD`/`OPTIONS` and without an
+    `Authorization` header must send `X-Requested-With`, and an `Origin` header must be an
+    allowed origin (CSRF protection). Users with the role `reader` get `403` when they try to
+    change content. Error responses carry a machine-readable `code`.
   license:
     name: "AGPL-3.0-or-later"
     url: "https://www.gnu.org/licenses/agpl-3.0.html"
 servers:
   - url: "http://localhost:7413"
 security:
+  - cookieAuth: []
+  - bearerAuth: []
   - basicAuth: []
 tags:
   - name: Status
     description: "Health"
   - name: Auth
-    description: "Users, websocket tickets and the Automerge actor map"
+    description: "Login, links, websocket tickets and the Automerge actor map"
+  - name: Account
+    description: "The signed-in user's own account (sessions only)"
+  - name: Admin
+    description: "User administration (admin sessions only)"
   - name: MkDocs
     description: "The MkDocs project"
   - name: Sections
@@ -54,7 +64,7 @@ paths:
   /auth/whoami/:
     get:
       summary: "The authenticated user"
-      description: "Without configured users, this is the user `anonymous` with the role `admin`."
+      description: "With `server.auth.disabled`, this is the user `anonymous` with the role `admin`."
       operationId: whoAmI
       tags: [ Auth ]
       responses:
@@ -63,7 +73,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/WhoAmI"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -85,6 +95,236 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /auth/status/:
+    get:
+      summary: "Authentication status of the server"
+      description: "What a client needs before the login: setup mode, passkeys, password rules."
+      operationId: authStatus
+      tags: [ Auth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The status"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /auth/login/:
+    post:
+      summary: "Log in with username and password"
+      description: |
+        Returns a session, or a challenge when the account has a second factor. Wrong
+        usernames and passwords give the same `invalid-credentials` error. Rate limited per
+        IP and per account.
+      operationId: login
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: "A session (`status: ok`) or a second factor challenge (`status: second-factor-required`)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SessionResponse"
+                  - $ref: "#/components/schemas/SecondFactorRequired"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/logout/:
+    post:
+      summary: "End the current session"
+      operationId: logout
+      tags: [ Auth ]
+      responses:
+        "204":
+          description: "The session ended, the cookie is cleared"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /auth/link/inspect/:
+    post:
+      summary: "Look at a setup, invite or reset link"
+      operationId: inspectLink
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkTokenRequest"
+      responses:
+        "200":
+          description: "The pending link"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkInspection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/link/redeem/:
+    post:
+      summary: "Redeem a link with a password"
+      description: |
+        Setup and invite links create an account (username, display name, password). Reset
+        links set a new password and revoke all sessions of the account. The response is a
+        session of the account.
+      operationId: redeemLink
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkRedeemRequest"
+      responses:
+        "200":
+          description: "A session"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /account/sessions/:
+    get:
+      summary: "The sessions of the signed-in user"
+      operationId: listAccountSessions
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "Active sessions, the current one first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/sessions/{sessionId}/:
+    parameters:
+      - $ref: "#/components/parameters/sessionId"
+    delete:
+      summary: "End one of the own sessions"
+      operationId: revokeAccountSession
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "The session ended"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/sessions/revoke-others/:
+    post:
+      summary: "End all other sessions"
+      operationId: revokeOtherSessions
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "How many sessions ended"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revoked"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/invites/:
+    get:
+      summary: "List invites"
+      operationId: listInvites
+      tags: [ Admin ]
+      parameters:
+        - $ref: "#/components/parameters/linkStatus"
+      responses:
+        "200":
+          description: "Invites, newest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Link"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: "Create an invite"
+      operationId: createInvite
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInviteRequest"
+      responses:
+        "200":
+          description: "The invite with its token and link (shown only now)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedLink"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/invites/{linkId}/:
+    parameters:
+      - $ref: "#/components/parameters/linkId"
+    delete:
+      summary: "Revoke an invite"
+      operationId: revokeInvite
+      tags: [ Admin ]
+      responses:
+        "204":
+          description: "Revoked (or already used, expired or revoked)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /actors/:
     get:
@@ -670,9 +910,19 @@ paths:
 
 components:
   securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: "__Host-mkdocseditor_session"
+      description: "Session cookie of the web client (`mkdocseditor_session` over plain HTTP)"
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "A session token (`mds_…`) of a native client"
     basicAuth:
       type: http
       scheme: basic
+      description: "Only with `server.auth.legacyBasicAuth` (transition)"
 
   parameters:
     sectionId:
@@ -704,6 +954,28 @@ components:
       description: "Id of a resource"
       schema:
         type: string
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: "Id of a session"
+      schema:
+        type: string
+    linkId:
+      name: linkId
+      in: path
+      required: true
+      description: "Id of a link"
+      schema:
+        type: string
+    linkStatus:
+      name: status
+      in: query
+      required: false
+      description: "Only links in this state"
+      schema:
+        type: string
+        enum: [ pending, used, expired, revoked ]
     force:
       name: force
       in: query
@@ -714,6 +986,16 @@ components:
         default: false
 
   responses:
+    TooManyRequests:
+      description: "Rate limited; retry after the `Retry-After` header (seconds)"
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     BadRequest:
       description: "Invalid request, for example a name with a slash or a leading dot"
       content:
@@ -858,6 +1140,291 @@ components:
           type: string
           example: "#1971c2"
 
+    WhoAmI:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [ authMethod, secondFactorSetupRequired ]
+          properties:
+            authMethod:
+              type: string
+              enum: [ session, app-token, basic, anonymous ]
+            secondFactorSetupRequired:
+              type: boolean
+              description: "The instance requires 2FA and this account has none yet: only the 2FA setup endpoints work"
+            sessionId:
+              type: string
+
+    UserWithSetupState:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [ secondFactorSetupRequired ]
+          properties:
+            secondFactorSetupRequired:
+              type: boolean
+
+    AuthStatus:
+      type: object
+      required: [ setupRequired, authDisabled, passkeys, passwordPolicy, legacyBasicAuth ]
+      properties:
+        setupRequired:
+          type: boolean
+          description: "No account exists; the first admin is created with a setup link"
+        authDisabled:
+          type: boolean
+        passkeys:
+          type: object
+          required: [ enabled ]
+          properties:
+            enabled:
+              type: boolean
+            rpId:
+              type: string
+        passwordPolicy:
+          type: object
+          required: [ minLength, maxLength ]
+          properties:
+            minLength:
+              type: integer
+            maxLength:
+              type: integer
+        legacyBasicAuth:
+          type: boolean
+
+    SessionFields:
+      type: object
+      properties:
+        sessionType:
+          type: string
+          enum: [ cookie, bearer ]
+          default: cookie
+          description: "`cookie` sets the HttpOnly session cookie, `bearer` returns the token"
+        deviceName:
+          type: string
+          maxLength: 64
+
+    LoginRequest:
+      allOf:
+        - $ref: "#/components/schemas/SessionFields"
+        - type: object
+          required: [ username, password ]
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+              format: password
+
+    LinkTokenRequest:
+      type: object
+      required: [ token ]
+      properties:
+        token:
+          type: string
+          description: "The link token (`mdl_…`) from the link fragment"
+
+    LinkRedeemRequest:
+      allOf:
+        - $ref: "#/components/schemas/SessionFields"
+        - type: object
+          required: [ token, password ]
+          properties:
+            token:
+              type: string
+            username:
+              type: string
+              description: "Setup and invite links only"
+            displayName:
+              type: string
+              description: "Setup and invite links only, defaults to the username"
+            password:
+              type: string
+              format: password
+
+    LinkInspection:
+      type: object
+      required: [ kind, expiresAt ]
+      properties:
+        kind:
+          type: string
+          enum: [ setup, invite, reset ]
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        note:
+          type: string
+        username:
+          type: string
+          description: "Reset links: the account"
+        displayName:
+          type: string
+        resetSecondFactors:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+
+    Session:
+      type: object
+      required: [ id, type, deviceName, userAgent, ip, createdAt, lastUsedAt, expiresAt, idleExpiresAt, current ]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [ cookie, bearer ]
+        deviceName:
+          type: string
+        userAgent:
+          type: string
+        ip:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: "Absolute expiry"
+        idleExpiresAt:
+          type: string
+          format: date-time
+          description: "Expiry if the session is not used"
+        current:
+          type: boolean
+
+    SessionResponse:
+      type: object
+      required: [ status, user, session ]
+      properties:
+        status:
+          type: string
+          enum: [ ok ]
+        user:
+          $ref: "#/components/schemas/UserWithSetupState"
+        session:
+          $ref: "#/components/schemas/Session"
+        token:
+          type: string
+          description: "Bearer sessions only: the session token (`mds_…`)"
+
+    SecondFactorRequired:
+      type: object
+      required: [ status, challenge, methods, expiresAt ]
+      properties:
+        status:
+          type: string
+          enum: [ second-factor-required ]
+        challenge:
+          type: string
+          description: "Login challenge (`mdc_…`), valid 5 minutes and 5 attempts"
+        methods:
+          type: array
+          items:
+            type: string
+            enum: [ totp, recovery-code, passkey ]
+        expiresAt:
+          type: string
+          format: date-time
+
+    Revoked:
+      type: object
+      required: [ revoked ]
+      properties:
+        revoked:
+          type: integer
+
+    Link:
+      type: object
+      required: [ id, kind, note, accountId, resetSecondFactors, createdBy, createdAt, expiresAt, usedAt, usedBy, revokedAt, status ]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [ setup, invite, reset ]
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        note:
+          type: string
+        accountId:
+          type: string
+          nullable: true
+        resetSecondFactors:
+          type: boolean
+        createdBy:
+          type: object
+          nullable: true
+          required: [ id ]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        usedAt:
+          type: string
+          format: date-time
+          nullable: true
+        usedBy:
+          type: object
+          nullable: true
+          required: [ id ]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [ pending, used, expired, revoked ]
+
+    CreateInviteRequest:
+      type: object
+      required: [ role ]
+      properties:
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        expiresInHours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          description: "Default 168 (7 days)"
+        note:
+          type: string
+          maxLength: 200
+
+    CreatedLink:
+      type: object
+      required: [ token, url ]
+      properties:
+        invite:
+          $ref: "#/components/schemas/Link"
+        link:
+          $ref: "#/components/schemas/Link"
+        token:
+          type: string
+          description: "The link token, returned only once"
+        url:
+          type: string
+          nullable: true
+          description: "`{clientUrl}/{kind}#{token}`, null without `server.auth.clientUrl`"
+
     Ticket:
       type: object
       required: [ ticket, expiresAt ]
@@ -967,5 +1534,12 @@ components:
         name:
           type: string
           example: "Not found"
+        code:
+          type: string
+          description: "Machine-readable error code, see docs/auth.md section 10"
+          example: "not-found"
         message:
           type: string
+        details:
+          type: object
+          additionalProperties: true

@@ -126,8 +126,12 @@ func TestImportAndBasicAuth(t *testing.T) {
 
 func TestNoUsers(t *testing.T) {
 	a := openTest(t, t.TempDir(), configuration.ServerConfiguration{})
-	if a.Enabled() {
-		t.Error("authentication enabled without users")
+	if !a.Enabled() || !a.SetupRequired() {
+		t.Error("without users the server must wait for the setup")
+	}
+	off := openTest(t, t.TempDir(), configuration.ServerConfiguration{Auth: configuration.AuthConfiguration{Disabled: true}})
+	if off.Enabled() || off.SetupRequired() {
+		t.Error("auth.disabled must turn authentication off")
 	}
 	if Anonymous().Role != RoleAdmin || a.UserByID(AnonymousID).Username != AnonymousUsername {
 		t.Error("anonymous user must be able to write when authentication is off")
@@ -224,29 +228,29 @@ func TestTickets(t *testing.T) {
 	a.now = func() time.Time { return now }
 	user := a.UserByUsername("markus")
 
-	ticket, expires, err := a.IssueTicket(user)
+	ticket, expires, err := a.IssueTicket(user, "")
 	if err != nil || !expires.Equal(now.Add(TicketLifetime)) {
 		t.Fatal(err, expires)
 	}
-	if u, err := a.RedeemTicket(ticket); err != nil || u.ID != user.ID {
+	if u, _, err := a.RedeemTicket(ticket); err != nil || u.ID != user.ID {
 		t.Fatal("redeem failed", err)
 	}
-	if _, err := a.RedeemTicket(ticket); err == nil {
+	if _, _, err := a.RedeemTicket(ticket); err == nil {
 		t.Error("ticket redeemed twice")
 	}
 
-	ticket, _, _ = a.IssueTicket(user)
+	ticket, _, _ = a.IssueTicket(user, "")
 	now = now.Add(TicketLifetime)
-	if _, err := a.RedeemTicket(ticket); err == nil {
+	if _, _, err := a.RedeemTicket(ticket); err == nil {
 		t.Error("expired ticket accepted")
 	}
-	if _, err := a.RedeemTicket("made-up"); err == nil {
+	if _, _, err := a.RedeemTicket("made-up"); err == nil {
 		t.Error("unknown ticket accepted")
 	}
-	if ticket, _, _ = a.IssueTicket(Anonymous()); ticket == "" {
+	if ticket, _, _ = a.IssueTicket(Anonymous(), ""); ticket == "" {
 		t.Fatal("no ticket")
 	}
-	if u, err := a.RedeemTicket(ticket); err != nil || u.ID != AnonymousID {
+	if u, _, err := a.RedeemTicket(ticket); err != nil || u.ID != AnonymousID {
 		t.Error("anonymous ticket", u, err)
 	}
 }

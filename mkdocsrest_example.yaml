@@ -5,15 +5,41 @@ server:
   # Port the REST API server should listen on
   # (optional) defaults to 7413
   port: 7413
-  # (optional) Users that may access the backend. Without any user (and without basicAuth),
-  # authentication is off and everyone has full access.
-  # These users are imported once into the account database (<stateDir>/auth.db) on the first
-  # start; afterwards this list is ignored. See docs/auth.md.
+  # (optional) Addresses of reverse proxies (CIDRs or single IPs) whose X-Forwarded-For and
+  # X-Forwarded-Proto headers are trusted. Default: none, the TCP peer is the client.
+  #trustedProxies:
+  #  - "10.42.0.0/16"
+  # (optional) Accounts and login, see docs/auth.md. Accounts live in <stateDir>/auth.db.
+  # Without any account, the backend starts in setup mode and prints a setup link for the
+  # first admin (again with: mkdocsrest setup-link). Further users join by invite links.
   auth:
+    # (optional) The web client, used to build setup, invite and reset links and as the
+    # default passkey origin and RP ID. Without it, only the tokens are shown.
+    clientUrl: "https://edit.wiki.mycompany.com"
+    # (optional) Accept HTTP basic auth with account passwords (accounts without a second
+    # factor). Only for the transition from the old configuration. Default: true for now.
+    #legacyBasicAuth: false
+    # (optional) Session lifetimes. Defaults: 720h idle, 2160h absolute
+    #sessionIdleTimeout: "720h"
+    #sessionMaxLifetime: "2160h"
+    # (optional) Secure flag of the session cookie: auto (HTTPS, directly or through a
+    # trusted proxy), always or never. Default: auto
+    #cookieSecure: "auto"
+    # (optional) Login rate limits, defaults shown. disabled: true is for automated tests only.
+    #rateLimits:
+    #  disabled: false
+    #  perIpBurst: 20
+    #  perIpRefill: "6s"
+    #  accountFailuresBeforeBackoff: 5
+    #  maxBackoff: "15m"
+    # (optional) Development only: no authentication, every request is the anonymous admin.
+    #disabled: false
+    # (optional, deprecated) Users of earlier versions. They are imported once into the
+    # account database on the first start; afterwards this list is ignored and can go.
     users:
-      # Username for HTTP basic auth
       - username: "markus"
-        # bcrypt hash of the password, create it with: mkdocsrest hash-password
+        # bcrypt hash of the password (from mkdocsrest hash-password); it is replaced by an
+        # Argon2id hash on the first login
         passwordHash: "$2a$12$replace.with.the.output.of.mkdocsrest.hash-password"
         # (optional) Name shown to other users and used as git author name, defaults to the username
         displayName: "Markus"
@@ -23,11 +49,8 @@ server:
         role: "admin"
         # (optional) Colour of the user's cursor, derived from the username by default
         color: "#e8590c"
-      - username: "kid"
-        passwordHash: "$2a$12$replace.with.the.output.of.mkdocsrest.hash-password"
-        role: "reader"
   # (optional, deprecated) The old single-user configuration with a plain-text password.
-  # It still works; this user is an admin. Prefer server.auth.users.
+  # Only read for the one-time import; this user becomes an admin.
   #basicAuth:
   #  user: "mkdocsrest"
   #  password: "mypassword"

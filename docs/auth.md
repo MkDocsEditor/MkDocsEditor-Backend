@@ -842,9 +842,11 @@ requests for the RP ID host reach the backend. Two ways:
    it needs `exclude_docs` adjusted or the file added by the web server / ingress.
 
 Android **App Links** for the invite, setup and reset links (`https://edit.wiki.…/invite`)
-are separate: they need the same file (with `handle_all_urls`) on the **client** host,
-`https://edit.wiki.markusressel.de/.well-known/assetlinks.json`. The same ingress
-route works for that host. Without App Links, the user opens the link in the browser
+are separate: they need the same file on the **client** host,
+`https://edit.wiki.markusressel.de/.well-known/assetlinks.json`, with both relations:
+`handle_all_urls` for the App Links and `get_login_creds`, so password managers and
+Credential Manager offer the passwords saved for the web client in the app as well
+(and the other way round). The same ingress route works for that host. Without App Links, the user opens the link in the browser
 (web client) or pastes it into the app; the app reads the token from the fragment.
 
 ## 13. Configuration
@@ -864,7 +866,8 @@ server:
     # passkey origin and RP ID.
     clientUrl: "https://edit.wiki.markusressel.de"
     # Accept HTTP Basic (username + password of accounts without a second factor, or
-    # username + app token). Only for the transition from server.auth.users. Default: false.
+    # username + app token). Only for the transition from server.auth.users. Default: true
+    # until the web and Android clients use sessions, then false.
     legacyBasicAuth: false
     # Session lifetimes (Go durations).
     sessionIdleTimeout: "720h"   # 30 days

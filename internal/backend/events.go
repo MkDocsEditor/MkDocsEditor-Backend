@@ -39,7 +39,7 @@ func (s *SyncServer) HandleEventsWebsocket(c echo.Context) error {
 		return nil
 	}
 	ws.SetReadLimit(64 << 10)
-	conn := newWsConn(s, ws, UserFromContext(c))
+	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
 	go conn.writeLoop()
 	conn.runEvents()
 	return nil
@@ -78,12 +78,12 @@ func (c *wsConn) runEvents() {
 			c.fail(CloseUnauthorized, ErrCodeUnauthorized, "authentication required")
 			return
 		}
-		user, err := s.authenticator.RedeemTicket(hello.Ticket)
+		user, sessionID, err := s.authenticator.RedeemTicket(hello.Ticket)
 		if err != nil {
 			c.fail(CloseUnauthorized, ErrCodeUnauthorized, err.Error())
 			return
 		}
-		c.user = user
+		c.user, c.sessionID = user, sessionID
 	}
 
 	s.eventsMu.Lock()

@@ -117,7 +117,61 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 	})
 	go s.treeWorker()
 	go s.eventsWorker()
+	authenticator.OnRevoke(s.onRevoke)
 	return s, nil
+}
+
+// sessionIDFromContext returns the id of the session that authenticated a request, or ""
+func sessionIDFromContext(c echo.Context) string {
+	if sess := SessionFromContext(c); sess != nil {
+		return sess.ID
+	}
+	return ""
+}
+
+// onRevoke closes the websockets of ended sessions, disabled accounts and changed roles
+func (s *SyncServer) onRevoke(e auth.RevokeEvent) {
+	match := func(c *wsConn) bool {
+		if c.user == nil || c.user.ID != e.AccountID {
+			return false
+		}
+		switch {
+		case e.SessionID != "":
+			return c.sessionID == e.SessionID
+		case e.ExceptSessionID != "":
+			return c.sessionID != e.ExceptSessionID
+		}
+		return true
+	}
+	code, reason := CloseUnauthorized, "session ended"
+	switch e.Reason {
+	case auth.RevokeDisabled:
+		reason = "account disabled"
+	case auth.RevokeRole:
+		code, reason = CloseForbidden, "role changed"
+	}
+	var conns []*wsConn
+	s.mu.Lock()
+	for _, session := range s.sessions {
+		session.mu.Lock()
+		for c := range session.conns {
+			if match(c) {
+				conns = append(conns, c)
+			}
+		}
+		session.mu.Unlock()
+	}
+	s.mu.Unlock()
+	s.eventsMu.Lock()
+	for c := range s.eventConns {
+		if match(c) {
+			conns = append(conns, c)
+		}
+	}
+	s.eventsMu.Unlock()
+	for _, c := range conns {
+		c.fail(code, ErrCodeUnauthorized, reason)
+	}
 }
 
 // checkOrigin allows websocket upgrades from the configured CORS origins and from clients
@@ -471,7 +525,7 @@ func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
 	}
 	ws.SetReadLimit(maxMessageSize)
 
-	conn := newWsConn(s, ws, UserFromContext(c))
+	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
 	go conn.writeLoop()
 	conn.run(documentID)
 	return nil
@@ -586,6 +640,9 @@ type wsConn struct {
 	ws       *websocket.Conn
 	user     *auth.User
 	clientID string
+	// sessionID is the session the connection authenticated with, if any. user and
+	// sessionID are set before the connection is added to a session or the events list.
+	sessionID string
 
 	outgoing   chan outgoingMessage
 	closeOnce  mutexSync.Once
@@ -607,11 +664,12 @@ type outgoingMessage struct {
 	reason    string
 }
 
-func newWsConn(s *SyncServer, ws *websocket.Conn, user *auth.User) *wsConn {
+func newWsConn(s *SyncServer, ws *websocket.Conn, user *auth.User, sessionID string) *wsConn {
 	return &wsConn{
 		server:     s,
 		ws:         ws,
 		user:       user,
+		sessionID:  sessionID,
 		clientID:   fmt.Sprintf("c-%d", s.clientCounter.Add(1)),
 		outgoing:   make(chan outgoingMessage, sendQueueSize),
 		done:       make(chan struct{}),
@@ -732,12 +790,12 @@ func (c *wsConn) run(documentID string) {
 			c.fail(CloseUnauthorized, ErrCodeUnauthorized, "authentication required")
 			return
 		}
-		user, err := c.server.authenticator.RedeemTicket(hello.Ticket)
+		user, sessionID, err := c.server.authenticator.RedeemTicket(hello.Ticket)
 		if err != nil {
 			c.fail(CloseUnauthorized, ErrCodeUnauthorized, err.Error())
 			return
 		}
-		c.user = user
+		c.user, c.sessionID = user, sessionID
 	}
 	if _, err = c.server.actors.Bind(hello.ActorID, c.user.ID); err != nil {
 		if errors.Is(err, ErrForeignActor) {
