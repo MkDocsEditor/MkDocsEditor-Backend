@@ -96,8 +96,9 @@ uses actor ids to attribute changes to users, so they follow these rules:
   - When a client persists its copy for offline use, it persists the actor id with
     it and keeps using that pair. One copy, one actor.
 - The client sends the actor id of its copy in the `hello` message. On first use the
-  server **binds** the actor id to the authenticated user and stores the binding
-  durably (`actors.json` in the state directory, see [Storage](#9-storage)). The
+  server **binds** the actor id to the authenticated user's account id and stores the
+  binding durably (in the account database `auth.db` in the state directory, see
+  [Storage](#9-storage); older versions used `actors.json`, which is imported once). The
   binding survives restarts and epochs and is never removed. A user can have any number
   of actor ids; authorship maps all of them to the user.
 - An actor id bound to another user is refused (close code `4003`).
@@ -120,8 +121,13 @@ connection joins (its actor) and when a new actor id appears in a document (a ne
 actor, or a `:disk` change). Entry:
 
 ```json
-{ "actorId": "5f3c…", "username": "markus", "displayName": "Markus", "color": "#e8590c" }
+{ "actorId": "5f3c…", "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa", "username": "markus", "displayName": "Markus", "color": "#e8590c" }
 ```
+
+`accountId` is the stable id of the account (empty for `:disk` and `:server`).
+`username` is the account's current username, which can change; clients that keep
+authorship or actor data should key it on `accountId`. Presence messages, `you`, the
+`online` list, authorship runs and history authors carry `accountId` as well.
 
 ## 3. Authentication
 
@@ -380,12 +386,12 @@ Presence is ephemeral. The server relays it and never stores it.
   cursor lookup: `"start"` resolves to 0, `"end"` to the current text length. A client
   may send them in other cases too (for example `"start"` for index 0 of a non-empty
   text), so receivers always handle both.
-- The server overwrites `clientId`, `username`, `displayName`, `color` and `actorId`
+- The server overwrites `clientId`, `accountId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
-  users is the set of distinct usernames in the presence list.
+  users is the set of distinct account ids in the presence list.
 
 ### Events websocket
 
@@ -480,7 +486,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
 
 ```
 .mkdocseditor/
-  actors.json                 actor id -> username bindings, never shrinks
+  auth.db                     accounts and actor id -> account bindings (SQLite, see auth.md)
   documents/
     <uuid>.automerge          Automerge save() of the document
     <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "diskBaseHeads": [...], "diskBaseHash": "…"}
@@ -589,7 +595,7 @@ Based on the git history of each file. Requires `git.enabled`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author":{"name","email","username"},"coAuthors":[…],"message","path"}]`. `path` is the file's path in that commit. `username` is empty for authors who are not configured users. |
+| `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author":{"name","email","username"},"coAuthors":[…],"message","path"}]`. `path` is the file's path in that commit. `username` (current username) and `accountId` are empty for authors who are not accounts. |
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
 | `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. |
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |

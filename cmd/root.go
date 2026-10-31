@@ -44,10 +44,14 @@ var rootCmd = &cobra.Command{
 		conf := configuration.CurrentConfig
 		treeManager := backend.NewTreeManager()
 
-		authenticator, err := auth.NewAuthenticator(conf.Server)
-		if err != nil {
-			log.Fatalf("Invalid authentication configuration: %v", err)
+		if err := backend.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
+			log.Fatalf("Invalid state directory: %v", err)
 		}
+		authenticator, err := auth.Open(auth.Options{StateDir: conf.MkDocs.StateDir, Server: conf.Server})
+		if err != nil {
+			log.Fatalf("Unable to open the account database: %v", err)
+		}
+		defer func() { _ = authenticator.Close() }()
 		if !authenticator.Enabled() {
 			_, _ = color.New(color.FgYellow).Println("WARNING: No users configured (server.auth.users), unauthorized access to all files in document path is possible!")
 		}

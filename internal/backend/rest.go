@@ -60,7 +60,7 @@ type (
 
 type RestService struct {
 	echoRest      *echo.Echo
-	authenticator *auth.Authenticator
+	authenticator *auth.Service
 	treeManager   *TreeManager
 	sync          *SyncServer
 	git           *GitCommitter
@@ -69,7 +69,7 @@ type RestService struct {
 func NewRestService(
 	treeManager *TreeManager,
 	syncServer *SyncServer,
-	authenticator *auth.Authenticator,
+	authenticator *auth.Service,
 ) *RestService {
 	rs := &RestService{
 		treeManager:   treeManager,

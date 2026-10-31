@@ -264,6 +264,11 @@ func newRandomID() string {
 }
 
 // checkStateDir makes sure the state directory is not inside the docs folder
+// CheckStateDir checks that the state directory is not inside the docs folder
+func CheckStateDir(stateDir string, docsDir string) error {
+	return checkStateDir(stateDir, docsDir)
+}
+
 func checkStateDir(stateDir string, docsDir string) error {
 	rel, err := filepath.Rel(docsDir, stateDir)
 	if err != nil {

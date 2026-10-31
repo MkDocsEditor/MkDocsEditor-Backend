@@ -9,10 +9,11 @@ import (
 
 // AuthorshipRun attributes the text range [Start, End) (Unicode code points) to an actor
 type AuthorshipRun struct {
-	Start    int    `json:"start"`
-	End      int    `json:"end"`
-	ActorID  string `json:"actorId"`
-	Username string `json:"username"`
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	ActorID   string `json:"actorId"`
+	AccountID string `json:"accountId"`
+	Username  string `json:"username"`
 }
 
 // Authorship is the response of GET /document/{id}/authorship/
@@ -61,8 +62,9 @@ func (a *authorshipState) advance(changes []*automerge.Change) error {
 	return nil
 }
 
-// result returns the runs with usernames
-func (a *authorshipState) result(owner func(actorID string) string) *Authorship {
+// result returns the runs with the users. owner returns the current username and the
+// account id of an actor.
+func (a *authorshipState) result(owner func(actorID string) (string, string)) *Authorship {
 	result := &Authorship{Heads: formatHeads(a.heads), Runs: []AuthorshipRun{}}
 	pos := 0
 	for _, r := range a.runs {
@@ -72,7 +74,8 @@ func (a *authorshipState) result(owner func(actorID string) string) *Authorship 
 		if n := len(result.Runs); n > 0 && result.Runs[n-1].ActorID == r.actor {
 			result.Runs[n-1].End += r.length
 		} else {
-			result.Runs = append(result.Runs, AuthorshipRun{Start: pos, End: pos + r.length, ActorID: r.actor, Username: owner(r.actor)})
+			username, accountID := owner(r.actor)
+			result.Runs = append(result.Runs, AuthorshipRun{Start: pos, End: pos + r.length, ActorID: r.actor, AccountID: accountID, Username: username})
 		}
 		pos += r.length
 	}
@@ -80,7 +83,7 @@ func (a *authorshipState) result(owner func(actorID string) string) *Authorship 
 }
 
 // computeAuthorship replays the whole history of a document
-func computeAuthorship(doc *automerge.Doc, owner func(actorID string) string) (*Authorship, error) {
+func computeAuthorship(doc *automerge.Doc, owner func(actorID string) (string, string)) (*Authorship, error) {
 	state, err := fullAuthorshipState(doc)
 	if err != nil {
 		return nil, err
@@ -157,7 +160,7 @@ func (s *SyncServer) Authorship(d *Document) (*Authorship, error) {
 			changes, err := session.doc.Changes(state.heads...)
 			if err == nil && len(changes) < 1000 {
 				if err = state.advance(changes); err == nil {
-					result = state.result(s.actors.Owner)
+					result = state.result(s.actorOwner)
 					return nil
 				}
 			}
@@ -187,5 +190,10 @@ func (s *SyncServer) Authorship(d *Document) (*Authorship, error) {
 		}
 		s.mu.Unlock()
 	}
-	return state.result(s.actors.Owner), nil
+	return state.result(s.actorOwner), nil
+}
+
+// actorOwner returns the current username and the account id of an actor
+func (s *SyncServer) actorOwner(actorID string) (string, string) {
+	return s.subjectUsername(s.actors.Owner(actorID))
 }

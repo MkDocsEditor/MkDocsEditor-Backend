@@ -43,7 +43,7 @@ type pendingEdits struct {
 // GitCommitter batches the user changes of each document into git commits
 type GitCommitter struct {
 	repo      *GitRepo
-	authn     *auth.Authenticator
+	authn     *auth.Service
 	opts      GitCommitterOptions
 	statePath string
 	sync      *SyncServer
@@ -58,7 +58,7 @@ type GitCommitter struct {
 }
 
 // NewGitCommitter creates the committer and loads the uncommitted changes of the last run
-func NewGitCommitter(repo *GitRepo, authn *auth.Authenticator, stateDir string, opts GitCommitterOptions) (*GitCommitter, error) {
+func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts GitCommitterOptions) (*GitCommitter, error) {
 	if opts.CheckInterval <= 0 {
 		opts.CheckInterval = 15 * time.Second
 	}
@@ -84,7 +84,9 @@ func NewGitCommitter(repo *GitRepo, authn *auth.Authenticator, stateDir string, 
 	for p, e := range c.pending {
 		if e == nil || len(e.Changes) == 0 {
 			delete(c.pending, p)
+			continue
 		}
+		e.Changes = c.migrateSubjects(e.Changes)
 	}
 	return c, nil
 }
@@ -228,10 +230,10 @@ func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths .
 		c.sync.FlushAll()
 	}
 	changes := c.takePending(paths...)
-	author := c.signature(user.Username)
+	author := c.signature(user.ID)
 	var coAuthors []GitSignature
 	for _, u := range rankUsers(changes) {
-		if u != user.Username {
+		if u != user.ID {
 			coAuthors = append(coAuthors, c.signature(u))
 		}
 	}
@@ -279,12 +281,30 @@ func rankUsers(changes map[string]int) []string {
 	return users
 }
 
-// signature returns the git author of a user
-func (c *GitCommitter) signature(username string) GitSignature {
-	name, email := username, ""
+// migrateSubjects maps the usernames of a pending file written before the account database
+// to account ids
+func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
+	if c.authn == nil {
+		return changes
+	}
+	out := make(map[string]int, len(changes))
+	for subject, n := range changes {
+		if c.authn.UserByID(subject) == nil {
+			if u := c.authn.UserByUsername(subject); u != nil {
+				subject = u.ID
+			}
+		}
+		out[subject] += n
+	}
+	return out
+}
+
+// signature returns the git author of a subject (account id)
+func (c *GitCommitter) signature(subject string) GitSignature {
+	name, email, username := subject, "", subject
 	if c.authn != nil {
-		if u := c.authn.User(username); u != nil {
-			name, email = u.DisplayName, u.Email
+		if u := c.authn.UserByID(subject); u != nil {
+			name, email, username = u.DisplayName, u.Email, u.Username
 		}
 	}
 	if email == "" {

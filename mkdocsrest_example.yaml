@@ -7,6 +7,8 @@ server:
   port: 7413
   # (optional) Users that may access the backend. Without any user (and without basicAuth),
   # authentication is off and everyone has full access.
+  # These users are imported once into the account database (<stateDir>/auth.db) on the first
+  # start; afterwards this list is ignored. See docs/auth.md.
   auth:
     users:
       # Username for HTTP basic auth

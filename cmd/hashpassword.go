@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 )
 
@@ -30,11 +30,11 @@ line of stdin is used, for example:
 		if password == "" {
 			return errors.New("the password is empty")
 		}
-		hash, err := auth.HashPassword(password)
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 		if err != nil {
 			return err
 		}
-		fmt.Println(hash)
+		fmt.Println(string(hash))
 		return nil
 	},
 }
