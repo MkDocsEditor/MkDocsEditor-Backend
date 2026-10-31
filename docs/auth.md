@@ -281,7 +281,9 @@ protected against cross-site request forgery:
 
 **CORS.** With `server.cors.allowedOrigins` set, those origins get
 `Access-Control-Allow-Credentials: true`, so `fetch(…, {credentials: "include"})` works.
-Allowed request headers: `Authorization`, `Content-Type`, `Accept`, `X-Requested-With`.
+Allowed methods (default of `server.cors.allowedMethods`): `HEAD`, `GET`, `POST`, `PUT`,
+`PATCH`, `DELETE`. Allowed request headers: `Authorization`, `Content-Type`, `Accept`,
+`X-Requested-With`.
 Exposed response headers: `Content-Disposition`, `Retry-After`. Without configured
 origins every origin may read responses but no credentials are allowed, so a web client
 on another origin cannot log in. List the web client's origin, also for development
@@ -349,7 +351,8 @@ in request bodies only; the backend never accepts link tokens in URLs.
   setup token: mdl_…
   ```
 
-  The `setup link:` line is only printed when `clientUrl` is set. `mkdocsrest setup-link`
+  The lines go to stdout and are flushed right away. The `setup link:` line is only
+  printed when `clientUrl` is set. `mkdocsrest setup-link`
   (same `--config`) prints the same two lines for a fresh token while the server keeps
   running (both use the same database; the newest setup link revokes the older ones). It
   refuses with exit code 1 when an account exists. Setup links stop working as soon as
@@ -749,6 +752,9 @@ In memory, per process (restarts reset them):
 - **Per login challenge:** 5 attempts.
 - Over the limit: 429 `rate-limited` with `Retry-After`. Triggered limits are logged and
   recorded in the audit log (at most once per minute per key).
+- The numbers are configurable under `server.auth.rateLimits` (section 13), and
+  `rateLimits.disabled: true` turns all of them off. That is meant for automated tests
+  that log in many times from one address, never for production.
 
 The client IP is the TCP peer address, unless the peer is in `server.trustedProxies`:
 then the backend takes the right-most address of `X-Forwarded-For` that is not a trusted
@@ -774,7 +780,11 @@ all existing passkeys useless.
 
 For Markus' deployment: `rpId: wiki.markusressel.de`. It covers `edit.wiki.…` and any
 future client under `wiki.markusressel.de`, without extending to all of
-`markusressel.de`. Default when not configured: the host of `server.auth.clientUrl`.
+`markusressel.de`. The Android builds in use are the debug variant from CI, package
+`de.markusressel.mkdocseditor.debug` with the certificate fingerprint
+`74:A7:45:FA:C2:4A:BF:BD:F0:A7:30:83:18:71:FE:A6:DE:24:6C:6B:D2:E3:F8:62:49:24:27:1F:C4:D3:70:48`,
+so that package goes into `server.auth.webauthn.android` (the release package has no
+published build yet). Default when not configured: the host of `server.auth.clientUrl`.
 Without either, passkeys are disabled (`passkeys-disabled`). For local development
 `rpId: localhost` works over plain HTTP.
 
@@ -858,6 +868,13 @@ server:
     secretKeyFile: ""
     # How long audit events are kept. Default: 8760h (365 days).
     auditRetention: "8760h"
+    # Rate limits of section 11. Defaults shown. disabled: true is for automated tests only.
+    rateLimits:
+      disabled: false
+      perIpBurst: 20
+      perIpRefill: "6s"
+      accountFailuresBeforeBackoff: 5
+      maxBackoff: "15m"
     webauthn:
       # Relying party id, see docs/auth.md section 12. Default: host of clientUrl.
       rpId: "wiki.markusressel.de"
@@ -879,6 +896,13 @@ server:
 ```
 
 `server.basicAuth` (the old single user) is also only read for the import.
+
+For local development, with the web client on `http://localhost:4174` and the backend
+on `http://localhost:17414`: `server.cors.allowedOrigins: ["http://localhost:4174"]`,
+`server.auth.clientUrl: "http://localhost:4174"`, `server.auth.webauthn.rpId: "localhost"`.
+Both are same-site, the cookie is `mkdocseditor_session` without `Secure`, and browsers
+allow WebAuthn on `localhost` over plain HTTP. Use `localhost` in both URLs, not
+`127.0.0.1` for one of them: an IP address and `localhost` are different sites.
 
 **Server key.** Losing `auth.key` makes TOTP secrets and recovery codes unreadable;
 affected users then need a reset link with `resetSecondFactors`. The key is not needed
