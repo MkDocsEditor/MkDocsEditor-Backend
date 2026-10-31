@@ -212,7 +212,7 @@ func (c *GitCommitter) commitEdits(relPath string) {
 	if len(changes) == 0 {
 		return
 	}
-	users := rankUsers(changes)
+	users := c.rankUsers(changes)
 	author := c.signature(users[0])
 	var coAuthors []GitSignature
 	for _, u := range users[1:] {
@@ -232,7 +232,7 @@ func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths .
 	changes := c.takePending(paths...)
 	author := c.signature(user.ID)
 	var coAuthors []GitSignature
-	for _, u := range rankUsers(changes) {
+	for _, u := range c.rankUsers(changes) {
 		if u != user.ID {
 			coAuthors = append(coAuthors, c.signature(u))
 		}
@@ -266,17 +266,24 @@ func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []G
 	return nil
 }
 
-// rankUsers sorts users by their number of changes, most first
-func rankUsers(changes map[string]int) []string {
+// rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the
+// name in the git signature, so the order does not depend on the random account ids.
+func (c *GitCommitter) rankUsers(changes map[string]int) []string {
 	users := make([]string, 0, len(changes))
+	names := make(map[string]string, len(changes))
 	for u := range changes {
 		users = append(users, u)
+		names[u] = c.signature(u).Name
 	}
 	sort.Slice(users, func(i, j int) bool {
-		if changes[users[i]] != changes[users[j]] {
-			return changes[users[i]] > changes[users[j]]
+		a, b := users[i], users[j]
+		if changes[a] != changes[b] {
+			return changes[a] > changes[b]
 		}
-		return users[i] < users[j]
+		if names[a] != names[b] {
+			return names[a] < names[b]
+		}
+		return a < b
 	})
 	return users
 }
