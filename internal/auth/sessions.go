@@ -344,6 +344,7 @@ func (s *Service) pruneExpired() {
 	now := s.now()
 	_, _ = s.db.Exec("DELETE FROM sessions WHERE expires_at <= ? OR last_used_at <= ?", toMillis(now), toMillis(now.Add(-s.cfg.idleTimeout)))
 	_, _ = s.db.Exec("DELETE FROM audit_events WHERE time < ?", toMillis(now.Add(-s.cfg.auditRetention)))
+	_, _ = s.db.Exec("DELETE FROM app_tokens WHERE expires_at != 0 AND expires_at <= ?", toMillis(now))
 }
 
 // Revoke reasons

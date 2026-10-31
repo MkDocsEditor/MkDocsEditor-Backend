@@ -207,6 +207,9 @@ func (s *Service) setPassword(u *User, sess *Session, hash, auditType string, ri
 	if err != nil {
 		return err
 	}
+	if _, err = tx.Exec("DELETE FROM app_tokens WHERE account_id = ?", u.ID); err != nil {
+		return err
+	}
 	if err = insertAudit(tx, now, AuditEvent{Type: auditType, ActorID: u.ID, TargetID: u.ID, IP: ri.IP, UserAgent: ri.UserAgent,
 		Details: map[string]any{"revokedSessions": n}}); err != nil {
 		return err

@@ -22,7 +22,12 @@ create the first admin. `mkdocsrest setup-link` prints a fresh link, for example
 **More users** join with invite links that an admin creates (`POST /admin/invites/`):
 role, expiry, single use and a note, revocable until used. There is no email: a
 forgotten password is reset with a reset link from an admin, and the reset ends all
-sessions of that account.
+sessions of that account. Admins manage accounts under `/admin/` (roles, disabling,
+deletion as a tombstone that keeps authorship, sessions, reset links, the instance-wide
+`require2FA` setting and the audit log).
+
+**Scripts** use app tokens (`POST /account/tokens/`, scope `read` or `write`) as
+`Authorization: Bearer mdp_…`, or as the password of HTTP basic auth.
 
 | Role | Can |
 |---|---|

@@ -14,9 +14,12 @@ func (s *Service) secondFactors(accountID string) (totp bool, passkeys int) {
 	return totp, s.passkeyCount(s.db, accountID)
 }
 
-// revokeCredentialsOnReset removes what a reset link revokes besides the sessions: with
-// resetSecondFactors, TOTP, the recovery codes and the passkeys
+// revokeCredentialsOnReset removes what a reset link revokes besides the sessions: the app
+// tokens and, with resetSecondFactors, TOTP, the recovery codes and the passkeys
 func (s *Service) revokeCredentialsOnReset(tx *sql.Tx, accountID string, resetSecondFactors bool) error {
+	if _, err := tx.Exec("DELETE FROM app_tokens WHERE account_id = ?", accountID); err != nil {
+		return err
+	}
 	if !resetSecondFactors {
 		return nil
 	}

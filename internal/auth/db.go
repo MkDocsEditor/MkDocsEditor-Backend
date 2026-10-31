@@ -132,6 +132,20 @@ CREATE TABLE passkeys (
 );
 CREATE INDEX passkeys_account ON passkeys(account_id);
 `,
+	// 5: app tokens for scripts and integrations
+	`
+CREATE TABLE app_tokens (
+	id           TEXT PRIMARY KEY,
+	account_id   TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	name         TEXT NOT NULL,
+	scope        TEXT NOT NULL CHECK (scope IN ('read', 'write')),
+	token_hash   BLOB NOT NULL UNIQUE,
+	created_at   INTEGER NOT NULL,
+	last_used_at INTEGER NOT NULL DEFAULT 0,
+	expires_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX app_tokens_account ON app_tokens(account_id);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations
