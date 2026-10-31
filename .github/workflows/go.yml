@@ -67,6 +67,21 @@ jobs:
         with:
           version: v2.15.0
 
+  openapi:
+    name: OpenAPI lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Lint openapi-description.yaml
+        run: npx -y @redocly/cli@2.72.1 lint openapi-description.yaml
+
   interop:
     name: Interop (JS Automerge)
     runs-on: ubuntu-latest

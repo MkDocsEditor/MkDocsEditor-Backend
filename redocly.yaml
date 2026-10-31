@@ -1,0 +1,11 @@
+extends:
+  - recommended
+rules:
+  # the backend's routes end with a slash (paths without it are redirected internally)
+  no-path-trailing-slash: off
+  # GET /alive/ has no error responses
+  operation-4xx-response: off
+  # the websocket endpoint answers 101 Switching Protocols
+  operation-2xx-response: off
+  # the backend runs wherever it is deployed
+  no-server-example.com: off
