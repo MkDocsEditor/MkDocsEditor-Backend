@@ -48,17 +48,6 @@ func cleanDisplayName(name, fallback string) (string, error) {
 	return name, nil
 }
 
-func validateEmail(email string) error {
-	if email == "" {
-		return nil
-	}
-	at := strings.LastIndex(email, "@")
-	if len(email) > 254 || at < 1 || at == len(email)-1 || strings.ContainsAny(email, " <>\r\n\t,") {
-		return ErrInvalidEmail
-	}
-	return nil
-}
-
 // passwordHash returns the stored hash of an account ("" without a password)
 func (s *Service) passwordHash(db querier, accountID string) (string, error) {
 	var h string

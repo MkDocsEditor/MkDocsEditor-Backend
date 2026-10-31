@@ -75,7 +75,7 @@ func validTokenFormat(token, prefix string) bool {
 		return false
 	}
 	for _, c := range token[len(prefix):] {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			return false
 		}
 	}
@@ -327,16 +327,6 @@ func ReauthenticatedUntil(sess *Session) time.Time {
 // RecentlyAuthenticated reports whether the session is within the step-up window
 func (s *Service) RecentlyAuthenticated(sess *Session) bool {
 	return sess != nil && s.now().Before(ReauthenticatedUntil(sess))
-}
-
-// markReauthenticated starts a new step-up window for a session
-func (s *Service) markReauthenticated(sess *Session) error {
-	now := s.now().UTC()
-	if _, err := s.db.Exec("UPDATE sessions SET reauth_at = ? WHERE id = ?", toMillis(now), sess.ID); err != nil {
-		return err
-	}
-	sess.ReauthAt = now
-	return nil
 }
 
 // pruneExpired deletes expired sessions, links and audit events

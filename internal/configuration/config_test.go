@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, content string) string {
@@ -117,5 +118,51 @@ mkdocs:
 	}
 	if users[1].Role != "reader" {
 		t.Errorf("user = %+v", users[1])
+	}
+}
+
+func TestInitConfigAuthSettings(t *testing.T) {
+	path := writeConfig(t, `
+server:
+  trustedProxies: [ "10.42.0.0/16" ]
+  auth:
+    clientUrl: "https://edit.example.com"
+    legacyBasicAuth: false
+    sessionIdleTimeout: "720h"
+    sessionMaxLifetime: "2160h"
+    cookieSecure: "always"
+    rateLimits:
+      disabled: true
+      perIpBurst: 2
+      perIpRefill: "6s"
+      accountFailuresBeforeBackoff: 3
+      maxBackoff: "15m"
+    webauthn:
+      rpId: "example.com"
+      origins: [ "https://edit.example.com" ]
+      android:
+        - packageName: "de.markusressel.mkdocseditor"
+          sha256CertFingerprints: [ "AB:CD" ]
+      serveAssetLinks: true
+mkdocs:
+  projectPath: "/wiki"
+`)
+	CurrentConfig = Configuration{}
+	InitConfig(path)
+
+	s := CurrentConfig.Server
+	a := s.Auth
+	if len(s.TrustedProxies) != 1 || a.ClientURL != "https://edit.example.com" || a.LegacyBasicAuth == nil || *a.LegacyBasicAuth ||
+		a.SessionIdleTimeout != 720*time.Hour || a.SessionMaxLifetime != 2160*time.Hour || a.CookieSecure != "always" {
+		t.Errorf("auth = %+v", a)
+	}
+	rl := a.RateLimits
+	if !rl.Disabled || rl.PerIPBurst != 2 || rl.PerIPRefill != 6*time.Second || rl.AccountFailuresBeforeBackoff != 3 || rl.MaxBackoff != 15*time.Minute {
+		t.Errorf("rate limits = %+v", rl)
+	}
+	w := a.WebAuthn
+	if w.RPID != "example.com" || len(w.Origins) != 1 || !w.ServeAssetLinks || len(w.Android) != 1 ||
+		w.Android[0].PackageName != "de.markusressel.mkdocseditor" || len(w.Android[0].SHA256CertFingerprints) != 1 {
+		t.Errorf("webauthn = %+v", w)
 	}
 }

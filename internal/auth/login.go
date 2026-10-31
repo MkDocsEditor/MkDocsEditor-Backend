@@ -40,7 +40,6 @@ type challenge struct {
 	accountID string
 	usernameK string
 	expires   time.Time
-	attempts  int
 }
 
 // LoginPassword checks a username and password. It returns a session, or a challenge when
@@ -130,49 +129,6 @@ func (s *Service) newChallenge(accountID, key string) (string, time.Time) {
 	}
 	s.challenges[string(tokenHash(token))] = &challenge{accountID: accountID, usernameK: key, expires: expires}
 	return token, expires
-}
-
-// challengeAttempt returns the account of a login challenge and counts an attempt. The
-// challenge is removed when it expired or is out of attempts.
-func (s *Service) challengeAttempt(token string) (*challenge, error) {
-	if !validTokenFormat(token, PrefixChallenge) {
-		return nil, ErrChallengeExpired
-	}
-	key := string(tokenHash(token))
-	s.challengesMu.Lock()
-	defer s.challengesMu.Unlock()
-	c := s.challenges[key]
-	if c == nil || !s.now().Before(c.expires) || c.attempts >= challengeMaxAttempts {
-		delete(s.challenges, key)
-		return nil, ErrChallengeExpired
-	}
-	c.attempts++
-	return c, nil
-}
-
-// challengeAccount returns the account of a challenge without counting an attempt
-func (s *Service) challengeAccount(token string) (string, error) {
-	if !validTokenFormat(token, PrefixChallenge) {
-		return "", ErrChallengeExpired
-	}
-	s.challengesMu.Lock()
-	defer s.challengesMu.Unlock()
-	c := s.challenges[string(tokenHash(token))]
-	if c == nil || !s.now().Before(c.expires) || c.attempts >= challengeMaxAttempts {
-		return "", ErrChallengeExpired
-	}
-	return c.accountID, nil
-}
-
-func (s *Service) endChallenge(token string) {
-	s.challengesMu.Lock()
-	delete(s.challenges, string(tokenHash(token)))
-	s.challengesMu.Unlock()
-}
-
-// attemptsLeft returns the remaining attempts of a challenge
-func (c *challenge) attemptsLeft() int {
-	return challengeMaxAttempts - c.attempts
 }
 
 // secondFactorMethods lists the second factors of an account for a login challenge

@@ -132,7 +132,7 @@ func isRepetitive(p string) bool {
 	for _, step := range []rune{1, -1} {
 		sequence := true
 		for i := 1; i < len(runes); i++ {
-			if runes[i]-runes[i-1] != step && !(step == 1 && runes[i-1] == '9' && runes[i] == '0') {
+			if runes[i]-runes[i-1] != step && (step != 1 || runes[i-1] != '9' || runes[i] != '0') {
 				sequence = false
 				break
 			}

@@ -33,6 +33,8 @@ const (
 )
 
 // Error codes of REST error responses, see docs/auth.md section 10
+//
+//nolint:gosec // error codes, not credentials
 const (
 	CodeBadRequest                = "bad-request"
 	CodeInvalidUsername           = "invalid-username"
@@ -366,15 +368,20 @@ func (rs *RestService) setSessionCookie(c echo.Context, token string, expires ti
 		name = cookieNameSecure
 	}
 	maxAge := int(time.Until(expires).Seconds())
-	c.SetCookie(&http.Cookie{Name: name, Value: token, Path: "/", MaxAge: maxAge, Expires: expires,
-		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
+	// Secure is off only for plain HTTP (development), see server.auth.cookieSecure
+	c.SetCookie(&http.Cookie{ //nolint:gosec // see above
+		Name: name, Value: token, Path: "/", MaxAge: maxAge, Expires: expires,
+		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func (rs *RestService) clearSessionCookie(c echo.Context) {
 	for _, name := range []string{cookieNameSecure, cookieNameInsecure} {
 		if _, err := c.Cookie(name); err == nil {
-			c.SetCookie(&http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
-				Secure: name == cookieNameSecure, SameSite: http.SameSiteLaxMode})
+			c.SetCookie(&http.Cookie{ //nolint:gosec // clears a cookie
+				Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+				Secure: name == cookieNameSecure, SameSite: http.SameSiteLaxMode,
+			})
 		}
 	}
 }

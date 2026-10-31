@@ -132,32 +132,42 @@ authorship or actor data should key it on `accountId`. Presence messages, `you`,
 ## 3. Authentication
 
 > Accounts, registration, sessions, passkeys and TOTP are specified in
-> [`auth.md`](auth.md). Once implemented, its sections 4 to 6 replace this section; the
-> ticket flow below stays as it is.
+> [`auth.md`](auth.md) (sections 4 to 6 for request authentication, CSRF and websockets).
+> This section is the summary a sync client needs.
 
-All REST endpoints except `GET /alive/` require authentication.
+All REST endpoints except `GET /alive/`, `GET /auth/status/` and the login and link
+endpoints require authentication.
 
-- **REST:** HTTP Basic auth (`Authorization: Basic …`) against the configured users. A
-  browser sets the header itself with `fetch`. Requests that send
-  `X-Requested-With: XMLHttpRequest` get no `WWW-Authenticate` header on a 401, so the
-  browser does not show its own login dialog.
+- **REST:** a session, either the HttpOnly session cookie (web client) or
+  `Authorization: Bearer mds_…` (native clients). During the transition, HTTP Basic auth
+  against the account passwords also works (`server.auth.legacyBasicAuth`); requests that
+  send `X-Requested-With: XMLHttpRequest` get no `WWW-Authenticate` header on a 401, so
+  the browser does not show its own login dialog.
 - `GET /auth/whoami/` returns the authenticated user:
-  `{"username","displayName","role","color"}`. The web client uses it to check a login.
+  `{"id","username","displayName","role","color","authMethod",…}`. `id` is the stable
+  account id; the username can change.
 - **Websocket:** browsers cannot set headers on a websocket, and tokens in URLs end up in
-  proxy logs. So the websocket accepts either of these:
-  1. an `Authorization: Basic …` header on the upgrade request (Android/OkHttp), or
-  2. a **ticket** in the `hello` message. A ticket comes from `POST /auth/ws-ticket/`
-     (Basic auth) as `{"ticket":"…","expiresAt":"<RFC 3339>"}`. It is valid for 60
-     seconds, can be used only once, and is not tied to a document. Tickets live in
-     memory only, so a backend restart invalidates them.
+  proxy logs. So the websocket accepts any of these:
+  1. the session cookie on the upgrade request, only when the `Origin` is the backend
+     itself or listed in `server.cors.allowedOrigins`,
+  2. an `Authorization: Bearer …` (or, during the transition, `Basic …`) header on the
+     upgrade request (Android/OkHttp), or
+  3. a **ticket** in the `hello` message. A ticket comes from `POST /auth/ws-ticket/` as
+     `{"ticket":"…","expiresAt":"<RFC 3339>"}`. It is valid for 60 seconds, can be used
+     only once, is not tied to a document, and is bound to the session that requested
+     it: once that session ends, the ticket is invalid. Tickets live in memory only, so a
+     backend restart invalidates them.
 
   Tickets are never accepted in the URL. A connection that is not authenticated within
-  10 seconds of the upgrade is closed with `4001`.
+  10 seconds of the upgrade is closed with `4001`. When the session of a connection ends
+  (logout, revocation, password reset) or its account is disabled, the backend closes the
+  connection with `4001`; the client must log in again instead of reconnecting.
 - **CORS:** `server.cors.allowedOrigins` lists the origins of web clients. The backend
-  allows the `Authorization`, `Content-Type` and `X-Requested-With` headers. Preflight
-  requests need no authentication. When origins are configured, the websocket upgrade
-  also checks the `Origin` header against them. A request without an `Origin` header,
-  like Android's, is allowed.
+  allows credentials from them and the `Authorization`, `Content-Type` and
+  `X-Requested-With` headers, and exposes `Retry-After`. Preflight requests need no
+  authentication. When origins are configured, the websocket upgrade also checks the
+  `Origin` header against them. A request without an `Origin` header, like Android's, is
+  allowed, but then only with a bearer header or a ticket.
 
 ## 4. Document model
 
