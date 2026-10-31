@@ -37,6 +37,8 @@ tags:
     description: "Markdown files"
   - name: Resources
     description: "Other files (images, attachments)"
+  - name: History
+    description: "Revision history of documents from git (requires git.enabled)"
 
 paths:
   /alive/:
@@ -383,6 +385,122 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /document/{documentId}/history/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "Revision history of a document"
+      description: |
+        The git commits that changed the file, newest first, following renames. Requires
+        `git.enabled`; without it the response is 404.
+      operationId: getDocumentHistory
+      tags: [ History ]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: "Maximum number of commits (1 to 1000, default 100)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: "The commits"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /document/{documentId}/history/diff/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "Diff between two revisions"
+      description: |
+        Unified diff of the document between two revisions. A revision is a commit hash (7 to
+        64 hex characters) from the history, or `current` for the live text.
+      operationId: getDocumentRevisionDiff
+      tags: [ History ]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          description: "Default: current"
+          schema:
+            type: string
+            default: current
+      responses:
+        "200":
+          description: "The unified diff, empty if the texts are equal"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /document/{documentId}/history/{revision}/content/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+      - $ref: "#/components/parameters/revision"
+    get:
+      summary: "A document's content at a revision"
+      operationId: getDocumentRevisionContent
+      tags: [ History ]
+      responses:
+        "200":
+          description: "The markdown text at that revision"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /document/{documentId}/history/{revision}/restore/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+      - $ref: "#/components/parameters/revision"
+    post:
+      summary: "Restore a revision"
+      description: |
+        Changes the live text to the text at that revision. The server applies it as an
+        Automerge change, so connected clients merge it like any other edit and nothing
+        typed concurrently is lost. In git, the change counts for the requesting user.
+        Requires the editor or admin role.
+      operationId: restoreDocumentRevision
+      tags: [ History ]
+      responses:
+        "204":
+          description: "Restored"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /document/{documentId}/ws/:
     parameters:
       - $ref: "#/components/parameters/documentId"
@@ -552,6 +670,14 @@ components:
       description: "Id of a document"
       schema:
         type: string
+    revision:
+      name: revision
+      in: path
+      required: true
+      description: "Commit hash from the history, 7 to 64 hex characters"
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{7,64}$"
     resourceId:
       name: resourceId
       in: path
@@ -764,6 +890,43 @@ components:
         username:
           type: string
           description: "Owner of the actor, `:disk` / `:server` for server changes, empty if unknown"
+
+    HistoryEntry:
+      type: object
+      required: [ revision, time, author, coAuthors, message, path ]
+      properties:
+        revision:
+          type: string
+          description: "Commit hash"
+        time:
+          type: string
+          format: date-time
+          description: "Author time"
+        author:
+          $ref: "#/components/schemas/HistoryAuthor"
+        coAuthors:
+          type: array
+          description: "From the Co-authored-by trailers"
+          items:
+            $ref: "#/components/schemas/HistoryAuthor"
+        message:
+          type: string
+          description: "Commit subject"
+        path:
+          type: string
+          description: "Path of the file in this commit, relative to the docs folder"
+
+    HistoryAuthor:
+      type: object
+      required: [ name, email, username ]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        username:
+          type: string
+          description: "The configured user with this email, empty if none"
 
     Error:
       type: object

@@ -7,7 +7,8 @@ documents and commits them to git.
 
 Status: **version 1**. Implemented: authentication, roles, the document websocket,
 presence, authorship, persistence, external changes, readers, rename and delete, git
-integration. Not yet implemented: revision history (section 11). The REST API reference is
+integration and revision history. Not yet implemented: the events websocket (future
+work in section 6). The REST API reference is
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
@@ -563,15 +564,20 @@ Based on the git history of each file. Requires `git.enabled`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/document/{id}/history/` | Commits that touched the file, newest first: `[{"revision","time","author":{"name","email","username"},"coAuthors":[…],"message"}]` |
+| `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author":{"name","email","username"},"coAuthors":[…],"message","path"}]`. `path` is the file's path in that commit. `username` is empty for authors who are not configured users. |
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
-| `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions. `to` may be `current` for the live text. |
+| `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. |
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |
 
 A restore is applied as splices (the diff from the current text to the old one) by the
 **server** actor, so connected clients simply see an edit, and it can be undone like any
-other edit. The restore is committed with the requesting user as author:
-`Restore guide/setup.md to <short revision>`.
+other edit. The restore is committed right away with the requesting user as author:
+`Restore guide/setup.md to <short revision>`. Pending edits of the document go into
+the same commit, their authors as `Co-authored-by:` trailers.
+
+A revision is a full or abbreviated commit hash (7 to 64 lowercase hex characters) that
+appears in the history of the document. Anything else is 404. Without `git.enabled`
+all history endpoints return 404.
 
 History follows renames (`git log --follow`).
 
