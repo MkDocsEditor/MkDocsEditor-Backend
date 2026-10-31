@@ -59,6 +59,14 @@ type SyncServer struct {
 	treeChanges   chan struct{}
 	stop          chan struct{}
 	workerDone    chan struct{}
+
+	// events websocket
+	eventsMu      sessionMutex
+	eventConns    map[*wsConn]struct{}
+	eventsClosed  bool
+	treeEvents    chan struct{}
+	onlineChanges chan struct{}
+	eventsDone    chan struct{}
 }
 
 // NewSyncServer creates the sync server. stateDir holds the Automerge state.
@@ -92,14 +100,23 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Authenticator, 
 		treeChanges:      make(chan struct{}, 1),
 		stop:             make(chan struct{}),
 		workerDone:       make(chan struct{}),
+		eventConns:       map[*wsConn]struct{}{},
+		treeEvents:       make(chan struct{}, 1),
+		onlineChanges:    make(chan struct{}, 1),
+		eventsDone:       make(chan struct{}),
 	}
 	treeManager.AddTreeChangeListener(func(_, _ *Section) {
 		select {
 		case s.treeChanges <- struct{}{}:
 		default:
 		}
+		select {
+		case s.treeEvents <- struct{}{}:
+		default:
+		}
 	})
 	go s.treeWorker()
+	go s.eventsWorker()
 	return s, nil
 }
 
@@ -425,6 +442,7 @@ func (s *SyncServer) Close() {
 	s.mu.Unlock()
 	close(s.stop)
 	<-s.workerDone
+	<-s.eventsDone
 }
 
 // HandleWebsocket serves GET /document/{id}/ws/
@@ -470,6 +488,7 @@ func (s *SyncServer) join(conn *wsConn, d *Document) (*docSession, error) {
 	if err = conn.attachLocked(session); err != nil {
 		return nil, err
 	}
+	s.onlineChanged()
 	return session, nil
 }
 
@@ -521,6 +540,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 		return
 	}
 	delete(session.conns, conn)
+	s.onlineChanged()
 	session.broadcastLocked(&PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: session.docID, ClientID: conn.clientID}, nil)
 	remaining := len(session.conns)
 	session.mu.Unlock()

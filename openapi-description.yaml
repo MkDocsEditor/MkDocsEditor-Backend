@@ -106,6 +106,25 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /events/ws/:
+    get:
+      summary: "Events websocket"
+      description: |
+        Upgrades to a websocket that pushes `tree-changed` (refetch the tree) and `online`
+        (who has which document open). Authentication works like the document websocket:
+        a basic auth header on the upgrade request, or a ticket in the first message
+        (`{"type":"hello","ticket":"…"}`). Specified in docs/sync-protocol.md, section 6.
+      operationId: eventsWebsocket
+      tags: [ Auth ]
+      security:
+        - basicAuth: [ ]
+        - { }
+      responses:
+        "101":
+          description: "Switching protocols"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /mkdocs/config/:
     get:
       summary: "The MkDocs configuration"

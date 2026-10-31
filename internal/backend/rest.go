@@ -163,6 +163,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.GET(EndpointPathWhoAmI, rs.whoAmI)
 	echoRest.POST(EndpointPathWsTicket, rs.issueWsTicket)
 	echoRest.GET("/actors/", rs.getActors)
+	echoRest.GET("/events/ws/", rs.handleEventsWebsocket)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 
 	// Authentication
@@ -607,6 +608,13 @@ func (rs *RestService) getActors(c echo.Context) error {
 		return c.JSONPretty(http.StatusOK, []ActorInfo{}, indentationChar)
 	}
 	return c.JSONPretty(http.StatusOK, rs.sync.Actors(), indentationChar)
+}
+
+func (rs *RestService) handleEventsWebsocket(c echo.Context) error {
+	if rs.sync == nil {
+		return echo.ErrNotFound
+	}
+	return rs.sync.HandleEventsWebsocket(c)
 }
 
 func (rs *RestService) handleWebsocket(c echo.Context) error {
