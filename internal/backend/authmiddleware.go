@@ -153,6 +153,9 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		if !rs.authenticator.Enabled() {
+			if strings.HasPrefix(path, "/account/") || strings.HasPrefix(path, "/admin/") || strings.HasPrefix(path, "/auth/reauth/") {
+				return apiError(c, http.StatusForbidden, CodeForbidden, "authentication is disabled (server.auth.disabled), there are no accounts", nil)
+			}
 			c.Set(contextKeyUser, auth.Anonymous())
 			c.Set(contextKeyAuthMethod, AuthMethodAnonymous)
 			return next(c)
@@ -412,6 +415,7 @@ func (rs *RestService) limitIP(c echo.Context) error {
 func (rs *RestService) authError(c echo.Context, err error) error {
 	var rl *auth.RateLimitError
 	var weak *auth.WeakPasswordError
+	var second *auth.SecondFactorError
 	switch {
 	case errors.As(err, &rl):
 		c.Response().Header().Set("Retry-After", itoa(rl.Seconds()))
@@ -433,6 +437,20 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 		return apiError(c, http.StatusConflict, CodeUsernameTaken, err.Error(), nil)
 	case errors.Is(err, auth.ErrInvalidDisplayName), errors.Is(err, auth.ErrInvalidNote), errors.Is(err, auth.ErrInvalidColor), errors.Is(err, auth.ErrInvalidEmail):
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
+	case errors.As(err, &second):
+		return apiError(c, http.StatusUnauthorized, CodeInvalidSecondFactor, err.Error(), map[string]any{"attemptsLeft": second.AttemptsLeft})
+	case errors.Is(err, auth.ErrInvalidTOTPCode):
+		return apiError(c, http.StatusBadRequest, CodeInvalidSecondFactor, err.Error(), nil)
+	case errors.Is(err, auth.ErrTOTPAlreadyEnabled):
+		return apiError(c, http.StatusConflict, CodeTOTPAlreadyEnabled, err.Error(), nil)
+	case errors.Is(err, auth.ErrTOTPNotEnabled):
+		return apiError(c, http.StatusConflict, CodeTOTPNotEnabled, err.Error(), nil)
+	case errors.Is(err, auth.ErrNoTOTPEnrollment):
+		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
+	case errors.Is(err, auth.ErrLastLoginMethod):
+		return apiError(c, http.StatusConflict, CodeLastLoginMethod, err.Error(), nil)
+	case errors.Is(err, auth.ErrSecondFactorRequired):
+		return apiError(c, http.StatusConflict, CodeSecondFactorRequired, err.Error(), nil)
 	case errors.Is(err, auth.ErrNotFound):
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)
 	case errors.Is(err, auth.ErrUnauthenticated):

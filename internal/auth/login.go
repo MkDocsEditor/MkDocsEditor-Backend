@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strconv"
 	"time"
 )
 
@@ -40,6 +41,7 @@ type challenge struct {
 	accountID string
 	usernameK string
 	expires   time.Time
+	attempts  int
 }
 
 // LoginPassword checks a username and password. It returns a session, or a challenge when
@@ -131,6 +133,37 @@ func (s *Service) newChallenge(accountID, key string) (string, time.Time) {
 	return token, expires
 }
 
+// challengeAttempt returns a login challenge and counts an attempt. The challenge is
+// removed when it expired or is out of attempts.
+func (s *Service) challengeAttempt(token string) (*challenge, error) {
+	if !validTokenFormat(token, PrefixChallenge) {
+		return nil, ErrChallengeExpired
+	}
+	key := string(tokenHash(token))
+	s.challengesMu.Lock()
+	defer s.challengesMu.Unlock()
+	c := s.challenges[key]
+	if c == nil || !s.now().Before(c.expires) || c.attempts >= challengeMaxAttempts {
+		delete(s.challenges, key)
+		return nil, ErrChallengeExpired
+	}
+	c.attempts++
+	return c, nil
+}
+
+func (s *Service) endChallenge(token string) {
+	s.challengesMu.Lock()
+	delete(s.challenges, string(tokenHash(token)))
+	s.challengesMu.Unlock()
+}
+
+// attemptsLeft returns the remaining attempts of a challenge
+func (s *Service) attemptsLeft(c *challenge) int {
+	s.challengesMu.Lock()
+	defer s.challengesMu.Unlock()
+	return challengeMaxAttempts - c.attempts
+}
+
 // secondFactorMethods lists the second factors of an account for a login challenge
 func (s *Service) secondFactorMethods(accountID string) []string {
 	totp, passkeys := s.secondFactors(accountID)
@@ -160,4 +193,61 @@ const settingRequire2FA = "require_2fa"
 func (s *Service) Require2FA() bool {
 	v, err := s.setting(settingRequire2FA)
 	return err == nil && v == "true"
+}
+
+// LoginSecondFactor completes a login challenge with a TOTP code or a recovery code
+func (s *Service) LoginSecondFactor(challengeToken, code, recoveryCode string, p SessionParams) (*LoginResult, error) {
+	c, err := s.challengeAttempt(challengeToken)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.checkAccount(c.usernameK, p.RequestInfo); err != nil {
+		return nil, err
+	}
+	u := s.UserByID(c.accountID)
+	if u == nil || u.Status != StatusActive {
+		s.endChallenge(challengeToken)
+		return nil, ErrChallengeExpired
+	}
+	method := MethodTOTP
+	var ok bool
+	switch {
+	case code != "":
+		ok, err = s.verifyTOTP(u.ID, code)
+	case recoveryCode != "":
+		method = MethodRecoveryCode
+		ok, err = s.useRecoveryCode(u.ID, recoveryCode)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		s.fail(c.usernameK)
+		left := s.attemptsLeft(c)
+		s.Audit(AuditEvent{Type: AuditLoginSecondFactorFailed, IP: p.IP, UserAgent: p.UserAgent, TargetID: u.ID,
+			Details: map[string]any{"method": method, "attemptsLeft": left}})
+		if left <= 0 {
+			s.endChallenge(challengeToken)
+			return nil, ErrChallengeExpired
+		}
+		return nil, &SecondFactorError{AttemptsLeft: left}
+	}
+	s.endChallenge(challengeToken)
+	s.succeed(c.usernameK)
+	if method == MethodRecoveryCode {
+		left, _ := recoveryCodesLeft(s.db, u.ID)
+		s.Audit(AuditEvent{Type: AuditRecoveryCodeUsed, ActorID: u.ID, TargetID: u.ID, IP: p.IP, UserAgent: p.UserAgent,
+			Details: map[string]any{"left": left}})
+	}
+	return s.completeLogin(u, p, "password+"+method)
+}
+
+// SetRequire2FA changes the instance setting require2FA
+func (s *Service) SetRequire2FA(on bool, by *User, ri RequestInfo) error {
+	if err := setSetting(s.db, settingRequire2FA, strconv.FormatBool(on)); err != nil {
+		return err
+	}
+	s.Audit(AuditEvent{Type: AuditSettingsChanged, ActorID: idOf(by), IP: ri.IP, UserAgent: ri.UserAgent,
+		Details: map[string]any{"require2FA": on}})
+	return nil
 }

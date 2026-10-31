@@ -329,6 +329,16 @@ func (s *Service) RecentlyAuthenticated(sess *Session) bool {
 	return sess != nil && s.now().Before(ReauthenticatedUntil(sess))
 }
 
+// markReauthenticated starts a new step-up window for a session
+func (s *Service) markReauthenticated(sess *Session) error {
+	now := s.now().UTC()
+	if _, err := s.db.Exec("UPDATE sessions SET reauth_at = ? WHERE id = ?", toMillis(now), sess.ID); err != nil {
+		return err
+	}
+	sess.ReauthAt = now
+	return nil
+}
+
 // pruneExpired deletes expired sessions, links and audit events
 func (s *Service) pruneExpired() {
 	now := s.now()

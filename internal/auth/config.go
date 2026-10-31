@@ -43,6 +43,9 @@ type settings struct {
 	cookieSecure    string
 	auditRetention  time.Duration
 	rateLimits      configuration.RateLimitConfiguration
+	secretKeyFile   string
+	// issuer is the name shown by authenticator apps and passkey providers
+	issuer string
 }
 
 func newSettings(conf configuration.AuthConfiguration) (settings, error) {
@@ -55,6 +58,11 @@ func newSettings(conf configuration.AuthConfiguration) (settings, error) {
 		cookieSecure:    conf.CookieSecure,
 		auditRetention:  conf.AuditRetention,
 		rateLimits:      conf.RateLimits,
+		secretKeyFile:   conf.SecretKeyFile,
+		issuer:          strings.TrimSpace(conf.WebAuthn.RPName),
+	}
+	if s.issuer == "" {
+		s.issuer = "MkDocsEditor"
 	}
 	if conf.LegacyBasicAuth != nil {
 		s.legacyBasicAuth = *conf.LegacyBasicAuth

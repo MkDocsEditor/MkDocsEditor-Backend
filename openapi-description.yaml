@@ -145,6 +145,68 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /auth/login/second-factor/:
+    post:
+      summary: "Complete a login with a TOTP code or a recovery code"
+      operationId: loginSecondFactor
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecondFactorRequest"
+      responses:
+        "200":
+          description: "A session"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: "`invalid-second-factor` (`details.attemptsLeft`) or `challenge-expired`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/reauth/:
+    post:
+      summary: "Confirm the identity again (step-up)"
+      description: |
+        Sensitive actions answer `403 reauth-required` unless the session logged in or
+        confirmed its identity within the last 10 minutes. Send the password, plus a TOTP
+        code when the account has TOTP (only the code for accounts without a password).
+        Failures count against the login backoff of the account.
+      operationId: reauth
+      tags: [ Auth ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthRequest"
+      responses:
+        "200":
+          description: "The end of the new step-up window"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reauthenticated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /auth/logout/:
     post:
       summary: "End the current session"
@@ -211,6 +273,167 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+
+  /account/:
+    get:
+      summary: "The signed-in user's account"
+      operationId: getAccount
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "The account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      summary: "Change the profile"
+      description: "Changing the username needs a recent authentication (step-up). The former username stays reserved for the account."
+      operationId: updateAccount
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountUpdate"
+      responses:
+        "200":
+          description: "The changed account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /account/password/:
+    put:
+      summary: "Change the password"
+      description: "Needs `currentPassword` or a recent authentication (step-up). All other sessions of the account end."
+      operationId: changePassword
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChange"
+      responses:
+        "204":
+          description: "Changed"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      summary: "Remove the password (accounts with a passkey; step-up)"
+      operationId: removePassword
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "Removed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /account/totp/:
+    post:
+      summary: "Start the TOTP enrollment (step-up)"
+      description: |
+        Creates a pending secret, valid 10 minutes. Show `otpauthUri` as a QR code and
+        `secret` for manual entry, then confirm with a current code.
+      operationId: beginTOTP
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "The pending secret"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TOTPEnrollment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: "Disable TOTP and delete the recovery codes (step-up)"
+      operationId: disableTOTP
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "Disabled"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /account/totp/confirm/:
+    post:
+      summary: "Activate TOTP with a current code"
+      operationId: confirmTOTP
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TOTPConfirm"
+      responses:
+        "200":
+          description: "TOTP is active; the recovery codes are shown only now"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodes"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /account/recovery-codes/:
+    post:
+      summary: "Replace the recovery codes (step-up)"
+      operationId: regenerateRecoveryCodes
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "The new codes, shown only now"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /account/sessions/:
     get:
@@ -1330,6 +1553,125 @@ components:
         expiresAt:
           type: string
           format: date-time
+
+    SecondFactorRequest:
+      allOf:
+        - $ref: "#/components/schemas/SessionFields"
+        - type: object
+          required: [ challenge ]
+          description: "Exactly one of `code` and `recoveryCode`"
+          properties:
+            challenge:
+              type: string
+            code:
+              type: string
+              example: "123456"
+            recoveryCode:
+              type: string
+              example: "abcd-efgh-jkmn"
+
+    ReauthRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          format: password
+        code:
+          type: string
+
+    Reauthenticated:
+      type: object
+      required: [ reauthenticatedUntil ]
+      properties:
+        reauthenticatedUntil:
+          type: string
+          format: date-time
+
+    Account:
+      allOf:
+        - $ref: "#/components/schemas/UserWithSetupState"
+        - type: object
+          required: [ email, createdAt, hasPassword, totpEnabled, recoveryCodesLeft, passkeyCount, require2FA, reauthenticatedUntil ]
+          properties:
+            email:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            hasPassword:
+              type: boolean
+            totpEnabled:
+              type: boolean
+            recoveryCodesLeft:
+              type: integer
+            passkeyCount:
+              type: integer
+            require2FA:
+              type: boolean
+            reauthenticatedUntil:
+              type: string
+              format: date-time
+              nullable: true
+              description: "End of the step-up window, null when it has passed"
+
+    AccountUpdate:
+      type: object
+      properties:
+        username:
+          type: string
+        displayName:
+          type: string
+          maxLength: 64
+        color:
+          type: string
+          example: "#1971c2"
+        email:
+          type: string
+          description: "An empty string removes the email"
+
+    PasswordChange:
+      type: object
+      required: [ newPassword ]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
+
+    TOTPEnrollment:
+      type: object
+      required: [ secret, otpauthUri, expiresAt ]
+      properties:
+        secret:
+          type: string
+          description: "Base32, for manual entry"
+        otpauthUri:
+          type: string
+          example: "otpauth://totp/MkDocsEditor:markus?secret=JBSWY3DPEHPK3PXP&issuer=MkDocsEditor&algorithm=SHA1&digits=6&period=30"
+        expiresAt:
+          type: string
+          format: date-time
+
+    TOTPConfirm:
+      type: object
+      required: [ code ]
+      properties:
+        code:
+          type: string
+
+    RecoveryCodes:
+      type: object
+      required: [ recoveryCodes ]
+      properties:
+        recoveryCodes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items:
+            type: string
+            example: "abcd-efgh-jkmn"
 
     Revoked:
       type: object

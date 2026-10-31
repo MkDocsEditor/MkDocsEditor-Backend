@@ -25,6 +25,10 @@ server:
     # (optional) Secure flag of the session cookie: auto (HTTPS, directly or through a
     # trusted proxy), always or never. Default: auto
     #cookieSecure: "auto"
+    # (optional) File with the 32-byte server key (base64) that encrypts TOTP secrets. Created
+    # on the first start; back it up with auth.db. The environment variable
+    # MKDOCSREST_AUTH_SECRET_KEY takes precedence. Default: <stateDir>/auth.key
+    #secretKeyFile: "/secrets/auth.key"
     # (optional) Login rate limits, defaults shown. disabled: true is for automated tests only.
     #rateLimits:
     #  disabled: false

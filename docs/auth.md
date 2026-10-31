@@ -669,9 +669,10 @@ give 400 `invalid-link`.
 | DELETE | `/account/tokens/{id}/` | | | 204 |
 
 TOTP enrollment: `POST /account/totp/` creates a pending secret (valid 10 minutes, not
-active yet). The client shows the QR code of `otpauthUri` and the `secret` for manual
+active yet; calling it again replaces the pending secret). The client shows the QR code of `otpauthUri` and the `secret` for manual
 entry. `POST /account/totp/confirm/` with a current code activates TOTP and returns the
-recovery codes, which the client shows once with "copy" and "download" actions.
+recovery codes, which the client shows once with "copy" and "download" actions. Without
+a pending secret (never started or expired), confirm answers 409 `conflict`.
 
 ### Admin (admin sessions only)
 
