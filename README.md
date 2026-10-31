@@ -120,6 +120,10 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while it is open) |
 | GET | `/document/{id}/content/` | The markdown text (live while open) |
 | GET | `/document/{id}/authorship/` | Who wrote which part of the text |
+| GET | `/document/{id}/history/` | Git commits of the document (requires `git.enabled`) |
+| GET | `/document/{id}/history/{revision}/content/` | The text at a revision |
+| GET | `/document/{id}/history/diff/?from=&to=` | Unified diff between revisions (`current` is the live text) |
+| POST | `/document/{id}/history/{revision}/restore/` | Restore a revision as a normal edit |
 | GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
 | POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
 | GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`), delete |

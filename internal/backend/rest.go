@@ -22,6 +22,7 @@ const (
 	urlParamParentId = "parentId"
 	urlParamId       = "id"
 	urlParamName     = "name"
+	urlParamRevision = "revision"
 	indentationChar  = "  "
 
 	EndpointPathAlive = "/alive/"
@@ -160,6 +161,10 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamId+"/content/", rs.getDocumentContent)
 	groupDocuments.GET("/:"+urlParamId+"/authorship/", rs.getDocumentAuthorship)
+	groupDocuments.GET("/:"+urlParamId+"/history/", rs.getDocumentHistory)
+	groupDocuments.GET("/:"+urlParamId+"/history/diff/", rs.getDocumentRevisionDiff)
+	groupDocuments.GET("/:"+urlParamId+"/history/:"+urlParamRevision+"/content/", rs.getDocumentRevisionContent)
+	groupDocuments.POST("/:"+urlParamId+"/history/:"+urlParamRevision+"/restore/", rs.restoreDocumentRevision)
 	groupDocuments.POST("/", rs.createDocument)
 	groupDocuments.PUT("/:"+urlParamId+"/", rs.renameDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", rs.deleteDocument)
