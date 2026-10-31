@@ -209,7 +209,7 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
 	eventually(t, "pending saved", func() bool {
 		data, err := os.ReadFile(filepath.Join(e.stateDir, gitPendingFile))
-		return err == nil && strings.Contains(string(data), "bob")
+		return err == nil && strings.Contains(string(data), e.authn.UserByUsername("bob").ID)
 	})
 	a.disconnect()
 	close(e.git.stop)
@@ -221,6 +221,24 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 	eventually(t, "commit after restart", func() bool { return len(e.commits()) == 3 })
 	if got := e.git0("log", "-1", "--format=%an"); got != "bob\n" {
 		t.Errorf("author %q", got)
+	}
+}
+
+// a pending file written before the account database (keyed by usernames) is still committed
+func TestGitPendingFileWithUsernames(t *testing.T) {
+	e := newGitEnv(t, GitCommitterOptions{AfterLeave: 100 * time.Millisecond})
+	e.stop()
+	pending := `{"guide/setup.md": {"changes": {"bob": 3, "alice": 1}, "firstChange": "2026-01-01T00:00:00Z", "lastChange": "2026-01-01T00:00:00Z"}}`
+	if err := os.WriteFile(filepath.Join(e.project, "docs", "guide", "setup.md"), []byte("# Setup\n\nchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.stateDir, gitPendingFile), []byte(pending), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+	eventually(t, "commit", func() bool { return len(e.commits()) == 2 })
+	if got := e.git0("log", "-1", "--format=%an <%ae>%n%b"); !strings.Contains(got, "bob <bob@mkdocseditor.invalid>") || !strings.Contains(got, "Co-authored-by: alice <alice@mkdocseditor.invalid>") {
+		t.Errorf("commit %q", got)
 	}
 }
 

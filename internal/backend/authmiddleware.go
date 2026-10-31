@@ -54,7 +54,7 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 
 		username, password, hasBasic := req.BasicAuth()
 		if hasBasic {
-			user := rs.authenticator.Authenticate(username, password)
+			user := rs.authenticator.AuthenticateBasic(username, password)
 			if user == nil {
 				return rs.unauthorized(c)
 			}

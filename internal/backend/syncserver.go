@@ -35,7 +35,7 @@ type SyncServer struct {
 	treeManager   *TreeManager
 	store         *StateStore
 	actors        *ActorRegistry
-	authenticator *auth.Authenticator
+	authenticator *auth.Service
 	upgrader      websocket.Upgrader
 
 	// timings, can be shortened in tests
@@ -70,7 +70,7 @@ type SyncServer struct {
 }
 
 // NewSyncServer creates the sync server. stateDir holds the Automerge state.
-func NewSyncServer(treeManager *TreeManager, authenticator *auth.Authenticator, stateDir string, allowedOrigins []string) (*SyncServer, error) {
+func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateDir string, allowedOrigins []string) (*SyncServer, error) {
 	if err := checkStateDir(stateDir, treeManager.RootPath()); err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Authenticator, 
 	if err != nil {
 		return nil, err
 	}
-	actors, err := NewActorRegistry(stateDir)
+	actors, err := NewActorRegistry(authenticator)
 	if err != nil {
 		return nil, err
 	}
@@ -204,23 +204,36 @@ func (s *SyncServer) notifyWritten(relPath string) {
 	}
 }
 
-// actorInfo describes the user of an actor
-func (s *SyncServer) actorInfo(actorID string, username string) ActorInfo {
-	info := ActorInfo{ActorID: actorID, Username: username, DisplayName: username, Color: "#868e96"}
-	switch username {
+// actorInfo describes the user of an actor. subject is an account id or a pseudo user.
+func (s *SyncServer) actorInfo(actorID string, subject string) ActorInfo {
+	info := ActorInfo{ActorID: actorID, Username: subject, DisplayName: subject, Color: "#868e96"}
+	switch subject {
 	case ActorUserDisk:
 		info.DisplayName = "External change"
 	case ActorUserServer:
 		info.DisplayName = "Server"
 	default:
-		if u := s.authenticator.User(username); u != nil {
+		if u := s.authenticator.UserByID(subject); u != nil {
+			info.AccountID = u.ID
+			info.Username = u.Username
 			info.DisplayName = u.DisplayName
 			info.Color = u.Color
 		} else {
-			info.Color = auth.ColorForUsername(username)
+			info.Color = auth.ColorForUsername(subject)
 		}
 	}
 	return info
+}
+
+// subjectUsername returns the current username of a subject (account id or pseudo user)
+func (s *SyncServer) subjectUsername(subject string) (username string, accountID string) {
+	if strings.HasPrefix(subject, ":") || subject == "" {
+		return subject, ""
+	}
+	if u := s.authenticator.UserByID(subject); u != nil {
+		return u.Username, u.ID
+	}
+	return subject, ""
 }
 
 // Actors returns the actor map
@@ -228,7 +241,7 @@ func (s *SyncServer) Actors() []ActorInfo {
 	all := s.actors.All()
 	out := make([]ActorInfo, 0, len(all))
 	for _, id := range SortedActorIDs(all) {
-		out = append(out, s.actorInfo(id, all[id].Username))
+		out = append(out, s.actorInfo(id, all[id].Subject))
 	}
 	return out
 }
@@ -726,7 +739,7 @@ func (c *wsConn) run(documentID string) {
 		}
 		c.user = user
 	}
-	if _, err = c.server.actors.Bind(hello.ActorID, c.user.Username); err != nil {
+	if _, err = c.server.actors.Bind(hello.ActorID, c.user.ID); err != nil {
 		if errors.Is(err, ErrForeignActor) {
 			c.fail(CloseForbidden, ErrCodeForeignActor, err.Error())
 		} else {
@@ -828,14 +841,14 @@ func (c *wsConn) attachLocked(session *docSession) error {
 	}
 	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers})
 	session.conns[c] = struct{}{}
-	session.announceActorLocked(c.actorID, c.user.Username, c)
+	session.announceActorLocked(c.actorID, c.user.ID, c)
 	session.broadcastLocked(c.presenceLocked(), c)
 	c.syncLocked()
 	return nil
 }
 
 func (c *wsConn) userInfo() UserInfo {
-	return UserInfo{ClientID: c.clientID, Username: c.user.Username, DisplayName: c.user.DisplayName, Role: c.user.Role, Color: c.user.Color}
+	return UserInfo{ClientID: c.clientID, AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Role: c.user.Role, Color: c.user.Color}
 }
 
 func (c *wsConn) presenceLocked() PresenceMessage {
@@ -843,6 +856,7 @@ func (c *wsConn) presenceLocked() PresenceMessage {
 		Type:        MsgPresence,
 		DocumentID:  c.session.docID,
 		ClientID:    c.clientID,
+		AccountID:   c.user.ID,
 		Username:    c.user.Username,
 		DisplayName: c.user.DisplayName,
 		Color:       c.user.Color,
@@ -906,7 +920,7 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 	var newActors []string
 	for _, ch := range changes {
 		actor := ch.ActorID()
-		bound, err := c.server.actors.Bind(actor, c.user.Username)
+		bound, err := c.server.actors.Bind(actor, c.user.ID)
 		if err != nil {
 			if errors.Is(err, ErrForeignActor) {
 				c.fail(CloseForbidden, ErrCodeForeignActor, "the message contains changes of another user's actor "+actor)
@@ -927,7 +941,7 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 		return false
 	}
 	for _, actor := range newActors {
-		session.announceActorLocked(actor, c.user.Username, nil)
+		session.announceActorLocked(actor, c.user.ID, nil)
 	}
 	if !sameHeads(before, session.doc.Heads()) {
 		if _, err := session.text(); err != nil {

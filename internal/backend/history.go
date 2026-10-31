@@ -168,24 +168,34 @@ type HistoryEntry struct {
 	Path      string          `json:"path"`
 }
 
-// HistoryAuthor is a commit author. Username is empty if the author is not a configured user.
+// HistoryAuthor is a commit author. Username and AccountID are empty if the author is not
+// an account. Username is the current username of the account.
 type HistoryAuthor struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Username  string `json:"username"`
+	AccountID string `json:"accountId"`
 }
 
 func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 	a := HistoryAuthor{Name: sig.Name, Email: sig.Email}
-	if user, ok := strings.CutSuffix(sig.Email, "@mkdocseditor.invalid"); ok && rs.authenticator != nil && rs.authenticator.User(user) != nil {
-		a.Username = user
-	} else if rs.authenticator != nil {
+	if rs.authenticator == nil {
+		return a
+	}
+	var user *auth.User
+	if name, ok := strings.CutSuffix(sig.Email, "@mkdocseditor.invalid"); ok {
+		// current or former username
+		user = rs.authenticator.UserByUsername(name)
+	} else {
 		for _, u := range rs.authenticator.Users() {
 			if u.Email != "" && strings.EqualFold(u.Email, sig.Email) {
-				a.Username = u.Username
+				user = u
 				break
 			}
 		}
+	}
+	if user != nil {
+		a.Username, a.AccountID = user.Username, user.ID
 	}
 	return a
 }
@@ -410,7 +420,7 @@ func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, mess
 		}
 		ds.meta.LastChange = time.Now().UTC()
 		if s.changeRecorder != nil {
-			s.changeRecorder.RecordChanges(ds.meta.Path, map[string]int{user.Username: 1})
+			s.changeRecorder.RecordChanges(ds.meta.Path, map[string]int{user.ID: 1})
 		}
 		ds.broadcastSyncLocked()
 		ds.scheduleFlushLocked()

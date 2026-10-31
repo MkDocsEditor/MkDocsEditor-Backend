@@ -841,10 +841,14 @@ components:
 
     User:
       type: object
-      required: [ username, displayName, role, color ]
+      required: [ id, username, displayName, role, color ]
       properties:
+        id:
+          type: string
+          description: "Stable account id (`anonymous` when authentication is off)"
         username:
           type: string
+          description: "Current username; it can change, the id does not"
         displayName:
           type: string
         role:
@@ -871,9 +875,12 @@ components:
         actorId:
           type: string
           description: "Automerge actor id, hex"
+        accountId:
+          type: string
+          description: "Account the actor is bound to, empty for `:disk` / `:server`"
         username:
           type: string
-          description: "Username, or `:disk` / `:server` for changes made by the server"
+          description: "Current username of the account, or `:disk` / `:server` for changes made by the server"
         displayName:
           type: string
         color:
@@ -906,9 +913,12 @@ components:
           description: "Code point after the run"
         actorId:
           type: string
+        accountId:
+          type: string
+          description: "Account of the actor, empty for server changes or if unknown"
         username:
           type: string
-          description: "Owner of the actor, `:disk` / `:server` for server changes, empty if unknown"
+          description: "Current username of the account, `:disk` / `:server` for server changes, empty if unknown"
 
     HistoryEntry:
       type: object
@@ -945,7 +955,10 @@ components:
           type: string
         username:
           type: string
-          description: "The configured user with this email, empty if none"
+          description: "Current username of the account this author resolves to (by `<username>@mkdocseditor.invalid`, including former usernames, or by the account email), empty if none"
+        accountId:
+          type: string
+          description: "Id of that account, empty if none"
 
     Error:
       type: object

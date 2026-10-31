@@ -34,7 +34,7 @@ func newRestTestEnv(t *testing.T, configure ...func(c *configuration.Configurati
 		f(&configuration.CurrentConfig)
 	}
 	tm := NewTreeManager()
-	authenticator := newTestAuthenticator(t)
+	authenticator := newTestAuthenticator(t, filepath.Join(project, ".mkdocseditor"))
 	ss, err := NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
 	if err != nil {
 		t.Fatal(err)
@@ -267,12 +267,13 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	expectStatus(t, e.do(http.MethodDelete, "/resource/"+renamed.ID+"/", nil, ""), http.StatusOK)
 }
 
-func newTestAuthenticator(t *testing.T) *auth.Authenticator {
+func newTestAuthenticator(t *testing.T, stateDir string) *auth.Service {
 	t.Helper()
-	a, err := auth.NewAuthenticator(configuration.CurrentConfig.Server)
+	a, err := auth.Open(auth.Options{StateDir: stateDir, Server: configuration.CurrentConfig.Server})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = a.Close() })
 	return a
 }
 
@@ -372,7 +373,7 @@ func TestRestWsTicket(t *testing.T) {
 		t.Fatalf("ticket = %+v", ticket)
 	}
 	user, err := e.rs.authenticator.RedeemTicket(ticket.Ticket)
-	if err != nil || user.Username != "markus" {
+	if err != nil || user.Username != "markus" || user.ID == "" {
 		t.Fatalf("redeem: %v %v", user, err)
 	}
 	if _, err = e.rs.authenticator.RedeemTicket(ticket.Ticket); err == nil {

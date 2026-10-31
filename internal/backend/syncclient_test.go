@@ -28,7 +28,7 @@ type syncEnv struct {
 	ss       *SyncServer
 	rs       *RestService
 	http     *httptest.Server
-	authn    *auth.Authenticator
+	authn    *auth.Service
 	stateDir string
 
 	// gitOpts enables the git committer when set
@@ -54,11 +54,9 @@ func newSyncEnv(t *testing.T) *syncEnv {
 		{Username: "bob", PasswordHash: hash("bob-pw"), Role: "editor"},
 		{Username: "carol", PasswordHash: hash("carol-pw"), Role: "reader"},
 	}
-	authn, err := auth.NewAuthenticator(configuration.CurrentConfig.Server)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := &syncEnv{t: t, project: project, authn: authn, stateDir: filepath.Join(project, ".mkdocseditor")}
+	stateDir := filepath.Join(project, ".mkdocseditor")
+	authn := newTestAuthenticator(t, stateDir)
+	e := &syncEnv{t: t, project: project, authn: authn, stateDir: stateDir}
 	e.start()
 	t.Cleanup(e.stop)
 	return e
@@ -195,7 +193,7 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 	}
 	c.mu.Unlock()
 	if o.useTicket {
-		ticket, _, err := c.env.authn.IssueTicket(c.env.authn.User(c.user))
+		ticket, _, err := c.env.authn.IssueTicket(c.env.authn.UserByUsername(c.user))
 		if err != nil {
 			return err
 		}

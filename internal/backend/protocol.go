@@ -58,6 +58,7 @@ type (
 	// UserInfo describes a user to other users
 	UserInfo struct {
 		ClientID    string `json:"clientId,omitempty"`
+		AccountID   string `json:"accountId"`
 		Username    string `json:"username"`
 		DisplayName string `json:"displayName"`
 		Role        string `json:"role,omitempty"`
@@ -69,6 +70,7 @@ type (
 		Type        string `json:"type,omitempty"`
 		DocumentID  string `json:"documentId,omitempty"`
 		ActorID     string `json:"actorId"`
+		AccountID   string `json:"accountId"`
 		Username    string `json:"username"`
 		DisplayName string `json:"displayName"`
 		Color       string `json:"color"`
@@ -95,6 +97,7 @@ type (
 		Type        string          `json:"type"`
 		DocumentID  string          `json:"documentId"`
 		ClientID    string          `json:"clientId,omitempty"`
+		AccountID   string          `json:"accountId,omitempty"`
 		Username    string          `json:"username,omitempty"`
 		DisplayName string          `json:"displayName,omitempty"`
 		Color       string          `json:"color,omitempty"`

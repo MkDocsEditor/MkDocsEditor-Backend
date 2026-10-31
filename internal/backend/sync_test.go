@@ -501,7 +501,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 func TestStateDirInsideDocsIsRefused(t *testing.T) {
 	project := newTestWiki(t)
 	tm := NewTreeManager()
-	if _, err := NewSyncServer(tm, newTestAuthenticator(t), filepath.Join(project, "docs", ".state"), nil); err == nil {
+	if _, err := NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
 		t.Error("state dir inside docs accepted")
 	}
 }
@@ -599,7 +599,7 @@ func TestAuthorship(t *testing.T) {
 		t.Fatal("document not loaded")
 	}
 	session.mu.Lock()
-	full, err := computeAuthorship(session.doc, e.ss.actors.Owner)
+	full, err := computeAuthorship(session.doc, e.ss.actorOwner)
 	session.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)

@@ -23,7 +23,7 @@ func BenchmarkAuthorship(b *testing.B) {
 	doc := benchDoc()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := computeAuthorship(doc, func(string) string { return "" }); err != nil {
+		if _, err := computeAuthorship(doc, func(string) (string, string) { return "", "" }); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -49,6 +49,6 @@ func BenchmarkAuthorshipIncremental(b *testing.B) {
 		if err = state.advance(changes); err != nil {
 			b.Fatal(err)
 		}
-		state.result(func(string) string { return "" })
+		state.result(func(string) (string, string) { return "", "" })
 	}
 }

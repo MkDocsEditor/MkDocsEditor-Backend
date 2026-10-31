@@ -10,8 +10,11 @@ Create a `mkdocsrest.yaml` file similar to the [mkdocsrest_example.yaml](mkdocsr
 
 ### Users and authentication
 
-Every request except `GET /alive/` needs HTTP basic auth against the users in
-`server.auth.users`. Each user has a bcrypt password hash and a role:
+Accounts live in an SQLite database in the state directory (`auth.db`, see
+[docs/auth.md](docs/auth.md)). On the first start, the users of `server.auth.users` (and
+the old `server.basicAuth` user) are imported into it once; after that the configuration
+list is ignored and can be removed. Every request except `GET /alive/` needs HTTP basic
+auth against these accounts. Each user has a bcrypt password hash and a role:
 
 | Role | Can |
 |---|---|

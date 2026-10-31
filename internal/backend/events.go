@@ -143,11 +143,11 @@ func (s *SyncServer) onlineSnapshot() *OnlineMessage {
 		seen := map[string]bool{}
 		var users []UserInfo
 		for c := range session.conns {
-			if seen[c.user.Username] {
+			if seen[c.user.ID] {
 				continue
 			}
-			seen[c.user.Username] = true
-			users = append(users, UserInfo{Username: c.user.Username, DisplayName: c.user.DisplayName, Color: c.user.Color})
+			seen[c.user.ID] = true
+			users = append(users, UserInfo{AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Color: c.user.Color})
 		}
 		docID := session.docID
 		session.mu.Unlock()

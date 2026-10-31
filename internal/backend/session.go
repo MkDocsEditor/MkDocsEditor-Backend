@@ -308,8 +308,8 @@ func (ds *docSession) broadcastLocked(msg any, except *wsConn) {
 }
 
 // announceActorLocked tells the connections (except one) which user an actor belongs to
-func (ds *docSession) announceActorLocked(actorID string, username string, except *wsConn) {
-	info := ds.server.actorInfo(actorID, username)
+func (ds *docSession) announceActorLocked(actorID string, subject string, except *wsConn) {
+	info := ds.server.actorInfo(actorID, subject)
 	info.Type = MsgActor
 	info.DocumentID = ds.docID
 	ds.broadcastLocked(&info, except)
@@ -320,7 +320,7 @@ func (ds *docSession) actorInfos() []ActorInfo {
 	all := ds.server.actors.All()
 	out := make([]ActorInfo, 0, len(all))
 	for _, id := range SortedActorIDs(all) {
-		out = append(out, ds.server.actorInfo(id, all[id].Username))
+		out = append(out, ds.server.actorInfo(id, all[id].Subject))
 	}
 	return out
 }

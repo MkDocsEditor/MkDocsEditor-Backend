@@ -43,7 +43,7 @@ type pendingEdits struct {
 // GitCommitter batches the user changes of each document into git commits
 type GitCommitter struct {
 	repo      *GitRepo
-	authn     *auth.Authenticator
+	authn     *auth.Service
 	opts      GitCommitterOptions
 	statePath string
 	sync      *SyncServer
@@ -58,7 +58,7 @@ type GitCommitter struct {
 }
 
 // NewGitCommitter creates the committer and loads the uncommitted changes of the last run
-func NewGitCommitter(repo *GitRepo, authn *auth.Authenticator, stateDir string, opts GitCommitterOptions) (*GitCommitter, error) {
+func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts GitCommitterOptions) (*GitCommitter, error) {
 	if opts.CheckInterval <= 0 {
 		opts.CheckInterval = 15 * time.Second
 	}
@@ -84,7 +84,9 @@ func NewGitCommitter(repo *GitRepo, authn *auth.Authenticator, stateDir string, 
 	for p, e := range c.pending {
 		if e == nil || len(e.Changes) == 0 {
 			delete(c.pending, p)
+			continue
 		}
+		e.Changes = c.migrateSubjects(e.Changes)
 	}
 	return c, nil
 }
@@ -210,7 +212,7 @@ func (c *GitCommitter) commitEdits(relPath string) {
 	if len(changes) == 0 {
 		return
 	}
-	users := rankUsers(changes)
+	users := c.rankUsers(changes)
 	author := c.signature(users[0])
 	var coAuthors []GitSignature
 	for _, u := range users[1:] {
@@ -228,10 +230,10 @@ func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths .
 		c.sync.FlushAll()
 	}
 	changes := c.takePending(paths...)
-	author := c.signature(user.Username)
+	author := c.signature(user.ID)
 	var coAuthors []GitSignature
-	for _, u := range rankUsers(changes) {
-		if u != user.Username {
+	for _, u := range c.rankUsers(changes) {
+		if u != user.ID {
 			coAuthors = append(coAuthors, c.signature(u))
 		}
 	}
@@ -264,27 +266,52 @@ func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []G
 	return nil
 }
 
-// rankUsers sorts users by their number of changes, most first
-func rankUsers(changes map[string]int) []string {
+// rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the
+// name in the git signature, so the order does not depend on the random account ids.
+func (c *GitCommitter) rankUsers(changes map[string]int) []string {
 	users := make([]string, 0, len(changes))
+	names := make(map[string]string, len(changes))
 	for u := range changes {
 		users = append(users, u)
+		names[u] = c.signature(u).Name
 	}
 	sort.Slice(users, func(i, j int) bool {
-		if changes[users[i]] != changes[users[j]] {
-			return changes[users[i]] > changes[users[j]]
+		a, b := users[i], users[j]
+		if changes[a] != changes[b] {
+			return changes[a] > changes[b]
 		}
-		return users[i] < users[j]
+		if names[a] != names[b] {
+			return names[a] < names[b]
+		}
+		return a < b
 	})
 	return users
 }
 
-// signature returns the git author of a user
-func (c *GitCommitter) signature(username string) GitSignature {
-	name, email := username, ""
+// migrateSubjects maps the usernames of a pending file written before the account database
+// to account ids
+func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
+	if c.authn == nil {
+		return changes
+	}
+	out := make(map[string]int, len(changes))
+	for subject, n := range changes {
+		if c.authn.UserByID(subject) == nil {
+			if u := c.authn.UserByUsername(subject); u != nil {
+				subject = u.ID
+			}
+		}
+		out[subject] += n
+	}
+	return out
+}
+
+// signature returns the git author of a subject (account id)
+func (c *GitCommitter) signature(subject string) GitSignature {
+	name, email, username := subject, "", subject
 	if c.authn != nil {
-		if u := c.authn.User(username); u != nil {
-			name, email = u.DisplayName, u.Email
+		if u := c.authn.UserByID(subject); u != nil {
+			name, email, username = u.DisplayName, u.Email, u.Username
 		}
 	}
 	if email == "" {

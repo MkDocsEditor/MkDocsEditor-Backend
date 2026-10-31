@@ -1,22 +1,24 @@
-// Package auth authenticates users against the configured user list and issues
-// short-lived, single-use tickets for websocket connections.
+// Package auth manages the accounts of the backend: storage in an embedded SQLite database,
+// passwords, sessions, websocket tickets and the bindings of Automerge actor ids to accounts.
+// See docs/auth.md.
 package auth
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
+	"database/sql"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
-	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Roles of a user
@@ -26,12 +28,17 @@ const (
 	RoleReader = "reader"
 )
 
+// Account states
 const (
-	// TicketLifetime is how long a websocket ticket stays valid
-	TicketLifetime = 60 * time.Second
-	// how long a successful password check is remembered, so not every request pays for bcrypt
-	verificationCacheLifetime = 10 * time.Minute
-	// AnonymousUsername is the user of all requests when no authentication is configured
+	StatusActive   = "active"
+	StatusDisabled = "disabled"
+	StatusDeleted  = "deleted"
+)
+
+const (
+	// AnonymousID is the account id and username of all requests when authentication is off
+	AnonymousID = "anonymous"
+	// AnonymousUsername is the username of the anonymous user
 	AnonymousUsername = "anonymous"
 )
 
@@ -43,22 +50,15 @@ var palette = []string{
 
 var colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
-// dummyHash is compared against for unknown users, so response times do not reveal usernames
-var dummyHash = sync.OnceValue(func() []byte {
-	h, err := bcrypt.GenerateFromPassword([]byte("dummy password"), 12)
-	if err != nil {
-		panic(err)
-	}
-	return h
-})
-
-// User is an authenticated user
+// User is the public view of an account. Instances are snapshots and never change.
 type User struct {
+	ID          string `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`
 	Email       string `json:"-"`
 	Role        string `json:"role"`
 	Color       string `json:"color"`
+	Status      string `json:"-"`
 }
 
 // CanWrite reports whether the user may change documents and the tree
@@ -66,100 +66,15 @@ func (u *User) CanWrite() bool {
 	return u.Role == RoleAdmin || u.Role == RoleEditor
 }
 
-type account struct {
-	user *User
-	// bcrypt hash, or empty when plainPassword is used (legacy basicAuth)
-	passwordHash  []byte
-	plainPassword string
+// IsAdmin reports whether the user is an admin
+func (u *User) IsAdmin() bool {
+	return u.Role == RoleAdmin
 }
 
-type cachedVerification struct {
-	digest  [32]byte
-	expires time.Time
-}
-
-type ticket struct {
-	user    *User
-	expires time.Time
-}
-
-// Authenticator checks credentials and manages websocket tickets
-type Authenticator struct {
-	accounts map[string]*account
-	lock     sync.Mutex
-	cache    map[string]cachedVerification
-	tickets  map[string]ticket
-	now      func() time.Time
-}
-
-// NewAuthenticator creates an Authenticator from the server configuration.
-// It returns an error if the configuration is invalid.
-func NewAuthenticator(config configuration.ServerConfiguration) (*Authenticator, error) {
-	a := &Authenticator{
-		accounts: map[string]*account{},
-		cache:    map[string]cachedVerification{},
-		tickets:  map[string]ticket{},
-		now:      time.Now,
-	}
-	for i, uc := range config.Auth.Users {
-		if uc.Username == "" {
-			return nil, fmt.Errorf("server.auth.users[%d]: username is empty", i)
-		}
-		if strings.ContainsAny(uc.Username, ":") {
-			return nil, fmt.Errorf("server.auth.users[%d]: username must not contain ':'", i)
-		}
-		if _, exists := a.accounts[uc.Username]; exists {
-			return nil, fmt.Errorf("server.auth.users[%d]: duplicate username %q", i, uc.Username)
-		}
-		passwordHash := normalizeHash(uc.PasswordHash)
-		if _, err := bcrypt.Cost([]byte(passwordHash)); err != nil {
-			return nil, fmt.Errorf("server.auth.users[%d] (%s): passwordHash is not a bcrypt hash: %w", i, uc.Username, err)
-		}
-		role := uc.Role
-		if role == "" {
-			role = RoleEditor
-		}
-		if role != RoleAdmin && role != RoleEditor && role != RoleReader {
-			return nil, fmt.Errorf("server.auth.users[%d] (%s): unknown role %q", i, uc.Username, uc.Role)
-		}
-		if uc.Color != "" && !colorPattern.MatchString(uc.Color) {
-			return nil, fmt.Errorf("server.auth.users[%d] (%s): color must look like #1971c2", i, uc.Username)
-		}
-		a.accounts[uc.Username] = &account{
-			user:         newUser(uc.Username, uc.DisplayName, uc.Email, role, uc.Color),
-			passwordHash: []byte(passwordHash),
-		}
-	}
-
-	legacy := config.BasicAuth
-	if legacy.User != "" && legacy.Password != "" {
-		if _, exists := a.accounts[legacy.User]; exists {
-			return nil, fmt.Errorf("server.basicAuth.user %q is also in server.auth.users", legacy.User)
-		}
-		a.accounts[legacy.User] = &account{
-			user:          newUser(legacy.User, "", "", RoleAdmin, ""),
-			plainPassword: legacy.Password,
-		}
-	}
-	return a, nil
-}
-
-// normalizeHash accepts the $2y$ prefix of htpasswd and PHP, which is the same algorithm as $2b$
-func normalizeHash(h string) string {
-	if strings.HasPrefix(h, "$2y$") {
-		return "$2b$" + h[4:]
-	}
-	return h
-}
-
-func newUser(username, displayName, email, role, color string) *User {
-	if displayName == "" {
-		displayName = username
-	}
-	if color == "" {
-		color = ColorForUsername(username)
-	}
-	return &User{Username: username, DisplayName: displayName, Email: email, Role: role, Color: color}
+// Anonymous is the user of all requests when authentication is off
+func Anonymous() *User {
+	return &User{ID: AnonymousID, Username: AnonymousUsername, DisplayName: "Anonymous", Role: RoleAdmin,
+		Color: ColorForUsername(AnonymousUsername), Status: StatusActive}
 }
 
 // ColorForUsername returns the stable default colour of a user
@@ -169,106 +84,187 @@ func ColorForUsername(username string) string {
 	return palette[int(h.Sum32()%12)%len(palette)]
 }
 
-// Enabled reports whether any user is configured. Without users, authentication is off.
-func (a *Authenticator) Enabled() bool {
-	return len(a.accounts) > 0
+// usernameKey is the case-insensitive form of a username used for uniqueness
+func usernameKey(username string) string {
+	return strings.ToLower(norm.NFKC.String(username))
 }
 
-// Anonymous is the user of all requests when authentication is off
-func Anonymous() *User {
-	return newUser(AnonymousUsername, "Anonymous", "", RoleAdmin, "")
+// Options configure the Service
+type Options struct {
+	// StateDir holds the database (auth.db) and, before the migration, actors.json
+	StateDir string
+	// Server is the server configuration (auth settings and the users to import)
+	Server configuration.ServerConfiguration
 }
 
-// User returns the configured user with the given name, or nil
-func (a *Authenticator) User(username string) *User {
-	if acc, ok := a.accounts[username]; ok {
-		return acc.user
+// Service is the account system
+type Service struct {
+	db   *sql.DB
+	opts Options
+	now  func() time.Time
+
+	// in-memory view of all accounts, rebuilt after every change
+	cacheMu    sync.Mutex
+	cacheValid bool
+	byID       map[string]*User
+	byUsername map[string]string // username key (current and former) -> account id
+	active     int
+
+	ticketsMu sync.Mutex
+	tickets   map[string]ticket
+
+	basicMu    sync.Mutex
+	basicCache map[string]cachedVerification
+	// basicKey keys the digests in basicCache; it exists only in memory and changes on
+	// every start, so a memory dump of the cache cannot be brute-forced offline without it
+	basicKey []byte
+}
+
+// Open opens the account database in the state directory and imports the configured users
+// and the actor bindings of actors.json on the first start.
+func Open(opts Options) (*Service, error) {
+	db, err := openDatabase(filepath.Join(opts.StateDir, DatabaseFileName))
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{
+		db:         db,
+		opts:       opts,
+		now:        time.Now,
+		tickets:    map[string]ticket{},
+		basicCache: map[string]cachedVerification{},
+		basicKey:   make([]byte, 32),
+	}
+	if _, err = rand.Read(s.basicKey); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err = s.importConfiguredUsers(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err = s.importActorsFile(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// Close closes the database
+func (s *Service) Close() error {
+	return s.db.Close()
+}
+
+// Enabled reports whether authentication is on. It is off while no account exists and no
+// user is configured.
+func (s *Service) Enabled() bool {
+	s.loadCache()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.active > 0
+}
+
+func (s *Service) invalidateCache() {
+	s.cacheMu.Lock()
+	s.cacheValid = false
+	s.cacheMu.Unlock()
+}
+
+func (s *Service) loadCache() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.cacheValid {
+		return
+	}
+	byID := map[string]*User{}
+	byUsername := map[string]string{}
+	active := 0
+	rows, err := s.db.Query("SELECT id, username, username_key, display_name, email, color, role, status FROM accounts")
+	if err != nil {
+		log.Printf("Unable to read the accounts: %v", err)
+		return
+	}
+	for rows.Next() {
+		var u User
+		var key string
+		if err = rows.Scan(&u.ID, &u.Username, &key, &u.DisplayName, &u.Email, &u.Color, &u.Role, &u.Status); err != nil {
+			log.Printf("Unable to read the accounts: %v", err)
+			_ = rows.Close()
+			return
+		}
+		byID[u.ID] = &u
+		byUsername[key] = u.ID
+		if u.Status != StatusDeleted {
+			active++
+		}
+	}
+	_ = rows.Close()
+	rows, err = s.db.Query("SELECT username_key, account_id FROM username_aliases")
+	if err != nil {
+		log.Printf("Unable to read the former usernames: %v", err)
+		return
+	}
+	for rows.Next() {
+		var key, id string
+		if err = rows.Scan(&key, &id); err == nil {
+			if _, taken := byUsername[key]; !taken {
+				byUsername[key] = id
+			}
+		}
+	}
+	_ = rows.Close()
+	s.byID, s.byUsername, s.active, s.cacheValid = byID, byUsername, active, true
+}
+
+// UserByID returns the account with the given id in any state (deleted accounts are
+// tombstones), the anonymous user for AnonymousID, or nil.
+func (s *Service) UserByID(id string) *User {
+	if id == AnonymousID {
+		return Anonymous()
+	}
+	s.loadCache()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return s.byID[id]
+}
+
+// UserByUsername returns the account that has or had the username (ignoring case), or nil
+func (s *Service) UserByUsername(username string) *User {
+	s.loadCache()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if id, ok := s.byUsername[usernameKey(username)]; ok {
+		return s.byID[id]
 	}
 	return nil
 }
 
-// Users returns all configured users
-func (a *Authenticator) Users() []*User {
-	users := make([]*User, 0, len(a.accounts))
-	for _, acc := range a.accounts {
-		users = append(users, acc.user)
+// Users returns all accounts, including deleted ones
+func (s *Service) Users() []*User {
+	s.loadCache()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	users := make([]*User, 0, len(s.byID))
+	for _, u := range s.byID {
+		users = append(users, u)
 	}
 	return users
 }
 
-// Authenticate checks a username and password. It returns the user, or nil if the credentials are wrong.
-func (a *Authenticator) Authenticate(username, password string) *User {
-	acc, ok := a.accounts[username]
-	if !ok {
-		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
-		return nil
-	}
-
-	if acc.passwordHash == nil {
-		if subtle.ConstantTimeCompare([]byte(password), []byte(acc.plainPassword)) == 1 {
-			return acc.user
-		}
-		return nil
-	}
-
-	digest := sha256.Sum256([]byte(username + "\x00" + password))
-	a.lock.Lock()
-	cached, hit := a.cache[username]
-	a.lock.Unlock()
-	if hit && a.now().Before(cached.expires) && subtle.ConstantTimeCompare(cached.digest[:], digest[:]) == 1 {
-		return acc.user
-	}
-
-	if bcrypt.CompareHashAndPassword(acc.passwordHash, []byte(password)) != nil {
-		return nil
-	}
-	a.lock.Lock()
-	a.cache[username] = cachedVerification{digest: digest, expires: a.now().Add(verificationCacheLifetime)}
-	a.lock.Unlock()
-	return acc.user
+// newID returns a random id of 26 lower-case base32 characters (128 bits)
+func newID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
 }
 
-// IssueTicket creates a single-use websocket ticket for the given user
-func (a *Authenticator) IssueTicket(user *User) (string, time.Time, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", time.Time{}, err
-	}
-	value := base64.RawURLEncoding.EncodeToString(b)
-	expires := a.now().Add(TicketLifetime)
+// ErrNotFound is returned for unknown objects
+var ErrNotFound = errors.New("not found")
 
-	a.lock.Lock()
-	defer a.lock.Unlock()
-	// drop expired tickets
-	for k, t := range a.tickets {
-		if !a.now().Before(t.expires) {
-			delete(a.tickets, k)
-		}
+func validateRole(role string) error {
+	switch role {
+	case RoleAdmin, RoleEditor, RoleReader:
+		return nil
 	}
-	a.tickets[value] = ticket{user: user, expires: expires}
-	return value, expires, nil
-}
-
-// ErrInvalidTicket is returned for unknown, used or expired tickets
-var ErrInvalidTicket = errors.New("invalid or expired ticket")
-
-// RedeemTicket returns the user of a ticket and invalidates it
-func (a *Authenticator) RedeemTicket(value string) (*User, error) {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-	t, ok := a.tickets[value]
-	if !ok {
-		return nil, ErrInvalidTicket
-	}
-	delete(a.tickets, value)
-	if !a.now().Before(t.expires) {
-		return nil, ErrInvalidTicket
-	}
-	return t.user, nil
-}
-
-// HashPassword creates a bcrypt hash for the configuration
-func HashPassword(password string) (string, error) {
-	h, err := bcrypt.GenerateFromPassword([]byte(password), 12)
-	return string(h), err
+	return fmt.Errorf("unknown role %q", role)
 }
