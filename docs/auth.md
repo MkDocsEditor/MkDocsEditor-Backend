@@ -509,6 +509,16 @@ standard JSON of the new credential (`RegistrationResponseJSON`, including
 `response.transports` when available). `passkeyName`/`name` is optional (up to 64
 characters, default: authenticator name from the AAGUID if known, else "Passkey").
 
+**Password managers.** Passkeys created by third-party providers (Bitwarden, 1Password,
+Google Password Manager, iCloud Keychain) work on the web and on Android: attestation is
+`none`, any AAGUID and authenticator is accepted, and an account can have any number of
+passkeys. Synced passkeys report `backedUp: true`. TOTP is plain RFC 6238 (SHA1, 6
+digits, 30 s) with a standard `otpauth://` URI, so every password manager can store it.
+The API field names stay plain (`username`, `password`, `currentPassword`,
+`newPassword`); clients set the `autocomplete` attributes (`username`,
+`current-password`, `new-password`, `one-time-code`, `webauthn`) so password managers
+fill and save them.
+
 For link begin, the username is checked (409 `username-taken`, 400 `invalid-username`)
 but not reserved; finish checks again.
 
