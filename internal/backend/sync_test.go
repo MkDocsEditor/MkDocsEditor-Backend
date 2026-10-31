@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -521,5 +522,89 @@ func TestExcludeFromGit(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(project, ".git", "info", "exclude"))
 	if string(b) != "*.tmp\n# MkDocsEditor backend state\n/.mkdocseditor/\n" {
 		t.Errorf("exclude = %q", b)
+	}
+}
+
+func TestAuthorship(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+
+	// not loaded yet: everything was imported by the server
+	rec := e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var au Authorship
+	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
+		t.Fatal(err)
+	}
+	if len(au.Runs) != 1 || au.Runs[0].Username != ActorUserServer || au.Runs[0].End != len([]rune(setupText)) {
+		t.Fatalf("initial runs: %+v", au.Runs)
+	}
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	// computed and kept while loaded, the requests below only advance it
+	if rec = e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol"); rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	a.insertText(0, "Ä😀 ") // 3 code points at the start
+	b.waitFor("a's edit", func() bool { return strings.HasPrefix(b.textLocked(), "Ä😀 ") })
+	b.appendText("bob\n") // at the end
+	a.waitFor("b's edit", func() bool { return strings.HasSuffix(a.textLocked(), "bob\n") })
+	b.edit(func(text *automerge.Text) error { return text.Delete(5, 3) }) // delete "Set" of "# Setup"
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == b.text() })
+
+	rec = e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol")
+	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
+		t.Fatal(err)
+	}
+	text := []rune(b.text())
+	var got []string
+	end := 0
+	for _, r := range au.Runs {
+		if r.Start != end {
+			t.Fatalf("gap before %+v", r)
+		}
+		end = r.End
+		got = append(got, r.Username+":"+string(text[r.Start:r.End]))
+	}
+	if end != len(text) {
+		t.Fatalf("runs end at %d, text has %d code points", end, len(text))
+	}
+	want := []string{"alice:Ä😀 ", ":server:# up\n\nSome text.\n", "bob:bob\n"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("authorship = %q, want %q", got, want)
+	}
+
+	// served from the cache while nothing changed
+	rec2 := e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol")
+	if rec2.Body.String() != rec.Body.String() {
+		t.Error("cached authorship differs")
+	}
+
+	// the advanced state matches a full replay
+	a.insertText(1, "a")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
+	rec = e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol")
+	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
+		t.Fatal(err)
+	}
+	e.ss.mu.Lock()
+	session := e.ss.sessions["guide/setup.md"]
+	e.ss.mu.Unlock()
+	if session == nil {
+		t.Fatal("document not loaded")
+	}
+	session.mu.Lock()
+	full, err := computeAuthorship(session.doc, e.ss.actors.Owner)
+	session.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(au) != fmt.Sprint(*full) {
+		t.Errorf("incremental %+v, full %+v", au, *full)
 	}
 }

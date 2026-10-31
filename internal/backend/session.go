@@ -36,6 +36,9 @@ type docSession struct {
 	flushTimer *time.Timer
 	dirty      bool
 	closed     bool
+
+	// authorship replay state, advanced on request
+	authorship *authorshipState
 }
 
 // newDocument creates a new Automerge document with the given text, made by a server actor

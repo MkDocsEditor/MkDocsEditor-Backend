@@ -358,6 +358,31 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /document/{documentId}/authorship/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "Per-character authorship of a document"
+      description: |
+        Which actor (and user) inserted each character of the current text, derived from the
+        Automerge history. Positions are Unicode code point offsets into the text at the
+        returned heads. See docs/sync-protocol.md, section 7.
+      operationId: getDocumentAuthorship
+      tags: [ Documents ]
+      responses:
+        "200":
+          description: "The authorship runs"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Authorship"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /document/{documentId}/ws/:
     parameters:
       - $ref: "#/components/parameters/documentId"
@@ -708,6 +733,37 @@ components:
           type: string
         color:
           type: string
+
+    Authorship:
+      type: object
+      required: [ heads, runs ]
+      properties:
+        heads:
+          type: array
+          description: "Automerge heads (hex) of the text the runs describe"
+          items:
+            type: string
+        runs:
+          type: array
+          description: "Consecutive runs covering the whole text, in order"
+          items:
+            $ref: "#/components/schemas/AuthorshipRun"
+
+    AuthorshipRun:
+      type: object
+      required: [ start, end, actorId, username ]
+      properties:
+        start:
+          type: integer
+          description: "First code point of the run"
+        end:
+          type: integer
+          description: "Code point after the run"
+        actorId:
+          type: string
+        username:
+          type: string
+          description: "Owner of the actor, `:disk` / `:server` for server changes, empty if unknown"
 
     Error:
       type: object
