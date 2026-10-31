@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	mutexSync "sync"
 )
@@ -46,13 +45,21 @@ func OpenGitRepo(dir string, committer GitSignature) (*GitRepo, error) {
 
 // run runs git in the docs folder and returns its stdout
 func (g *GitRepo) run(env []string, args ...string) (string, error) {
-	// the repository may belong to another uid (an NFS volume), git would refuse it
-	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off"}, args...)
-	// no shell is involved; paths always follow "--" and values are passed as option arguments
-	cmd := exec.Command("git", full...) // #nosec G204
+	return g.runInput(env, "", args...)
+}
+
+// runInput runs git with stdin. User provided values (paths, names, messages) are never passed
+// as arguments: paths go through stdin (--pathspec-from-file), authors through the environment
+// and messages through a file.
+func (g *GitRepo) runInput(env []string, stdin string, args ...string) (string, error) {
+	// the repository may belong to another uid (an NFS volume), git would refuse it.
+	// Literal pathspecs: a file named ":(glob)*" is just a file.
+	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off", "--literal-pathspecs"}, args...)
+	cmd := exec.Command("git", full...) // #nosec G204 -- fixed git subcommands, no shell, no user values
 	cmd.Dir = g.dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	cmd.Env = append(cmd.Env, env...)
+	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -85,41 +92,50 @@ func exitCode(err error) int {
 	return -1
 }
 
-// Commit commits the given paths (files or folders, existing or deleted) and nothing else.
-// Other staged changes in the repository stay staged and uncommitted. It returns false if the
-// paths have no changes.
+// Commit commits the given paths (files or folders, existing or deleted, relative to the docs
+// folder) and nothing else. Other staged changes in the repository stay staged and uncommitted.
+// It returns false if the paths have no changes.
 func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	// only paths git can stage: existing files (tracked or not, not ignored) and deleted tracked files
+	out, err := g.run(nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return false, err
+	}
+	known := strings.Split(out, "\x00")
 	var pathspecs []string
 	for _, p := range paths {
-		if _, err := os.Lstat(filepath.Join(g.dir, filepath.FromSlash(p))); err == nil {
-			pathspecs = append(pathspecs, p)
-			continue
-		}
-		// deleted: only a path git knows can be staged
-		out, err := g.run(nil, "ls-files", "--", p)
-		if err != nil {
-			return false, err
-		}
-		if strings.TrimSpace(out) != "" {
-			pathspecs = append(pathspecs, p)
+		for _, k := range known {
+			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
+				pathspecs = append(pathspecs, p)
+				break
+			}
 		}
 	}
 	if len(pathspecs) == 0 {
 		return false, nil
 	}
+	pathspecInput := strings.Join(pathspecs, "\x00")
 
-	if _, err := g.run(nil, append([]string{"add", "--all", "--"}, pathspecs...)...); err != nil {
+	if _, err = g.runInput(nil, pathspecInput, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return false, err
 	}
-	_, err := g.run(nil, append([]string{"diff", "--cached", "--quiet", "--"}, pathspecs...)...)
-	if err == nil {
+	out, err = g.run(nil, "diff", "--cached", "--relative", "--name-only", "-z")
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for _, k := range strings.Split(out, "\x00") {
+		for _, p := range pathspecs {
+			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
+				changed = true
+			}
+		}
+	}
+	if !changed {
 		return false, nil
-	}
-	if exitCode(err) != 1 {
-		return false, err
 	}
 
 	message := subject
@@ -129,10 +145,25 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 			message += "\nCo-authored-by: " + co.String()
 		}
 	}
-	env := []string{"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email}
-	args := []string{"-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify", "--only",
-		"--author", author.String(), "--message", message, "--"}
-	if _, err = g.run(env, append(args, pathspecs...)...); err != nil {
+	messageFile, err := os.CreateTemp("", "mkdocseditor-commit-")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = os.Remove(messageFile.Name()) }()
+	_, err = messageFile.WriteString(message + "\n")
+	if cerr := messageFile.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return false, err
+	}
+
+	env := []string{
+		"GIT_AUTHOR_NAME=" + author.Name, "GIT_AUTHOR_EMAIL=" + author.Email,
+		"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email,
+	}
+	if _, err = g.runInput(env, pathspecInput, "-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify",
+		"--only", "--cleanup=whitespace", "--file="+messageFile.Name(), "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return false, err
 	}
 	return true, nil

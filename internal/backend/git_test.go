@@ -223,3 +223,20 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 		t.Errorf("author %q", got)
 	}
 }
+
+// file names are never interpreted as pathspec magic or options
+func TestGitCommitsOddNames(t *testing.T) {
+	e := newGitEnv(t, GitCommitterOptions{})
+	for _, name := range []string{":(exclude)index", "--all", "*"} {
+		rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"root","name":"`+name+`"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("create %q: %d %s", name, rec.Code, rec.Body.String())
+		}
+		if files := e.git0("show", "--format=", "--name-only", "HEAD"); files != "docs/"+name+".md\n" {
+			t.Errorf("commit of %q has files %q", name, files)
+		}
+	}
+	if got := e.commits(); len(got) != 4 {
+		t.Errorf("commits %v", got)
+	}
+}
