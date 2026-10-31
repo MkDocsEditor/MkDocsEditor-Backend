@@ -4,45 +4,102 @@ on:
   push:
     branches: [ master ]
     tags:
-      - '*.*.*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - '*.*.*'
   pull_request:
     branches: [ master ]
 
+permissions:
+  contents: read
+
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # the minimum version from go.mod and the latest stable release
+        go: [ go.mod, stable ]
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go (go.mod)
+        if: matrix.go == 'go.mod'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Go (stable)
+        if: matrix.go == 'stable'
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Check go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
   generate:
     name: Generate cross-platform builds
     runs-on: ubuntu-latest
-
+    needs: [ test, lint ]
+    permissions:
+      contents: write
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - name: Test
-        run: go test -v ./...
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # automerge-go links a Rust static library through cgo, so cross compiling needs a C cross compiler
+      - name: Install the arm64 C cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build
-        run: go build -v ./...
-
-      - name: Genereat build files
         run: |
-          GOOS="linux"
-          GOARCH="amd64"
-          filename="$GOOS-$GOARCH"
-          go build -o ./dist/mkdocs-backend-$filename -buildmode "exe" main.go
-
-      - name: Genereat build files
-        run: |
-          GOOS="linux"
-          GOARCH="arm64"
-          filename="$GOOS-$GOARCH"
-          go build -o ./dist/mkdocs-backend-$filename -buildmode "exe" main.go
+          VERSION="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then VERSION="dev"; fi
+          LDFLAGS="-w -s -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Version=${VERSION} -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Commit=${GITHUB_SHA::7} -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o ./dist/mkdocs-backend-linux-amd64 .
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc go build -trimpath -ldflags "${LDFLAGS}" -o ./dist/mkdocs-backend-linux-arm64 .
+          file ./dist/*
+          ./dist/mkdocs-backend-linux-amd64 --version
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             dist/mkdocs-backend-linux-amd64
             dist/mkdocs-backend-linux-arm64
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

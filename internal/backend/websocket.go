@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -11,9 +12,13 @@ import (
 
 const (
 	TypeInitialContent = "initial-content"
-	TypeEditRequest    = "edit-request"
 	TypeSyncRequest    = "sync-request"
 )
+
+// SyncManager is implemented by the component that processes document sync requests
+type SyncManager interface {
+	IsItemBeingEditedRecursive(s *Section) (err error)
+}
 
 type WebsocketConnectionManager struct {
 	treeManager *TreeManager
@@ -25,7 +30,6 @@ type WebsocketConnectionManager struct {
 	connectionsPerDocument map[string]uint
 
 	onNewClient          func(client *websocket.Conn, document *Document) error
-	onIncomingMessage    func(client *websocket.Conn, request EditRequest) error
 	onSyncRequest        func(client *websocket.Conn, request SyncRequest) error
 	onClientDisconnected func(client *websocket.Conn, documentId string, remainingConnections uint)
 }
@@ -88,24 +92,13 @@ func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, docum
 			break
 		}
 
-		switch request.(type) {
-		//case InitialContentRequest:
-		case EditRequest:
-			// Send the newly received message to the broadcast channel
-			err = wcm.handleIncomingMessage(client, request.(EditRequest))
-			if err != nil {
-				log.Printf("%v: error: %v", client.RemoteAddr(), err)
-				break
-			}
+		switch r := request.(type) {
 		case SyncRequest:
-			err = wcm.handleSyncRequest(client, request.(SyncRequest))
-			if err != nil {
+			if err = wcm.handleSyncRequest(client, r); err != nil {
 				log.Printf("%v: error: %v", client.RemoteAddr(), err)
-				break
 			}
 		default:
 			log.Printf("%v: error: invalid message type: %v", client.RemoteAddr(), request)
-			break
 		}
 	}
 
@@ -121,31 +114,19 @@ type SocketEntityBase struct {
 func (wcm *WebsocketConnectionManager) parseRequestBody(
 	client *websocket.Conn,
 ) (request interface{}, err error) {
-	var baseRequest SocketEntityBase
-
-	err = client.ReadJSON(&baseRequest)
+	_, data, err := client.ReadMessage()
 	if err != nil {
 		return nil, err
 	}
+
+	var baseRequest SocketEntityBase
+	if err = json.Unmarshal(data, &baseRequest); err != nil {
+		return nil, err
+	}
 	switch baseRequest.Type {
-	case TypeInitialContent:
-		var initialContentRequest InitialContentRequest
-		err = client.ReadJSON(&initialContentRequest)
-		if err != nil {
-			return nil, err
-		}
-		return initialContentRequest, nil
-	case TypeEditRequest:
-		var editRequest EditRequest
-		err = client.ReadJSON(&editRequest)
-		if err != nil {
-			return nil, err
-		}
-		return editRequest, nil
 	case TypeSyncRequest:
 		var syncRequest SyncRequest
-		err = client.ReadJSON(&syncRequest)
-		if err != nil {
+		if err = json.Unmarshal(data, &syncRequest); err != nil {
 			return nil, err
 		}
 		return syncRequest, nil
@@ -153,34 +134,9 @@ func (wcm *WebsocketConnectionManager) parseRequestBody(
 	return nil, nil
 }
 
-// processes incoming messages from connected clients
-func (wcm *WebsocketConnectionManager) handleIncomingMessage(client *websocket.Conn, request EditRequest) (err error) {
-	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
-	err = wcm.onIncomingMessage(client, request)
-	return err
-}
-
-// sends an EditRequest to the specified connection
-func (wcm *WebsocketConnectionManager) sendToClient(connection *websocket.Conn, editRequest EditRequest) (err error) {
-	err = connection.WriteJSON(editRequest)
-	if err != nil {
-		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
-	}
-	return err
-}
-
 func (wcm *WebsocketConnectionManager) handleSyncRequest(client *websocket.Conn, request SyncRequest) (err error) {
 	fmt.Printf("%v: %s\n", client.RemoteAddr(), request)
 	err = wcm.onSyncRequest(client, request)
-	return err
-}
-
-// sends an SyncRequest to the specified connection
-func (wcm *WebsocketConnectionManager) syncStateToClient(connection *websocket.Conn, syncStateRequest SyncRequest) (err error) {
-	err = connection.WriteJSON(syncStateRequest)
-	if err != nil {
-		log.Printf("%v: error writing EditRequest to websocket client: %v", connection.RemoteAddr(), err)
-	}
 	return err
 }
 
@@ -205,10 +161,6 @@ func (wcm *WebsocketConnectionManager) disconnectClient(conn *websocket.Conn) {
 
 func (wcm *WebsocketConnectionManager) SetOnNewClientListener(f func(client *websocket.Conn, document *Document) error) {
 	wcm.onNewClient = f
-}
-
-func (wcm *WebsocketConnectionManager) SetOnIncomingEditRequestMessageListener(f func(client *websocket.Conn, request EditRequest) error) {
-	wcm.onIncomingMessage = f
 }
 
 func (wcm *WebsocketConnectionManager) SetOnSyncRequestMessageListener(f func(client *websocket.Conn, request SyncRequest) error) {

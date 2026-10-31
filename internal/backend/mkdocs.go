@@ -37,9 +37,12 @@ type MkDocsConfig struct {
 }
 
 func readMkDocsConfig() (MkDocsConfig, error) {
-	mkDocsConfigFileContent, err := os.ReadFile(configuration.CurrentConfig.MkDocs.ConfigFile)
-
 	var mkDocsConfig MkDocsConfig
+	mkDocsConfigFileContent, err := os.ReadFile(configuration.CurrentConfig.MkDocs.ConfigFile)
+	if err != nil {
+		return mkDocsConfig, err
+	}
+
 	// Unmarshal the YAML data into the map
 	err = yaml.Unmarshal(mkDocsConfigFileContent, &mkDocsConfig)
 	return mkDocsConfig, err

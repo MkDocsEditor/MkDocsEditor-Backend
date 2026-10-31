@@ -1,80 +1,36 @@
 package backend
 
 import (
-	"fmt"
-	"io"
-	"mime/multipart"
 	"os"
+	"path/filepath"
 )
 
-// ReadFile read the content of a file
-func ReadFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if isError(err) {
-		return "", err
+// WriteFile atomically replaces the content of the file at path.
+// The data is written to a temporary file in the same folder which is then renamed,
+// so readers never see a partially written file. The mode of an existing file is kept.
+func WriteFile(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
 	}
 
-	return string(data), nil
-}
-
-func WriteFile(path string, data []byte) (err error) {
-	err = os.WriteFile(path, data, 0x660)
-	isError(err)
-	return err
-}
-
-// CreateFile create a new file with the given content
-func CreateFile(path string, content string) {
-	// detect if file exists
-	var _, err = os.Stat(path)
-
-	// create file if not exists
-	if os.IsNotExist(err) {
-		var file, err = os.Create(path)
-		if isError(err) {
-			return
-		}
-		defer file.Close()
-	}
-}
-
-// UpdateFileFromForm update the content of an existing file
-func UpdateFileFromForm(file *multipart.FileHeader, targetPath string) error {
-	src, err := file.Open()
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
 
-	// Destination
-	dst, err := os.Create(targetPath)
-	if err != nil {
+	if _, err = tmp.Write(data); err != nil {
+		_ = tmp.Close()
 		return err
 	}
-	defer dst.Close()
-
-	// Copy
-	if _, err = io.Copy(dst, src); err != nil {
+	if err = tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
 		return err
 	}
-
-	return nil
-}
-
-// DeleteFileOrFolder delete a file from disk
-func DeleteFileOrFolder(path string) (bool, error) {
-	var err = os.RemoveAll(path)
-	if isError(err) {
-		return false, err
+	if err = tmp.Close(); err != nil {
+		return err
 	}
-	return true, nil
-}
-
-// check if an error exists
-func isError(err error) bool {
-	if err != nil {
-		fmt.Println(err.Error())
-	}
-
-	return err != nil
+	return os.Rename(tmpName, path)
 }

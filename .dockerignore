@@ -1,0 +1,6 @@
+.git
+.idea
+bin
+build
+dist
+mkdocsrest.yaml

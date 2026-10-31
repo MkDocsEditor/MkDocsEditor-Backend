@@ -2,11 +2,9 @@ package backend
 
 import (
 	"errors"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
-	"github.com/OneOfOne/xxhash"
+	"fmt"
 	"io"
 	"log"
-	"mime/multipart"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	mutexSync "sync"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/OneOfOne/xxhash"
 )
 
 const (
@@ -22,7 +23,19 @@ const (
 	TypeDocument = "document"
 	TypeResource = "resource"
 
+	// RootSectionID is the id of the root section of the tree
+	RootSectionID = "root"
+
 	markdownFileExtension = ".md"
+)
+
+var (
+	// ErrInvalidName is returned when a section, document or resource name is not a plain file name
+	ErrInvalidName = errors.New("invalid name")
+	// ErrAlreadyExists is returned when the target of a create or rename operation already exists
+	ErrAlreadyExists = errors.New("target already exists")
+	// ErrNotFound is returned when an item does not exist
+	ErrNotFound = errors.New("item not found")
 )
 
 type (
@@ -43,7 +56,6 @@ type (
 		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
-		Content  string    `json:"-" xml:"-" form:"-" query:"-"`
 		SubUrl   string    `json:"url" xml:"url" form:"url" query:"url"`
 	}
 
@@ -57,96 +69,162 @@ type (
 	}
 )
 
+// TreeManager keeps an in memory representation of the file structure of the docs folder.
+//
+// The tree is an immutable snapshot: every change on disk (made through the TreeManager or
+// detected by the file watcher) builds a new tree and swaps it in. Items returned by the
+// getters never change after they have been returned and can be used without locking.
 type TreeManager struct {
+	// lock guards the tree pointer
 	lock mutexSync.RWMutex
+	// fsLock serializes modifications of the docs folder made through the TreeManager
+	fsLock mutexSync.Mutex
+	// buildLock serializes tree rebuilds so listeners see them in order
+	buildLock mutexSync.Mutex
 
 	rootPath string
-	// DocumentTree an in memory representation of the mkdocs file structure
-	DocumentTree Section
+	tree     *Section
+
+	listenerLock mutexSync.Mutex
+	listeners    []func(oldTree *Section, newTree *Section)
 }
 
+// NewTreeManager creates a TreeManager for the configured docs path and builds the initial tree
 func NewTreeManager() *TreeManager {
-	rootPath := configuration.CurrentConfig.MkDocs.DocsPath
+	return NewTreeManagerForPath(configuration.CurrentConfig.MkDocs.DocsPath)
+}
+
+// NewTreeManagerForPath creates a TreeManager for the given docs path and builds the initial tree
+func NewTreeManagerForPath(rootPath string) *TreeManager {
 	treeManager := &TreeManager{
-		rootPath: rootPath,
+		rootPath: filepath.Clean(rootPath),
 	}
 	treeManager.CreateItemTree()
 	return treeManager
 }
 
-// CreateItemTree traverses the mkdocs directory and puts all files into a tree representation
-func (tm *TreeManager) CreateItemTree() {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	path, file := filepath.Split(tm.rootPath)
+// RootPath returns the path of the docs folder
+func (tm *TreeManager) RootPath() string {
+	return tm.rootPath
+}
 
-	tm.DocumentTree = tm.createSectionForTree(path, file, "root")
-	searchDir := tm.DocumentTree.Path
-	tm.populateItemTree(&tm.DocumentTree, searchDir)
+// AddTreeChangeListener registers a function that is called after the tree has been rebuilt.
+// It is called synchronously, in the order of the rebuilds.
+func (tm *TreeManager) AddTreeChangeListener(f func(oldTree *Section, newTree *Section)) {
+	tm.listenerLock.Lock()
+	defer tm.listenerLock.Unlock()
+	tm.listeners = append(tm.listeners, f)
+}
+
+// Root returns the current snapshot of the tree
+func (tm *TreeManager) Root() *Section {
+	tm.lock.RLock()
+	defer tm.lock.RUnlock()
+	return tm.tree
+}
+
+// CreateItemTree traverses the docs directory and puts all files into a new tree snapshot
+func (tm *TreeManager) CreateItemTree() {
+	tm.buildLock.Lock()
+	defer tm.buildLock.Unlock()
+
+	ignore := newIgnoreMatcher(tm.rootPath)
+	parent, name := filepath.Split(tm.rootPath)
+	root := tm.createSectionForTree(parent, name, RootSectionID)
+	tm.populateItemTree(root, root.Path, ignore)
+
+	tm.lock.Lock()
+	oldTree := tm.tree
+	tm.tree = root
+	tm.lock.Unlock()
+
+	tm.listenerLock.Lock()
+	listeners := slices.Clone(tm.listeners)
+	tm.listenerLock.Unlock()
+	for _, l := range listeners {
+		l(oldTree, root)
+	}
 }
 
 // recursive function that creates a subtree of the complete item tree
-func (tm *TreeManager) populateItemTree(section *Section, path string) {
+func (tm *TreeManager) populateItemTree(section *Section, path string, ignore func(string) bool) {
 	files, err := os.ReadDir(path)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Unable to read directory %s: %v", path, err)
+		return
 	}
 
 	for _, f := range files {
 		totalPath := filepath.Join(path, f.Name())
-		if tm.isOnIgnoreList(totalPath) {
+		if ignore(totalPath) {
 			continue
 		}
 
 		if f.IsDir() {
-			var subSection = tm.createSectionForTree(path, f.Name(), "")
-			*section.Subsections = append(*section.Subsections, &subSection)
+			subSection := tm.createSectionForTree(path, f.Name(), "")
+			*section.Subsections = append(*section.Subsections, subSection)
+			tm.populateItemTree(subSection, subSection.Path, ignore)
+			continue
+		}
 
-			// recursive call
-			tm.populateItemTree(&subSection, filepath.Join(path, subSection.Name))
+		info, err := f.Info()
+		if err != nil {
+			// the file was removed while reading the directory
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if strings.HasSuffix(info.Name(), markdownFileExtension) {
+			*section.Documents = append(*section.Documents, tm.createDocumentForTree(path, info))
 		} else {
-			f, _ := f.Info()
-			if strings.HasSuffix(f.Name(), markdownFileExtension) {
-				var document = tm.createDocumentForTree(path, f)
-				*section.Documents = append(*section.Documents, &document)
-			} else {
-				var resource = tm.createResourceForTree(path, f)
-				*section.Resources = append(*section.Resources, &resource)
-			}
+			*section.Resources = append(*section.Resources, tm.createResourceForTree(path, info))
 		}
 	}
 }
 
-func (tm *TreeManager) isOnIgnoreList(path string) bool {
-	mkDocsConfig, err := readMkDocsConfig()
-	if err != nil {
-		return false
+// newIgnoreMatcher returns a function that reports whether a path should be left out of the tree.
+// Hidden files and folders, the extra_css files of mkdocs.yml and the configured blacklist are ignored.
+func newIgnoreMatcher(rootPath string) func(path string) bool {
+	var extraCss []string
+	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
+		extraCss = mkDocsConfig.ExtraCss
 	}
+	blacklist := configuration.CurrentConfig.MkDocs.Blacklist
 
-	pathInRootPath := strings.TrimPrefix(path, tm.rootPath)
-	pathInRootPath = strings.TrimPrefix(pathInRootPath, "/")
-
-	shouldIgnore := slices.Contains(mkDocsConfig.ExtraCss, pathInRootPath)
-	shouldIgnore = shouldIgnore || slices.Contains(configuration.CurrentConfig.MkDocs.Blacklist, pathInRootPath)
-
-	return shouldIgnore
+	return func(path string) bool {
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			return true
+		}
+		rel, err := filepath.Rel(rootPath, path)
+		if err != nil {
+			return false
+		}
+		rel = filepath.ToSlash(rel)
+		return slices.Contains(extraCss, rel) || slices.Contains(blacklist, rel)
+	}
 }
 
 // creates a (non-cryptographic) hash of the given string
-func (tm *TreeManager) createHash(s string) string {
-	pathHash := xxhash.ChecksumString64(s)
-	return strconv.FormatUint(pathHash, 10)
+func createHash(s string) string {
+	return strconv.FormatUint(xxhash.ChecksumString64(s), 10)
+}
+
+// GenerateId generates the item id for the given path
+func (tm *TreeManager) GenerateId(path string) string {
+	if filepath.Clean(path) == tm.rootPath {
+		return RootSectionID
+	}
+	return createHash(path)
 }
 
 // creates a section object for storing in the tree
-func (tm *TreeManager) createSectionForTree(path string, name string, id string) Section {
+func (tm *TreeManager) createSectionForTree(path string, name string, id string) *Section {
 	sectionPath := filepath.Join(path, name)
-
 	if id == "" {
-		id = tm.generateId(sectionPath)
+		id = tm.GenerateId(sectionPath)
 	}
-
-	return Section{
+	return &Section{
 		Type:        TypeSection,
 		ID:          id,
 		Name:        name,
@@ -157,17 +235,10 @@ func (tm *TreeManager) createSectionForTree(path string, name string, id string)
 	}
 }
 
-// generates an item id from its path
-func (tm *TreeManager) generateId(path string) string {
-	return tm.createHash(path)
-}
-
 // creates a document object for storing in the tree
-func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileInfo) (document Document) {
+func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileInfo) *Document {
 	fileName := f.Name()
-	fileSize := f.Size()
-	fileModTime := f.ModTime()
-	documentPath := filepath.Join(parentFolderPath, f.Name())
+	documentPath := filepath.Join(parentFolderPath, fileName)
 
 	subUrl := ""
 	for _, element := range strings.Split(strings.TrimPrefix(documentPath, tm.rootPath), string(filepath.Separator)) {
@@ -177,378 +248,304 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 		}
 	}
 
-	content, err := ReadFile(documentPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return Document{
+	return &Document{
 		Type:     TypeDocument,
-		ID:       tm.generateId(documentPath),
-		Name:     fileName[0 : len(fileName)-len(markdownFileExtension)],
+		ID:       tm.GenerateId(documentPath),
+		Name:     strings.TrimSuffix(fileName, markdownFileExtension),
 		Path:     documentPath,
-		Filesize: fileSize,
-		ModTime:  fileModTime,
-		Content:  content,
+		Filesize: f.Size(),
+		ModTime:  f.ModTime(),
 		SubUrl:   subUrl,
 	}
 }
 
 // creates a resource object for storing in the tree
-func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileInfo) Resource {
-	fileName := f.Name()
-	fileSize := f.Size()
-	fileModTime := f.ModTime()
+func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileInfo) *Resource {
 	resourcePath := filepath.Join(parentFolderPath, f.Name())
-
-	return Resource{
+	return &Resource{
 		Type:     TypeResource,
-		ID:       tm.generateId(resourcePath),
-		Name:     fileName,
+		ID:       tm.GenerateId(resourcePath),
+		Name:     f.Name(),
 		Path:     resourcePath,
-		Filesize: fileSize,
-		ModTime:  fileModTime,
+		Filesize: f.Size(),
+		ModTime:  f.ModTime(),
 	}
 }
 
-// GetSection finds a document with the given id in the document tree
+// GetSection finds a section with the given id in the document tree
 func (tm *TreeManager) GetSection(id string) *Section {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	return tm.findSectionRecursive(&tm.DocumentTree, id)
+	return findSectionRecursive(tm.Root(), id)
 }
 
 // GetDocument finds a document with the given id in the document tree
 func (tm *TreeManager) GetDocument(id string) *Document {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	return tm.findDocumentRecursive(&tm.DocumentTree, id)
+	return findDocumentRecursive(tm.Root(), id)
 }
 
 // GetResource finds a resource with the given id in the document tree
 func (tm *TreeManager) GetResource(id string) *Resource {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	return tm.findResourceRecursive(&tm.DocumentTree, id)
+	return findResourceRecursive(tm.Root(), id)
 }
 
-func (tm *TreeManager) CreateResource(parentSectionId string, resourceName string, content string) (resource *Resource, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
-
-	if parent == nil {
-		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
-	}
-
-	var fileName = resourceName
-	filePath := filepath.Join(parent.Path, fileName)
-
-	exists, err := tm.fileExists(filePath)
-	if exists {
-		return nil, errors.New("Target resource " + resourceName + " already exists!")
-	}
-
-	dst, err := os.Create(filePath)
+// ReadDocumentContent reads the current content of the given document from disk
+func (tm *TreeManager) ReadDocumentContent(d *Document) (string, error) {
+	data, err := os.ReadFile(d.Path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer dst.Close()
-
-	if _, err = io.WriteString(dst, content); err != nil {
-		return nil, err
-	}
-
-	fileInfo, err := dst.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	newResourceTreeItem := tm.createResourceForTree(parent.Path, fileInfo)
-	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
-
-	return &newResourceTreeItem, err
+	return string(data), nil
 }
 
-func (tm *TreeManager) CreateResourceFromMultipart(parentSectionId string, resourceName string, src multipart.File) (resource *Resource, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	defer src.Close()
-
-	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
-
-	if parent == nil {
-		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
+// traverses the tree and searches for a section with the given id
+func findSectionRecursive(section *Section, id string) *Section {
+	if section == nil {
+		return nil
 	}
-
-	var fileName = resourceName
-
-	filePath := filepath.Join(parent.Path, fileName)
-
-	exists, err := tm.fileExists(filePath)
-	if exists {
-		return nil, errors.New("Target resource " + resourceName + " already exists!")
-	}
-
-	dst, err := os.Create(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer dst.Close()
-
-	if _, err = io.Copy(dst, src); err != nil {
-		return nil, err
-	}
-
-	fileInfo, err := dst.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	newResourceTreeItem := tm.createResourceForTree(parent.Path, fileInfo)
-	*parent.Resources = append(*parent.Resources, &newResourceTreeItem)
-
-	return &newResourceTreeItem, err
-}
-
-// traverses the tree and searches for a document with the given id
-func (tm *TreeManager) findSectionRecursive(section *Section, id string) *Section {
 	if section.ID == id {
 		return section
 	}
-
 	for _, subsection := range *section.Subsections {
-		d := tm.findSectionRecursive(subsection, id)
-		if d != nil {
-			return d
+		if s := findSectionRecursive(subsection, id); s != nil {
+			return s
 		}
 	}
-
 	return nil
 }
 
 // traverses the tree and searches for a document with the given id
-func (tm *TreeManager) findDocumentRecursive(section *Section, id string) *Document {
+func findDocumentRecursive(section *Section, id string) *Document {
+	if section == nil {
+		return nil
+	}
 	for _, document := range *section.Documents {
 		if document.ID == id {
 			return document
 		}
 	}
-
 	for _, subsection := range *section.Subsections {
-		d := tm.findDocumentRecursive(subsection, id)
-		if d != nil {
+		if d := findDocumentRecursive(subsection, id); d != nil {
 			return d
 		}
 	}
-
 	return nil
 }
 
 // traverses the tree and searches for a resource with the given id
-func (tm *TreeManager) findResourceRecursive(section *Section, id string) *Resource {
+func findResourceRecursive(section *Section, id string) *Resource {
+	if section == nil {
+		return nil
+	}
 	for _, resource := range *section.Resources {
 		if resource.ID == id {
 			return resource
 		}
 	}
-
 	for _, subsection := range *section.Subsections {
-		r := tm.findResourceRecursive(subsection, id)
-		if r != nil {
+		if r := findResourceRecursive(subsection, id); r != nil {
 			return r
 		}
 	}
-
 	return nil
 }
 
-// CreateSection creates a new section with the given name as a child of the given parent section
-func (tm *TreeManager) CreateSection(parentSection *Section, sectionName string) (section *Section, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	newSection := tm.createSectionForTree(parentSection.Path, sectionName, "")
-
-	// create folder
-	err = os.MkdirAll(newSection.Path, os.ModePerm)
-	if err != nil {
-		return nil, err
+// ValidateName checks that a name given by a client is a plain, visible file name
+// that cannot escape its parent folder.
+func ValidateName(name string) error {
+	if name == "" || strings.ContainsAny(name, "/\\\x00") || strings.HasPrefix(name, ".") {
+		return fmt.Errorf("%w: %q", ErrInvalidName, name)
 	}
-
-	// append section to tree
-	*parentSection.Subsections = append(*parentSection.Subsections, &newSection)
-
-	return &newSection, err
+	return nil
 }
 
-// CreateDocument creates a new document as a child of the given parent section id and the given name
-func (tm *TreeManager) CreateDocument(parentSectionId string, documentName string) (document *Document, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	parent := tm.findSectionRecursive(&tm.DocumentTree, parentSectionId)
-
-	if parent == nil {
-		return nil, errors.New("Parent section " + parentSectionId + " does not exist")
-	}
-
-	var fileName = documentName + markdownFileExtension
-
-	filePath := filepath.Join(parent.Path, fileName)
-
-	exists, err := tm.fileExists(filePath)
-	if exists {
-		return nil, errors.New("Target document " + documentName + " already exists!")
-	}
-
-	f, err := os.Create(filePath)
-	if err != nil {
-		return nil, err
-	}
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	newDocumentTreeItem := tm.createDocumentForTree(parent.Path, fileInfo)
-	*parent.Documents = append(*parent.Documents, &newDocumentTreeItem)
-
-	return &newDocumentTreeItem, err
-}
-
-func (tm *TreeManager) RenameSection(section *Section, name string) (sec *Section, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	var newFilePath = filepath.Join(filepath.Dir(section.Path), name)
-	exists, err := tm.fileExists(newFilePath)
-	if exists {
-		return nil, errors.New("Target section " + section.Name + " already exists!")
-	}
-
-	err = os.Rename(section.Path, newFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	tm.CreateItemTree()
-	section = tm.GetSection(tm.generateId(newFilePath))
-
-	return section, err
-}
-
-func (tm *TreeManager) RenameDocument(document *Document, name string) (doc *Document, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	var fileName = name + markdownFileExtension
-	var newFilePath = filepath.Join(filepath.Dir(document.Path), fileName)
-
-	exists, err := tm.fileExists(newFilePath)
-	if exists {
-		return nil, errors.New("Target document " + document.Name + " already exists!")
-	}
-
-	err = os.Rename(document.Path, newFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	tm.CreateItemTree()
-	document = tm.GetDocument(tm.generateId(newFilePath))
-
-	return document, err
-}
-
-func (tm *TreeManager) RenameResource(resource *Resource, name string) (res *Resource, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
-	var newFilePath = filepath.Join(filepath.Dir(resource.Path), name)
-	exists, err := tm.fileExists(newFilePath)
-	if exists {
-		return nil, errors.New("Target resource " + resource.Name + " already exists!")
-	}
-
-	err = os.Rename(resource.Path, newFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	tm.CreateItemTree()
-	resource = tm.GetResource(tm.generateId(newFilePath))
-
-	return resource, err
-}
-
-func (tm *TreeManager) fileExists(filePath string) (exists bool, err error) {
-	if _, err := os.Stat(filePath); err == nil {
-		// path/to/whatever exists
+func fileExists(filePath string) (bool, error) {
+	_, err := os.Stat(filePath)
+	if err == nil {
 		return true, nil
-	} else if os.IsNotExist(err) {
-		return false, nil
-	} else {
-		return exists, err
 	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
-// DeleteItem deletes a file/folder with the given ID and type from disk
-func (tm *TreeManager) DeleteItem(id string, itemType string) (success bool, err error) {
-	tm.lock.Lock()
-	defer tm.lock.Unlock()
+// prepares the path of a new child item of the given parent section
+func (tm *TreeManager) newChildPath(parentSectionId string, fileName string) (string, error) {
+	if err := ValidateName(fileName); err != nil {
+		return "", err
+	}
+	parent := tm.GetSection(parentSectionId)
+	if parent == nil {
+		return "", fmt.Errorf("%w: parent section %s", ErrNotFound, parentSectionId)
+	}
+	filePath := filepath.Join(parent.Path, fileName)
+	exists, err := fileExists(filePath)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", fmt.Errorf("%w: %s", ErrAlreadyExists, fileName)
+	}
+	return filePath, nil
+}
+
+// CreateSection creates a new section with the given name as a child of the given parent section
+func (tm *TreeManager) CreateSection(parentSectionId string, sectionName string) (*Section, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+
+	sectionPath, err := tm.newChildPath(parentSectionId, sectionName)
+	if err != nil {
+		return nil, err
+	}
+	if err = os.Mkdir(sectionPath, 0o755); err != nil {
+		return nil, err
+	}
+	tm.CreateItemTree()
+	return tm.GetSection(tm.GenerateId(sectionPath)), nil
+}
+
+// CreateDocument creates a new, empty document as a child of the given parent section
+func (tm *TreeManager) CreateDocument(parentSectionId string, documentName string) (*Document, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+
+	if err := ValidateName(documentName); err != nil {
+		return nil, err
+	}
+	documentPath, err := tm.newChildPath(parentSectionId, documentName+markdownFileExtension)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(documentPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err = f.Close(); err != nil {
+		return nil, err
+	}
+	tm.CreateItemTree()
+	return tm.GetDocument(tm.GenerateId(documentPath)), nil
+}
+
+// CreateResource creates a new resource file with the given content as a child of the given parent section
+func (tm *TreeManager) CreateResource(parentSectionId string, resourceName string, content io.Reader) (*Resource, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+
+	resourcePath, err := tm.newChildPath(parentSectionId, resourceName)
+	if err != nil {
+		return nil, err
+	}
+	dst, err := os.OpenFile(resourcePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	_, err = io.Copy(dst, content)
+	closeErr := dst.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(resourcePath)
+		return nil, err
+	}
+	tm.CreateItemTree()
+	return tm.GetResource(tm.GenerateId(resourcePath)), nil
+}
+
+// renames the item at oldPath to the new file name in the same folder
+func (tm *TreeManager) renamePath(oldPath string, newFileName string) (string, error) {
+	if err := ValidateName(newFileName); err != nil {
+		return "", err
+	}
+	newPath := filepath.Join(filepath.Dir(oldPath), newFileName)
+	if newPath == oldPath {
+		return newPath, nil
+	}
+	exists, err := fileExists(newPath)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return "", fmt.Errorf("%w: %s", ErrAlreadyExists, newFileName)
+	}
+	if err = os.Rename(oldPath, newPath); err != nil {
+		return "", err
+	}
+	tm.CreateItemTree()
+	return newPath, nil
+}
+
+// RenameSection renames the folder of the given section
+func (tm *TreeManager) RenameSection(section *Section, name string) (*Section, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+	if section.ID == RootSectionID {
+		return nil, fmt.Errorf("%w: the root section cannot be renamed", ErrInvalidName)
+	}
+	newPath, err := tm.renamePath(section.Path, name)
+	if err != nil {
+		return nil, err
+	}
+	return tm.GetSection(tm.GenerateId(newPath)), nil
+}
+
+// RenameDocument renames the file of the given document (name without the .md extension)
+func (tm *TreeManager) RenameDocument(document *Document, name string) (*Document, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	newPath, err := tm.renamePath(document.Path, name+markdownFileExtension)
+	if err != nil {
+		return nil, err
+	}
+	return tm.GetDocument(tm.GenerateId(newPath)), nil
+}
+
+// RenameResource renames the file of the given resource
+func (tm *TreeManager) RenameResource(resource *Resource, name string) (*Resource, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+	newPath, err := tm.renamePath(resource.Path, name)
+	if err != nil {
+		return nil, err
+	}
+	return tm.GetResource(tm.GenerateId(newPath)), nil
+}
+
+// DeleteItem deletes a file/folder with the given ID and type from disk.
+// It returns false if no item with the given id and type exists.
+func (tm *TreeManager) DeleteItem(id string, itemType string) (bool, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+
 	var path string
 	switch itemType {
 	case TypeSection:
-		s := tm.findSectionRecursive(&tm.DocumentTree, id)
-		if s != nil {
+		if id == RootSectionID {
+			return false, fmt.Errorf("%w: the root section cannot be deleted", ErrInvalidName)
+		}
+		if s := tm.GetSection(id); s != nil {
 			path = s.Path
-		} else {
-			return false, nil
 		}
 	case TypeDocument:
-		d := tm.findDocumentRecursive(&tm.DocumentTree, id)
-		if d != nil {
+		if d := tm.GetDocument(id); d != nil {
 			path = d.Path
-		} else {
-			return false, nil
 		}
 	case TypeResource:
-		r := tm.findResourceRecursive(&tm.DocumentTree, id)
-		if r != nil {
+		if r := tm.GetResource(id); r != nil {
 			path = r.Path
-		} else {
-			return false, nil
 		}
+	}
+	if path == "" {
+		return false, nil
 	}
 
-	success, err = DeleteFileOrFolder(path)
-	if !success || err != nil {
-		return success, err
+	if err := os.RemoveAll(path); err != nil {
+		return false, err
 	}
-
-	err = tm.removeNodeFromTree(&tm.DocumentTree, id)
-
-	return success, err
-}
-
-func (tm *TreeManager) removeNodeFromTree(s *Section, id string) (err error) {
-	for i, subsection := range *s.Subsections {
-		if subsection.ID == id {
-			*s.Subsections = append((*s.Subsections)[:i], (*s.Subsections)[i+1:]...)
-			return nil
-		}
-		err = tm.removeNodeFromTree(subsection, id)
-		if err == nil {
-			return nil
-		}
-	}
-	for i, document := range *s.Documents {
-		if document.ID == id {
-			*s.Documents = append((*s.Documents)[:i], (*s.Documents)[i+1:]...)
-			return nil
-		}
-	}
-	for i, resource := range *s.Resources {
-		if resource.ID == id {
-			*s.Resources = append((*s.Resources)[:i], (*s.Resources)[i+1:]...)
-			return nil
-		}
-	}
-	return err
+	tm.CreateItemTree()
+	return true, nil
 }

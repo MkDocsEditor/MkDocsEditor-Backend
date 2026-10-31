@@ -7,8 +7,11 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"gopkg.in/yaml.v3"
+	"io"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 const (
@@ -77,7 +80,22 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	echoRest.Use(middleware.Secure())
 
-	echoRest.Use(middleware.Logger())
+	echoRest.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogMethod:   true,
+		LogURIPath:  true,
+		LogStatus:   true,
+		LogLatency:  true,
+		LogError:    true,
+		HandleError: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			if v.Error != nil {
+				log.Printf("%s %s %d %v error=%v", v.Method, v.URIPath, v.Status, v.Latency, v.Error)
+			} else {
+				log.Printf("%s %s %d %v", v.Method, v.URIPath, v.Status, v.Latency)
+			}
+			return nil
+		},
+	}))
 	echoRest.Use(middleware.Recover())
 
 	var allowedOrigins = configuration.CurrentConfig.Server.CORS.AllowedOrigins
@@ -155,6 +173,9 @@ func (rs *RestService) isAlive(c echo.Context) error {
 
 func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 	mkDocsConfigFileContent, err := os.ReadFile(configuration.CurrentConfig.MkDocs.ConfigFile)
+	if err != nil {
+		return rs.ReturnError(c, err)
+	}
 
 	var config map[string]interface{}
 	// Unmarshal the YAML data into the map
@@ -167,7 +188,7 @@ func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 
 // returns the complete file tree
 func (rs *RestService) getTree(c echo.Context) error {
-	return c.JSONPretty(http.StatusOK, rs.treeManager.DocumentTree, " ")
+	return c.JSONPretty(http.StatusOK, rs.treeManager.Root(), indentationChar)
 }
 
 // returns the description of a single section (if found)
@@ -191,20 +212,25 @@ func (rs *RestService) getItemDescription(c echo.Context, itemType string) (err 
 	var result interface{}
 	switch itemType {
 	case TypeSection:
-		result = rs.treeManager.GetSection(id)
+		if s := rs.treeManager.GetSection(id); s != nil {
+			result = s
+		}
 	case TypeDocument:
-		result = rs.treeManager.GetDocument(id)
+		if d := rs.treeManager.GetDocument(id); d != nil {
+			result = d
+		}
 	case TypeResource:
-		result = rs.treeManager.GetResource(id)
+		if r := rs.treeManager.GetResource(id); r != nil {
+			result = r
+		}
 	default:
 		return rs.ReturnError(c, errors.New("Unknown itemType '"+itemType+"'"))
 	}
 
-	if result != nil {
-		return c.JSONPretty(http.StatusOK, result, indentationChar)
-	} else {
+	if result == nil {
 		return rs.ReturnNotFound(c, id)
 	}
+	return c.JSONPretty(http.StatusOK, result, indentationChar)
 }
 
 // returns the content of the document with the given id (if found)
@@ -212,12 +238,14 @@ func (rs *RestService) getDocumentContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 
 	d := rs.treeManager.GetDocument(id)
-
-	if d != nil {
-		return c.String(http.StatusOK, d.Content)
-	} else {
+	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
+	content, err := rs.treeManager.ReadDocumentContent(d)
+	if err != nil {
+		return rs.ReturnError(c, err)
+	}
+	return c.String(http.StatusOK, content)
 }
 
 // creates a new document with the given data
@@ -227,17 +255,16 @@ func (rs *RestService) createSection(c echo.Context) (err error) {
 		return rs.ReturnError(c, err)
 	}
 
-	s := rs.treeManager.GetSection(r.Parent)
-	if s == nil {
+	if rs.treeManager.GetSection(r.Parent) == nil {
 		return rs.ReturnNotFound(c, r.Parent)
 	}
 
-	section, err := rs.treeManager.CreateSection(s, r.Name)
+	section, err := rs.treeManager.CreateSection(r.Parent, r.Name)
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
 
-	return c.JSONPretty(http.StatusOK, section, " ")
+	return c.JSONPretty(http.StatusOK, section, indentationChar)
 }
 
 // renames an existing section
@@ -258,7 +285,7 @@ func (rs *RestService) renameSection(c echo.Context) (err error) {
 		return rs.ReturnError(c, err)
 	}
 
-	return c.JSONPretty(http.StatusOK, section, " ")
+	return c.JSONPretty(http.StatusOK, section, indentationChar)
 }
 
 // creates a new document with the given data
@@ -277,7 +304,7 @@ func (rs *RestService) createDocument(c echo.Context) (err error) {
 		return rs.ReturnError(c, err)
 	}
 
-	return c.JSONPretty(http.StatusOK, document, " ")
+	return c.JSONPretty(http.StatusOK, document, indentationChar)
 }
 
 func (rs *RestService) renameDocument(c echo.Context) (err error) {
@@ -296,7 +323,7 @@ func (rs *RestService) renameDocument(c echo.Context) (err error) {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, document, " ")
+	return c.JSONPretty(http.StatusOK, document, indentationChar)
 }
 
 func (rs *RestService) renameResource(c echo.Context) (err error) {
@@ -315,7 +342,7 @@ func (rs *RestService) renameResource(c echo.Context) (err error) {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, resource, " ")
+	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }
 
 // deletes an existing section
@@ -339,12 +366,16 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 
 	switch itemType {
 	case TypeSection:
-		err = rs.syncManager.IsItemBeingEditedRecursive(rs.treeManager.GetSection(id))
-		if err != nil {
-			return rs.ReturnError(c, err)
+		if s := rs.treeManager.GetSection(id); s != nil && rs.syncManager != nil {
+			if err = rs.syncManager.IsItemBeingEditedRecursive(s); err != nil {
+				return c.JSONPretty(http.StatusConflict, &ErrorResult{
+					Name:    "Conflict",
+					Message: err.Error(),
+				}, indentationChar)
+			}
 		}
 	case TypeDocument:
-		if rs.websocketConnectionManager.IsClientConnected(id) {
+		if rs.websocketConnectionManager != nil && rs.websocketConnectionManager.IsClientConnected(id) {
 			return c.JSONPretty(http.StatusConflict, &ErrorResult{
 				Name:    "Conflict",
 				Message: "There are still clients connected to the document",
@@ -359,16 +390,8 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 
 	if !success {
 		return rs.ReturnNotFound(c, id)
-	} else {
-		rs.treeManager.CreateItemTree()
-		return c.NoContent(http.StatusOK)
 	}
-}
-
-// GetResourceDescription returns the description of a single resource with the given id (if found)
-func (rs *RestService) GetResourceDescription(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
-	return c.String(http.StatusOK, "Resource ID: "+id)
+	return c.NoContent(http.StatusOK)
 }
 
 // returns the content of a single resource with the given id (if found)
@@ -376,39 +399,37 @@ func (rs *RestService) getResourceContent(c echo.Context) (err error) {
 	id := c.Param(urlParamId)
 
 	d := rs.treeManager.GetResource(id)
-
-	if d != nil {
-		return c.File(d.Path)
-	} else {
+	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
+	return c.File(d.Path)
 }
 
-// uploads a new resource file
+// uploads a new resource file.
+// The content is taken from the multipart form field "file", either as a file part (binary safe)
+// or, for older clients, as a plain form value.
 func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 	parentId := c.Param(urlParamParentId)
 	name := c.Param(urlParamName)
 
-	content := []byte{}
-	_, err = c.Request().Body.Read(content)
-	if err != nil {
-		return err
+	var content io.Reader
+	if fileHeader, ferr := c.FormFile("file"); ferr == nil {
+		src, err := fileHeader.Open()
+		if err != nil {
+			return rs.ReturnError(c, err)
+		}
+		defer func() { _ = src.Close() }()
+		content = src
+	} else if value := c.FormValue("file"); value != "" {
+		content = strings.NewReader(value)
+	} else {
+		return c.JSONPretty(http.StatusBadRequest, &ErrorResult{
+			Name:    "Bad Request",
+			Message: "missing multipart form field 'file'",
+		}, indentationChar)
 	}
 
-	fileContent := c.FormValue("file")
-
-	//file, err := c.FormFile("file")
-	//if err != nil {
-	//	return err
-	//}
-	//src, err := file.Open()
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//resource, err := CreateResource(parentId, name, src)
-
-	resource, err := rs.treeManager.CreateResource(parentId, name, fileContent)
+	resource, err := rs.treeManager.CreateResource(parentId, name, content)
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -416,10 +437,19 @@ func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }
 
-// return the error message of an error
+// ReturnError writes an error response. Known errors are mapped to matching status codes.
 func (rs *RestService) ReturnError(c echo.Context, e error) (err error) {
-	return c.JSONPretty(http.StatusInternalServerError, &ErrorResult{
-		Name:    "Unknown Error",
+	status, name := http.StatusInternalServerError, "Unknown Error"
+	switch {
+	case errors.Is(e, ErrInvalidName):
+		status, name = http.StatusBadRequest, "Bad Request"
+	case errors.Is(e, ErrAlreadyExists):
+		status, name = http.StatusConflict, "Conflict"
+	case errors.Is(e, ErrNotFound):
+		status, name = http.StatusNotFound, "Not found"
+	}
+	return c.JSONPretty(status, &ErrorResult{
+		Name:    name,
 		Message: e.Error(),
 	}, indentationChar)
 }

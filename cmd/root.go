@@ -31,6 +31,7 @@ var rootCmd = &cobra.Command{
 	Long:  `mkdocsrest is the backend companion for the MkDocsEditor project.`,
 	// this is the default command to run when no subcommand is specified
 	Run: func(cmd *cobra.Command, args []string) {
+		configuration.InitConfig(global.CfgFile)
 		setupUi()
 		printStartupInfo()
 
@@ -84,9 +85,10 @@ func printStartupInfo() {
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	cobra.OnInitialize(func() {
-		configuration.InitConfig(global.CfgFile)
-	})
+	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", global.Version, global.Commit, global.Date)
+	rootCmd.PersistentFlags().StringVarP(&global.CfgFile, "config", "c", "", "path to the configuration file (default: ./mkdocsrest.yaml, ~/mkdocsrest.yaml, ~/.mkdocsrest/, /etc/mkdocsrest/)")
+	rootCmd.PersistentFlags().BoolVar(&global.NoColor, "no-color", false, "disable colored output")
+	rootCmd.PersistentFlags().BoolVar(&global.NoStyle, "no-style", false, "disable styled output")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
