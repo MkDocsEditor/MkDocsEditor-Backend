@@ -125,6 +125,15 @@ Setup, invite and reset links share one table: `id`, `kind` (`setup`, `invite`,
 and to the person redeeming it), `resetSecondFactors` (reset only), `createdBy`,
 `createdAt`, `expiresAt`, `usedAt`, `usedBy`, `revokedAt`. Links are single use.
 
+### Device link
+
+Pairs a new device (the Android app) with an account that is signed in elsewhere (the web
+client), see [Device pairing](#device-pairing-connect-the-android-app). Fields: `id`,
+`accountId`, token hash, `deviceName` (optional hint from the creator, up to 64
+characters), `createdBySession`, `createdAt`, `expiresAt` (creation + 5 minutes),
+`redeemedAt`, `redeemedSession` (the session it created), `redeemedDeviceName`,
+`revokedAt`. Single use. Rows are deleted 24 hours after they expire.
+
 ### Actor binding
 
 `actorId` → `subject`, where `subject` is an account id, a pseudo user (`:disk`,
@@ -140,7 +149,8 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 `session.revoked`, `reauth.succeeded`, `reauth.failed`, `password.changed`,
 `password.removed`, `totp.enabled`, `totp.disabled`, `recovery-codes.generated`,
 `recovery-code.used`, `passkey.added`, `passkey.renamed`, `passkey.removed`,
-`app-token.created`, `app-token.revoked`, `setup.link-created`, `setup.completed`,
+`app-token.created`, `app-token.revoked`, `device-link.created`,
+`device-link.revoked`, `device-link.redeemed`, `setup.link-created`, `setup.completed`,
 `invite.created`, `invite.revoked`, `invite.redeemed`, `reset.created`,
 `reset.revoked`, `reset.redeemed`, `account.created`, `account.imported`,
 `account.updated`, `account.role-changed`, `account.disabled`, `account.enabled`,
@@ -198,6 +208,7 @@ admin reset with `resetSecondFactors`).
 | app token | `mdp_` + 43 base64url characters | `Authorization: Bearer` |
 | link token | `mdl_` + 43 base64url characters | link fragment, request bodies |
 | login challenge | `mdc_` + 43 base64url characters | between password and second factor |
+| device link token | `mdd_` + 43 base64url characters | connect link payload, redeem request body |
 | websocket ticket | 43 base64url characters (unchanged) | first websocket message |
 
 Tokens are compared by looking up their SHA-256 hash, so no timing difference depends on
@@ -384,13 +395,15 @@ and answers with a **session response**:
 ```json
 {
   "status": "ok",
-  "user": { "id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "secondFactorSetupRequired": false },
+  "user": { "id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "secondFactorSetupRequired": false, "passkeyCount": 0 },
   "session": { "id": "p1q2…", "type": "bearer", "deviceName": "Pixel 8", "createdAt": "…", "expiresAt": "…", "idleExpiresAt": "…" },
   "token": "mds_…"
 }
 ```
 
-`token` is only present for `bearer` sessions. For `cookie` sessions the response sets
+`user.passkeyCount` is the number of passkeys of the account, for the passkey step
+after sign-in (see [Step-up](#step-up-re-authentication)). `token` is only present for
+`bearer` sessions. For `cookie` sessions the response sets
 the cookie:
 
 ```
@@ -544,8 +557,17 @@ account's login backoff and give 401 `invalid-credentials`.
 
 Sensitive actions: change or remove the password (unless `currentPassword` is sent),
 change one's own username, TOTP enroll and disable, regenerate recovery codes, add or
-delete passkeys, create app tokens, and the admin actions: change a role, disable,
+delete passkeys, create app tokens and device links, and the admin actions: change a role, disable,
 delete, create reset links, change settings.
+
+**Passkey right after sign-in.** Clients suggest creating a passkey right after the
+first sign-in on a device (setup, invite, password login, device pairing). So that this
+needs no extra prompt, `POST /account/passkeys/begin/` also accepts a session that was
+created less than 10 minutes ago, by any complete authentication: a login (with its
+second factor, if the account has one), a link redeem, or a device link redeem. Clients
+decide whether to show the step from `user.passkeyCount` in the session response (or
+`passkeyCount` in `GET /account/`): offer it when it is `0`, or when this device has no
+passkey of its own yet and the user wants one.
 
 Step-up does not issue a new token. Tokens are only ever created after a complete
 authentication (no pre-login session is upgraded in place), so session fixation is not
@@ -564,6 +586,71 @@ possible; see the threat model.
    returned. If the account still has TOTP, the reset sign-in does **not** ask for it
    (the admin vouched for the user); with `require2FA` and no second factor left the
    session is restricted.
+
+### Device pairing (connect the Android app)
+
+A user who is signed in on the web connects the Android app without typing the server
+address, username or password:
+
+1. Web (signed-in session, step-up): `POST /account/device-links/` `{"deviceName": "Pixel 8"}`
+   (`deviceName` optional) →
+
+   ```json
+   {"deviceLink": {device link object}, "token": "mdd_…", "expiresAt": "…", "connectUrl": "https://edit.wiki.markusressel.de/connect#eyJ2IjoxLC…"}
+   ```
+
+   The web client shows `connectUrl` as a QR code and as a link to tap on the phone.
+2. Android scans the QR code or opens the link (App Link on `/connect`, or pasted) and
+   decodes the payload (below).
+3. Android: `GET {backendUrl}/server-info/` to show the instance name and check the
+   protocol version, then `POST {backendUrl}/auth/device-link/redeem/`
+   `{"token": "mdd_…", "username": "markus", "deviceName": "Pixel 8", "sessionType": "bearer"}`
+   → session response (with `token`).
+4. Web: `GET /account/device-links/{id}/` shows `status: "redeemed"` and
+   `redeemedDeviceName`; the new session also appears in `GET /account/sessions/`.
+
+**Connect link.** `connectUrl` is `{clientUrl}/connect#<payload>`, `null` when
+`clientUrl` is not configured. The fragment is the whole payload: the UTF-8 JSON object
+below, encoded as base64url without padding. The payload never reaches a server log.
+
+```json
+{"v": 1, "backendUrl": "https://backend.wiki.markusressel.de", "username": "markus", "token": "mdd_…", "expiresAt": "2026-11-01T12:05:00Z"}
+```
+
+| Field | Notes |
+|---|---|
+| `v` | payload version, `1`. Clients reject other versions with "update the app". |
+| `backendUrl` | the API base URL: `server.backendUrl`, else derived from the request that created the link (scheme, honouring `X-Forwarded-Proto` from trusted proxies, and `Host`) |
+| `username` | the account's current username, for display and the redeem check |
+| `token` | the device link token |
+| `expiresAt` | so the client can say "expired" without a request |
+
+Clients ignore unknown fields. The payload is about 200 characters, small enough for a
+QR code with error correction level M.
+
+**Rules.**
+
+- Creating needs a session (not an app token) with a recent authentication
+  ([Step-up](#step-up-re-authentication)); a fresh login counts, for cookie and bearer
+  sessions alike. Restricted sessions (`require2FA`) cannot create device links.
+- The token is valid for **5 minutes** and **once**. An account has at most 5 pending
+  device links; creating a sixth revokes the oldest.
+- Redeeming creates a normal session of the account, like a login. The second factor
+  counts as satisfied, because the creator passed step-up. The new session is **not**
+  recently authenticated, with one exception: like every new session it may register a
+  passkey during its first 10 minutes (see [Step-up](#step-up-re-authentication)). All
+  other sensitive actions on the new device need their own step-up.
+- `username` in the redeem request is optional; when sent, it must match the account
+  (ignoring case), otherwise the request fails like an unknown token.
+- `sessionType` defaults to `"bearer"`; `"cookie"` is also accepted.
+- Unknown, used, expired and revoked tokens, and a wrong `username`, all give 400
+  `invalid-link`. A disabled account gives 403 `account-disabled`.
+- The redeem endpoint is unauthenticated: it needs `X-Requested-With` like the other
+  unauthenticated `POST` requests (section 5) and counts against the per-IP limit.
+- Pending device links are revoked when the account's password changes, on a reset, and
+  when the account is disabled or deleted.
+- Audit events: `device-link.created`, `device-link.revoked`, `device-link.redeemed`
+  (with the device name and the new session id in `details`).
 
 ### Logout and sessions
 
@@ -608,6 +695,37 @@ provider (from the AAGUID) and absent for unknown authenticators.
 
 **App token object:** `{"id", "name", "scope", "createdAt", "lastUsedAt", "expiresAt"}`.
 
+**Device link object:**
+
+```json
+{"id": "…", "deviceName": "Pixel 8", "createdAt": "…", "expiresAt": "…", "status": "pending",
+ "redeemedAt": null, "redeemedDeviceName": null, "sessionId": null}
+```
+
+`status`: `pending`, `redeemed`, `expired`, `revoked`. `deviceName` is the creator's hint
+(`null` when none was given); `redeemedDeviceName` and `sessionId` are set once redeemed.
+
+**Server info:**
+
+```json
+{"name": "wiki.markusressel.de", "version": "1.4.0", "protocolVersion": 1,
+ "backendUrl": "https://backend.wiki.markusressel.de", "wikiUrl": "https://wiki.markusressel.de",
+ "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
+ "passkeys": {"enabled": true, "rpId": "wiki.markusressel.de"},
+ "loginMethods": ["password", "passkey", "device-link"], "require2FA": false}
+```
+
+- `name`: `server.instanceName`, else the host of `wikiUrl`, else the host of
+  `webClientUrl`, else the host of the request.
+- `version`: the backend build version (`dev` for local builds); `protocolVersion`: the
+  sync protocol version (`sync-protocol.md`).
+- `backendUrl`: as in the connect link payload. `wikiUrl`: `server.wikiUrl`, the
+  published site. `webClientUrl`: `server.auth.clientUrl`. Each is `null` when unknown.
+- `loginMethods`: `password` (always, unless `authDisabled`), `passkey` (when passkeys
+  are enabled), `device-link` (always, unless `authDisabled`). Empty with `authDisabled`.
+- Nothing secret and nothing about accounts (no user counts, no usernames). `/auth/status/`
+  stays as it is; `/server-info/` is the superset for onboarding screens.
+
 **Link object:**
 
 ```json
@@ -633,6 +751,8 @@ creation.
 | POST | `/auth/link/passkey/begin/` | setup/invite: `{token, username, displayName?}`; reset: `{token}` | `{ceremonyId, publicKey}` |
 | POST | `/auth/link/passkey/finish/` | `{ceremonyId, credential, passkeyName?, sessionType?, deviceName?}` | session response |
 | GET | `/.well-known/assetlinks.json` | | Digital Asset Links, only when configured, see section 12 |
+| GET | `/server-info/` | | server info object |
+| POST | `/auth/device-link/redeem/` | `{token, username?, deviceName?, sessionType?}` (`sessionType` default `bearer`) | session response |
 
 `displayName` defaults to the username. Invalid, used, expired or revoked link tokens all
 give 400 `invalid-link`.
@@ -671,6 +791,10 @@ give 400 `invalid-link`.
 | GET | `/account/tokens/` | | | `[app token object]` |
 | POST | `/account/tokens/` | yes | `{name, scope, expiresInDays?}` (`scope`: `read`/`write`, `expiresInDays` 1–3650 or absent for no expiry) | `{"appToken": {…}, "token": "mdp_…"}` |
 | DELETE | `/account/tokens/{id}/` | | | 204 |
+| GET | `/account/device-links/` | | | `[device link object]`, newest first (the last 24 hours) |
+| POST | `/account/device-links/` | yes | `{deviceName?}` | `{"deviceLink": {…}, "token": "mdd_…", "expiresAt": "…", "connectUrl": "…" or null}` |
+| GET | `/account/device-links/{id}/` | | | device link object |
+| DELETE | `/account/device-links/{id}/` | | | 204 (revoke); 409 `conflict` when already redeemed |
 
 TOTP enrollment: `POST /account/totp/` creates a pending secret (valid 10 minutes, not
 active yet; calling it again replaces the pending secret). The client shows the QR code of `otpauthUri` and the `secret` for manual
@@ -757,7 +881,8 @@ ended, `4003` forbidden (foreign actor, role changed).
 In memory, per process (restarts reset them):
 
 - **Per client IP** on the unauthenticated endpoints (`/auth/login/…`,
-  `/auth/passkey/login/…`, `/auth/link/…`) and on `/auth/reauth/…`: token bucket,
+  `/auth/passkey/login/…`, `/auth/link/…`, `/auth/device-link/…`) and on
+  `/auth/reauth/…`: token bucket,
   burst 20, refill 1 per 6 seconds (10 per minute).
 - **Per account** (by lower-cased username, also for names that do not exist, so the
   limit does not reveal accounts): after 5 consecutive failed passwords, second factors
@@ -846,7 +971,7 @@ requests for the RP ID host reach the backend. Two ways:
    `.well-known/assetlinks.json`. MkDocs skips dot-folders under `docs/` by default, so
    it needs `exclude_docs` adjusted or the file added by the web server / ingress.
 
-Android **App Links** for the invite, setup and reset links (`https://edit.wiki.…/invite`)
+Android **App Links** for the invite, setup, reset and connect links (`https://edit.wiki.…/invite`)
 are separate: they need the same file on the **client** host,
 `https://edit.wiki.markusressel.de/.well-known/assetlinks.json`, with both relations:
 `handle_all_urls` for the App Links and `get_login_creds`, so password managers and
@@ -860,6 +985,14 @@ New keys (all optional):
 
 ```yaml
 server:
+  # Shown by clients in onboarding screens (GET /server-info/). Default: the host of
+  # wikiUrl, else of auth.clientUrl, else of the request.
+  instanceName: "Markus' Wiki"
+  # The published MkDocs site, reported by GET /server-info/.
+  wikiUrl: "https://wiki.markusressel.de"
+  # The public base URL of this API, used in connect links and /server-info/. Default:
+  # derived from the request (scheme from X-Forwarded-Proto of trusted proxies, Host).
+  backendUrl: "https://backend.wiki.markusressel.de"
   # Addresses of reverse proxies whose X-Forwarded-For and X-Forwarded-Proto are trusted
   # (CIDRs or single IPs). Default: none, the TCP peer is the client.
   trustedProxies:
@@ -867,8 +1000,8 @@ server:
   auth:
     # Development only: no authentication, every request is the anonymous admin.
     disabled: false
-    # The web client, used to build setup, invite and reset links and as the default
-    # passkey origin and RP ID.
+    # The web client, used to build setup, invite, reset and connect links, reported as
+    # webClientUrl by /server-info/, and the default passkey origin and RP ID.
     clientUrl: "https://edit.wiki.markusressel.de"
     # Accept HTTP Basic (username + password of accounts without a second factor, or
     # username + app token). Only for the transition from server.auth.users. Default: true
@@ -1013,6 +1146,10 @@ Additive only; existing clients keep working.
   revoke), reset links (list, revoke), settings (`require2FA`), audit log (paged with
   `before`).
 - Use `accountId` instead of `username` as the key for authorship and actors.
+- Device pairing: the web client offers "connect the Android app" (step-up, then
+  `POST /account/device-links/`, QR code of `connectUrl`, poll
+  `GET /account/device-links/{id}/` every few seconds until `redeemed` or `expired`,
+  revoke on cancel); Android handles `/connect#…`.
 
 **Web:**
 
@@ -1031,8 +1168,11 @@ Additive only; existing clients keep working.
   (login, links, passkey login), since they carry no `Authorization` header.
 - Passkeys via Credential Manager with the `publicKey` JSON; send
   `registrationResponseJson` / `authenticationResponseJson` as `credential`.
-- Optional App Links for the client host's `/setup`, `/invite`, `/reset` paths (needs
-  `assetlinks.json` on that host, section 12).
+- Optional App Links for the client host's `/setup`, `/invite`, `/reset` and `/connect`
+  paths (needs `assetlinks.json` on that host, section 12).
+- Onboarding: `GET /server-info/` for the instance name, protocol version and login
+  methods. Connect links: decode the payload, check `v` and `expiresAt`, show the
+  instance name and username, then redeem with a meaningful `deviceName`.
 
 ## 17. Threat model
 
@@ -1066,6 +1206,7 @@ compromised client device while unlocked, a malicious admin.
 | Memory exhaustion through hashing | at most 4 concurrent Argon2id computations; rate limits |
 | Timing attacks on secrets | lookups by hash, `subtle.ConstantTimeCompare` for remaining comparisons |
 | Brute force of link or session tokens | 256-bit tokens; per-IP limit on link endpoints |
+| Device link QR code photographed or link forwarded | creation needs step-up; 5-minute, single-use token; the web shows which device redeemed it; the session is listed and revocable; the new session needs its own step-up for sensitive actions |
 
 Residual risks: rate limits are per process and reset on restart; an attacker with read
 access to both the database and `auth.key` can read TOTP secrets (not passwords);
