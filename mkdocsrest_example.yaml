@@ -54,6 +54,10 @@ mkdocs:
   # (optional) Path to the directory containing the documents
   # defaults to "<projectPath>/docs"
   docsPath: "/home/markus/documents/Wiki/docs"
+  # (optional) Folder for the realtime editing state (Automerge documents, actor ids).
+  # Must be writable and outside docsPath. Never delete it while clients may hold offline edits.
+  # defaults to "<projectPath>/.mkdocseditor" (added to .git/info/exclude automatically)
+  stateDir: "/home/markus/documents/Wiki/.mkdocseditor"
   # (optional) List of files and directories to exclude from the document tree
   blacklist:
     - "stylesheets"

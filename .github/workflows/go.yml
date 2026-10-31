@@ -67,10 +67,36 @@ jobs:
         with:
           version: v2.15.0
 
+  interop:
+    name: Interop (JS Automerge)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: interop/package-lock.json
+
+      - name: Install @automerge/automerge
+        working-directory: interop
+        run: npm ci
+
+      - name: Run the interop test against the backend
+        run: ./interop/run.sh
+
   generate:
     name: Generate cross-platform builds
     runs-on: ubuntu-latest
-    needs: [ test, lint ]
+    needs: [ test, lint, interop ]
     permissions:
       contents: write
     steps:

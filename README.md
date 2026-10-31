@@ -47,6 +47,17 @@ Clients:
   Scripts should send `X-Requested-With: XMLHttpRequest`, so a 401 does not make the
   browser show its own login dialog.
 
+### Realtime editing state
+
+Documents are edited live with [Automerge](https://automerge.org). The backend keeps the
+Automerge state of every document it has opened in `mkdocs.stateDir` (default
+`<projectPath>/.mkdocseditor/`). The folder must be writable and outside the docs
+folder, and it must survive restarts. It is what lets offline edits of the clients merge
+later. If the project is a git repository, the backend adds the folder to
+`.git/info/exclude`. The markdown files stay the source of truth for MkDocs: the backend
+writes every change to them within two seconds, and merges changes made on disk (git
+pull, manual edits) into the live documents.
+
 ### Docker
 
 Run the service using Docker and mount the configuration file and the wiki folder:
@@ -58,6 +69,9 @@ docker run -d \
     -v ~/mywiki:/data \
     ghcr.io/mkdocseditor/mkdocseditor-backend:latest
 ```
+
+The container runs as uid/gid 1000, so the wiki folder must be writable by that user
+(`chown -R 1000:1000 ~/mywiki`, or run the container with `--user` matching the owner).
 
 ### Connect
 

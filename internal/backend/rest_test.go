@@ -34,11 +34,13 @@ func newRestTestEnv(t *testing.T, configure ...func(c *configuration.Configurati
 		f(&configuration.CurrentConfig)
 	}
 	tm := NewTreeManager()
-	sm := NewAutomergeSyncManager(tm)
-	rs := NewRestService(tm, sm, newTestAuthenticator(t))
-	wcm := NewWebsocketConnectionManager(tm)
-	rs.RegisterWebsocketHandler(wcm)
-	sm.SetWebsocketConnectionManager(wcm)
+	authenticator := newTestAuthenticator(t)
+	ss, err := NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ss.Close)
+	rs := NewRestService(tm, ss, authenticator)
 	return &restTestEnv{t: t, project: project, tm: tm, rs: rs}
 }
 

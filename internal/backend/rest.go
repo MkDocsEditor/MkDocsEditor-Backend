@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -13,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -55,21 +57,20 @@ type (
 )
 
 type RestService struct {
-	echoRest                   *echo.Echo
-	authenticator              *auth.Authenticator
-	treeManager                *TreeManager
-	syncManager                SyncManager
-	websocketConnectionManager *WebsocketConnectionManager
+	echoRest      *echo.Echo
+	authenticator *auth.Authenticator
+	treeManager   *TreeManager
+	sync          *SyncServer
 }
 
 func NewRestService(
 	treeManager *TreeManager,
-	syncManager SyncManager,
+	syncServer *SyncServer,
 	authenticator *auth.Authenticator,
 ) *RestService {
 	rs := &RestService{
 		treeManager:   treeManager,
-		syncManager:   syncManager,
+		sync:          syncServer,
 		authenticator: authenticator,
 	}
 	rs.echoRest = rs.createRestService()
@@ -110,6 +111,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	echoRest.GET(EndpointPathWhoAmI, rs.whoAmI)
 	echoRest.POST(EndpointPathWsTicket, rs.issueWsTicket)
+	echoRest.GET("/actors/", rs.getActors)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 
 	// Authentication
@@ -128,7 +130,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupSections.DELETE("/:"+urlParamId+"/", rs.deleteSection)
 
 	groupDocuments.GET("/:"+urlParamId+"/", rs.getDocumentDescription)
-	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleNewConnection)
+	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamId+"/content/", rs.getDocumentContent)
 	groupDocuments.POST("/", rs.createDocument)
 	groupDocuments.PUT("/:"+urlParamId+"/", rs.renameDocument)
@@ -165,10 +167,20 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 	return c
 }
 
-// Start the REST service
+// Start the REST service. It returns after Shutdown.
 func (rs *RestService) Start() {
 	var serverConf = configuration.CurrentConfig.Server
-	rs.echoRest.Logger.Fatal(rs.echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port)))
+	err := rs.echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port))
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		rs.echoRest.Logger.Fatal(err)
+	}
+}
+
+// Shutdown stops the REST service gracefully
+func (rs *RestService) Shutdown(ctx context.Context) {
+	if err := rs.echoRest.Shutdown(ctx); err != nil {
+		log.Printf("Shutdown: %v", err)
+	}
 }
 
 // returns an empty "ok" answer
@@ -246,6 +258,11 @@ func (rs *RestService) getDocumentContent(c echo.Context) (err error) {
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
+	if rs.sync != nil {
+		if text, ok := rs.sync.CurrentText(d); ok {
+			return c.String(http.StatusOK, text)
+		}
+	}
 	content, err := rs.treeManager.ReadDocumentContent(d)
 	if err != nil {
 		return rs.ReturnError(c, err)
@@ -285,7 +302,11 @@ func (rs *RestService) renameSection(c echo.Context) (err error) {
 		return rs.ReturnNotFound(c, id)
 	}
 
-	section, err := rs.treeManager.RenameSection(s, r.Name)
+	var section *Section
+	err = rs.moveItem(s.Path, filepath.Join(filepath.Dir(s.Path), r.Name), func() (err error) {
+		section, err = rs.treeManager.RenameSection(s, r.Name)
+		return err
+	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -324,7 +345,11 @@ func (rs *RestService) renameDocument(c echo.Context) (err error) {
 		return rs.ReturnNotFound(c, id)
 	}
 
-	document, err := rs.treeManager.RenameDocument(d, r.Name)
+	var document *Document
+	err = rs.moveItem(d.Path, filepath.Join(filepath.Dir(d.Path), r.Name+markdownFileExtension), func() (err error) {
+		document, err = rs.treeManager.RenameDocument(d, r.Name)
+		return err
+	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -343,7 +368,11 @@ func (rs *RestService) renameResource(c echo.Context) (err error) {
 		return rs.ReturnNotFound(c, id)
 	}
 
-	resource, err := rs.treeManager.RenameResource(d, r.Name)
+	var resource *Resource
+	err = rs.moveItem(d.Path, filepath.Join(filepath.Dir(d.Path), r.Name), func() (err error) {
+		resource, err = rs.treeManager.RenameResource(d, r.Name)
+		return err
+	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -365,34 +394,57 @@ func (rs *RestService) deleteResource(c echo.Context) (err error) {
 	return rs.deleteItem(c, TypeResource)
 }
 
-// deletes an item by id and itemType
+// moves the Automerge state of affected documents along with a rename
+func (rs *RestService) moveItem(oldPath string, newPath string, rename func() error) error {
+	if rs.sync == nil {
+		return rename()
+	}
+	return rs.sync.MoveItem(oldPath, newPath, rename)
+}
+
+// deletes an item by id and itemType.
+// Documents (or sections containing documents) with connected clients are only deleted with ?force=true.
 func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 	id := c.Param(urlParamId)
 
+	var path string
 	switch itemType {
 	case TypeSection:
-		if s := rs.treeManager.GetSection(id); s != nil && rs.syncManager != nil {
-			if err = rs.syncManager.IsItemBeingEditedRecursive(s); err != nil {
-				return c.JSONPretty(http.StatusConflict, &ErrorResult{
-					Name:    "Conflict",
-					Message: err.Error(),
-				}, indentationChar)
-			}
+		if s := rs.treeManager.GetSection(id); s != nil {
+			path = s.Path
 		}
 	case TypeDocument:
-		if rs.websocketConnectionManager != nil && rs.websocketConnectionManager.IsClientConnected(id) {
-			return c.JSONPretty(http.StatusConflict, &ErrorResult{
-				Name:    "Conflict",
-				Message: "There are still clients connected to the document",
-			}, indentationChar)
+		if d := rs.treeManager.GetDocument(id); d != nil {
+			path = d.Path
+		}
+	case TypeResource:
+		if r := rs.treeManager.GetResource(id); r != nil {
+			path = r.Path
 		}
 	}
+	if path == "" {
+		return rs.ReturnNotFound(c, id)
+	}
 
-	success, err := rs.treeManager.DeleteItem(id, itemType)
+	var success bool
+	remove := func() (err error) {
+		success, err = rs.treeManager.DeleteItem(id, itemType)
+		return err
+	}
+	if rs.sync != nil {
+		err = rs.sync.DeleteItem(path, c.QueryParam("force") == "true", remove)
+	} else {
+		err = remove()
+	}
+	if errors.Is(err, ErrDocumentInUse) {
+		return c.JSONPretty(http.StatusConflict, &ErrorResult{
+			Name:    "Conflict",
+			Message: err.Error() + " (use ?force=true to delete anyway)",
+		}, indentationChar)
+	}
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-
 	if !success {
 		return rs.ReturnNotFound(c, id)
 	}
@@ -467,12 +519,17 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 	}, indentationChar)
 }
 
-func (rs *RestService) RegisterWebsocketHandler(websocketConnectionManager *WebsocketConnectionManager) {
-	rs.websocketConnectionManager = websocketConnectionManager
-	rs.echoRest.GET("/:"+urlParamId+"/ws/", rs.handleNewConnection)
+// returns the actor map (Automerge actor id -> user)
+func (rs *RestService) getActors(c echo.Context) error {
+	if rs.sync == nil {
+		return c.JSONPretty(http.StatusOK, []ActorInfo{}, indentationChar)
+	}
+	return c.JSONPretty(http.StatusOK, rs.sync.Actors(), indentationChar)
 }
 
-func (rs *RestService) handleNewConnection(c echo.Context) (err error) {
-	documentId := c.Param(urlParamId)
-	return rs.websocketConnectionManager.HandleNewConnection(c, documentId)
+func (rs *RestService) handleWebsocket(c echo.Context) error {
+	if rs.sync == nil {
+		return echo.ErrNotFound
+	}
+	return rs.sync.HandleWebsocket(c, c.Param(urlParamId))
 }
