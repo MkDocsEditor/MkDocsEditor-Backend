@@ -122,3 +122,36 @@ func TestHistoryRequiresGit(t *testing.T) {
 		t.Errorf("%d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// new pages start empty, so git sees each one as a copy of the previous one; the history must
+// not follow copies
+func TestHistoryIgnoresCopiesOfEmptyPages(t *testing.T) {
+	e := newGitEnv(t, GitCommitterOptions{})
+	for _, name := range []string{"first", "second", "third"} {
+		if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"root","name":"`+name+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("create %s: %d", name, rec.Code)
+		}
+	}
+	id := e.docID("third.md")
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.appendText("text\n")
+	eventually(t, "server", func() bool { return e.serverText("third.md") == a.text() })
+	a.disconnect()
+	e.restart()
+	if rec := e.doBody(http.MethodPut, "/document/"+id+"/", "bob", `{"name":"renamed"}`); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d", rec.Code)
+	}
+
+	var got []string
+	for _, h := range e.history(e.docID("renamed.md")) {
+		got = append(got, h.Message+"|"+h.Path)
+	}
+	want := []string{"Rename third.md to renamed.md|renamed.md", "Update third.md|third.md", "Create third.md|third.md"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("history:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if h := e.history(e.docID("second.md")); len(h) != 1 || h[0].Message != "Create second.md" {
+		t.Errorf("history of second.md: %+v", h)
+	}
+}

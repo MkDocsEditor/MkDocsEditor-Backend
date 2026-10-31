@@ -604,7 +604,9 @@ A revision is a full or abbreviated commit hash (7 to 64 lowercase hex character
 appears in the history of the document. Anything else is 404. Without `git.enabled`
 all history endpoints return 404.
 
-History follows renames (`git log --follow`).
+History follows renames, but not copies: a new page starts empty and would otherwise
+look like a copy of any other empty file. The backend follows a file back to the
+commit that added it and continues with the old path only if that commit renamed it.
 
 ## 12. Changes from the previous protocol
 
