@@ -3,6 +3,8 @@ package backend
 import (
 	"errors"
 	"fmt"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -54,6 +56,7 @@ type (
 
 type RestService struct {
 	echoRest                   *echo.Echo
+	authenticator              *auth.Authenticator
 	treeManager                *TreeManager
 	syncManager                SyncManager
 	websocketConnectionManager *WebsocketConnectionManager
@@ -62,10 +65,12 @@ type RestService struct {
 func NewRestService(
 	treeManager *TreeManager,
 	syncManager SyncManager,
+	authenticator *auth.Authenticator,
 ) *RestService {
 	rs := &RestService{
-		treeManager: treeManager,
-		syncManager: syncManager,
+		treeManager:   treeManager,
+		syncManager:   syncManager,
+		authenticator: authenticator,
 	}
 	rs.echoRest = rs.createRestService()
 	return rs
@@ -98,35 +103,13 @@ func (rs *RestService) createRestService() *echo.Echo {
 	}))
 	echoRest.Use(middleware.Recover())
 
-	var allowedOrigins = configuration.CurrentConfig.Server.CORS.AllowedOrigins
-	var allowedMethods = configuration.CurrentConfig.Server.CORS.AllowedMethods
-	if len(allowedOrigins) <= 0 {
-		echoRest.Use(middleware.CORS())
-	} else {
-		echoRest.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-			AllowOrigins: allowedOrigins,
-			AllowMethods: allowedMethods,
-		}))
-	}
+	echoRest.Use(middleware.CORSWithConfig(corsConfig(configuration.CurrentConfig.Server.CORS)))
 
 	// global auth
-	var authConf = configuration.CurrentConfig.Server.BasicAuth
-	if authConf.User != "" && authConf.Password != "" {
-		basicAuthConfig := middleware.BasicAuthConfig{
-			Skipper: func(context echo.Context) bool {
-				return context.Path() == EndpointPathAlive
-			},
-			Validator: func(username string, password string, context echo.Context) (b bool, err error) {
-				if username == authConf.User && password == authConf.Password {
-					return true, nil
-				}
-				return false, nil
-			},
-			Realm: "Restricted",
-		}
-		echoRest.Use(middleware.BasicAuthWithConfig(basicAuthConfig))
-	}
+	echoRest.Use(rs.authMiddleware)
 
+	echoRest.GET(EndpointPathWhoAmI, rs.whoAmI)
+	echoRest.POST(EndpointPathWsTicket, rs.issueWsTicket)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 
 	// Authentication
@@ -158,6 +141,28 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupResources.DELETE("/:"+urlParamId+"/", rs.deleteResource)
 
 	return echoRest
+}
+
+// corsConfig builds the CORS configuration. With explicit origins, credentials are allowed,
+// so browsers may send the Authorization header from those origins.
+func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
+	c := middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: conf.AllowedMethods,
+		AllowHeaders: []string{
+			echo.HeaderAuthorization, echo.HeaderContentType, echo.HeaderAccept, "X-Requested-With",
+		},
+		ExposeHeaders: []string{echo.HeaderContentDisposition},
+		MaxAge:        3600,
+	}
+	if len(c.AllowMethods) == 0 {
+		c.AllowMethods = []string{http.MethodHead, http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete}
+	}
+	if len(conf.AllowedOrigins) > 0 {
+		c.AllowOrigins = conf.AllowedOrigins
+		c.AllowCredentials = true
+	}
+	return c
 }
 
 // Start the REST service

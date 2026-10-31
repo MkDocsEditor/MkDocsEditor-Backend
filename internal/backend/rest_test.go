@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type restTestEnv struct {
@@ -24,12 +26,16 @@ type restTestEnv struct {
 	pass    string
 }
 
-func newRestTestEnv(t *testing.T) *restTestEnv {
+// newRestTestEnv creates a test wiki, applies the configuration changes and starts a RestService
+func newRestTestEnv(t *testing.T, configure ...func(c *configuration.Configuration)) *restTestEnv {
 	t.Helper()
 	project := newTestWiki(t)
+	for _, f := range configure {
+		f(&configuration.CurrentConfig)
+	}
 	tm := NewTreeManager()
 	sm := NewAutomergeSyncManager(tm)
-	rs := NewRestService(tm, sm)
+	rs := NewRestService(tm, sm, newTestAuthenticator(t))
 	wcm := NewWebsocketConnectionManager(tm)
 	rs.RegisterWebsocketHandler(wcm)
 	sm.SetWebsocketConnectionManager(wcm)
@@ -234,18 +240,25 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	expectStatus(t, e.do(http.MethodDelete, "/resource/"+renamed.ID+"/", nil, ""), http.StatusOK)
 }
 
+func newTestAuthenticator(t *testing.T) *auth.Authenticator {
+	t.Helper()
+	a, err := auth.NewAuthenticator(configuration.CurrentConfig.Server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
 func TestRestLegacyBasicAuth(t *testing.T) {
-	newTestWiki(t)
-	configuration.CurrentConfig.Server.BasicAuth = configuration.AuthenticationConfiguration{User: "admin", Password: "secret"}
-	e := newRestTestEnv(t)
-	configuration.CurrentConfig.Server.BasicAuth = configuration.AuthenticationConfiguration{User: "admin", Password: "secret"}
-	e.rs = NewRestService(e.tm, nil)
+	e := newRestTestEnv(t, func(c *configuration.Configuration) {
+		c.Server.BasicAuth = configuration.AuthenticationConfiguration{User: "admin", Password: "secret"}
+	})
 
 	// the liveness probe needs no credentials
 	expectStatus(t, e.do(http.MethodGet, "/alive/", nil, ""), http.StatusOK)
 	rec := e.do(http.MethodGet, "/section/", nil, "")
 	expectStatus(t, rec, http.StatusUnauthorized)
-	if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "basic") && !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Basic") {
+	if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Basic") {
 		t.Errorf("missing WWW-Authenticate header: %v", rec.Header())
 	}
 
@@ -253,4 +266,138 @@ func TestRestLegacyBasicAuth(t *testing.T) {
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
 	e.user, e.pass = "admin", "secret"
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusOK)
+
+	rec = e.do(http.MethodGet, "/auth/whoami/", nil, "")
+	expectStatus(t, rec, http.StatusOK)
+	if u := decode[auth.User](t, rec); u.Username != "admin" || u.Role != auth.RoleAdmin {
+		t.Errorf("whoami = %+v", u)
+	}
+}
+
+func hashFor(t *testing.T, password string) string {
+	t.Helper()
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(h)
+}
+
+func newMultiUserEnv(t *testing.T) *restTestEnv {
+	t.Helper()
+	return newRestTestEnv(t, func(c *configuration.Configuration) {
+		c.Server.Auth.Users = []configuration.UserConfiguration{
+			{Username: "markus", PasswordHash: hashFor(t, "pw-markus"), Role: "admin", DisplayName: "Markus"},
+			{Username: "anna", PasswordHash: hashFor(t, "pw-anna")},
+			{Username: "kid", PasswordHash: hashFor(t, "pw-kid"), Role: "reader"},
+		}
+		c.Server.CORS.AllowedOrigins = []string{"https://editor.example.com"}
+	})
+}
+
+func TestRestMultiUserAuth(t *testing.T) {
+	e := newMultiUserEnv(t)
+
+	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
+	e.user, e.pass = "anna", "pw-markus"
+	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
+	e.user, e.pass = "nobody", "x"
+	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
+
+	e.user, e.pass = "anna", "pw-anna"
+	rec := e.do(http.MethodGet, "/auth/whoami/", nil, "")
+	expectStatus(t, rec, http.StatusOK)
+	if u := decode[auth.User](t, rec); u.Username != "anna" || u.Role != auth.RoleEditor || u.DisplayName != "anna" || u.Color == "" {
+		t.Errorf("whoami = %+v", u)
+	}
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK)
+
+	// readers may read, but not change anything
+	e.user, e.pass = "kid", "pw-kid"
+	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusOK)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden)
+	expectStatus(t, e.do(http.MethodDelete, "/section/"+RootSectionID+"/", nil, ""), http.StatusForbidden)
+	// but they may get a websocket ticket
+	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusOK)
+}
+
+func TestRestNoWWWAuthenticateForScripts(t *testing.T) {
+	e := newMultiUserEnv(t)
+	req := httptest.NewRequest(http.MethodGet, "/section/", nil)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	rec := httptest.NewRecorder()
+	e.rs.echoRest.ServeHTTP(rec, req)
+	expectStatus(t, rec, http.StatusUnauthorized)
+	if rec.Header().Get("WWW-Authenticate") != "" {
+		t.Error("WWW-Authenticate header sent to a script request")
+	}
+}
+
+func TestRestWsTicket(t *testing.T) {
+	e := newMultiUserEnv(t)
+	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusUnauthorized)
+
+	e.user, e.pass = "markus", "pw-markus"
+	rec := e.do(http.MethodPost, "/auth/ws-ticket/", nil, "")
+	expectStatus(t, rec, http.StatusOK)
+	ticket := decode[TicketResponse](t, rec)
+	if len(ticket.Ticket) < 32 || ticket.ExpiresAt.IsZero() {
+		t.Fatalf("ticket = %+v", ticket)
+	}
+	user, err := e.rs.authenticator.RedeemTicket(ticket.Ticket)
+	if err != nil || user.Username != "markus" {
+		t.Fatalf("redeem: %v %v", user, err)
+	}
+	if _, err = e.rs.authenticator.RedeemTicket(ticket.Ticket); err == nil {
+		t.Error("ticket could be used twice")
+	}
+}
+
+func TestRestCorsPreflight(t *testing.T) {
+	e := newMultiUserEnv(t)
+
+	req := httptest.NewRequest(http.MethodOptions, "/section/", nil)
+	req.Header.Set("Origin", "https://editor.example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	req.Header.Set("Access-Control-Request-Headers", "authorization")
+	rec := httptest.NewRecorder()
+	e.rs.echoRest.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d", rec.Code)
+	}
+	h := rec.Header()
+	if h.Get("Access-Control-Allow-Origin") != "https://editor.example.com" ||
+		h.Get("Access-Control-Allow-Credentials") != "true" ||
+		!strings.Contains(strings.ToLower(h.Get("Access-Control-Allow-Headers")), "authorization") {
+		t.Errorf("preflight headers = %v", h)
+	}
+
+	req = httptest.NewRequest(http.MethodOptions, "/section/", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	rec = httptest.NewRecorder()
+	e.rs.echoRest.ServeHTTP(rec, req)
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Error("unknown origin allowed")
+	}
+}
+
+func TestWebsocketOriginCheck(t *testing.T) {
+	check := checkOrigin([]string{"https://editor.example.com"})
+	for origin, want := range map[string]bool{
+		"":                           true,
+		"https://editor.example.com": true,
+		"https://evil.example.com":   false,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/document/x/ws/", nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if got := check(req); got != want {
+			t.Errorf("origin %q: %v, want %v", origin, got, want)
+		}
+	}
+	if !checkOrigin(nil)(httptest.NewRequest(http.MethodGet, "/", nil)) {
+		t.Error("no configured origins must allow everything")
+	}
 }

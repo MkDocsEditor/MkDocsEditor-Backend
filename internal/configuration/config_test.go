@@ -54,3 +54,37 @@ mkdocs:
 		t.Errorf("blacklist = %v", c.MkDocs.Blacklist)
 	}
 }
+
+func TestInitConfigUsers(t *testing.T) {
+	path := writeConfig(t, `
+server:
+  auth:
+    users:
+      - username: "markus"
+        passwordHash: "$2a$12$abc"
+        displayName: "Markus"
+        email: "markus@example.com"
+        role: "admin"
+        color: "#e8590c"
+      - username: "kid"
+        passwordHash: "$2a$12$def"
+        role: "reader"
+mkdocs:
+  projectPath: "/wiki"
+`)
+	CurrentConfig = Configuration{}
+	InitConfig(path)
+
+	users := CurrentConfig.Server.Auth.Users
+	if len(users) != 2 {
+		t.Fatalf("users = %+v", users)
+	}
+	want := UserConfiguration{Username: "markus", PasswordHash: "$2a$12$abc", DisplayName: "Markus",
+		Email: "markus@example.com", Role: "admin", Color: "#e8590c"}
+	if users[0] != want {
+		t.Errorf("user = %+v, want %+v", users[0], want)
+	}
+	if users[1].Role != "reader" {
+		t.Errorf("user = %+v", users[1])
+	}
+}

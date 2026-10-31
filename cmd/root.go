@@ -3,11 +3,13 @@ package cmd
 import (
 	"fmt"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
+	"log"
 	"os"
 )
 
@@ -45,7 +47,15 @@ var rootCmd = &cobra.Command{
 		//syncManager := backend.NewSyncManager(treeManager)
 		automergeSyncManager := backend.NewAutomergeSyncManager(treeManager)
 
-		restService := backend.NewRestService(treeManager, automergeSyncManager)
+		authenticator, err := auth.NewAuthenticator(configuration.CurrentConfig.Server)
+		if err != nil {
+			log.Fatalf("Invalid authentication configuration: %v", err)
+		}
+		if !authenticator.Enabled() {
+			_, _ = color.New(color.FgYellow).Println("WARNING: No users configured (server.auth.users), unauthorized access to all files in document path is possible!")
+		}
+
+		restService := backend.NewRestService(treeManager, automergeSyncManager, authenticator)
 		//websocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
 		automergeWebsocketConnectionManager := backend.NewWebsocketConnectionManager(treeManager)
 
@@ -70,16 +80,7 @@ func setupUi() {
 
 func printStartupInfo() {
 	green := color.New(color.FgGreen).PrintfFunc()
-	warning := color.New(color.FgYellow).PrintfFunc()
-
 	green(banner, configuration.CurrentConfig.Server.Host, configuration.CurrentConfig.Server.Port, configuration.CurrentConfig.MkDocs.DocsPath)
-
-	var auth = configuration.CurrentConfig.Server.BasicAuth
-	if auth.User == "" && auth.Password == "" {
-		warning("WARNING: No basic auth values set in configuration, unauthorized access to all files in document path is possible!")
-	}
-
-	fmt.Println("")
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

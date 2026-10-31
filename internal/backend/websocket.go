@@ -2,7 +2,10 @@ package backend
 
 import (
 	"encoding/json"
+	"strings"
+
 	"fmt"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"log"
@@ -43,13 +46,28 @@ func NewWebsocketConnectionManager(
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin:     checkOrigin(configuration.CurrentConfig.Server.CORS.AllowedOrigins),
 		},
 		lock:                   mutexSync.RWMutex{},
 		clients:                make(map[*websocket.Conn]string), // connected clients (websocket -> document id)
 		connectionsPerDocument: make(map[string]uint),
+	}
+}
+
+// checkOrigin allows websocket upgrades from the configured CORS origins and from clients
+// that send no Origin header (native apps). Without configured origins every origin is allowed.
+func checkOrigin(allowedOrigins []string) func(r *http.Request) bool {
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" || len(allowedOrigins) == 0 {
+			return true
+		}
+		for _, allowed := range allowedOrigins {
+			if allowed == "*" || strings.EqualFold(allowed, origin) {
+				return true
+			}
+		}
+		return false
 	}
 }
 
@@ -61,6 +79,9 @@ func (wcm *WebsocketConnectionManager) IsClientConnected(documentId string) bool
 
 // handle new websocket connections
 func (wcm *WebsocketConnectionManager) HandleNewConnection(c echo.Context, documentId string) (err error) {
+	if UserFromContext(c) == nil {
+		return echo.ErrUnauthorized
+	}
 	d := wcm.treeManager.GetDocument(documentId)
 	if d == nil {
 		return echo.ErrNotFound
