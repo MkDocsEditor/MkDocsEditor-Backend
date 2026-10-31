@@ -5,6 +5,14 @@ server:
   # Port the REST API server should listen on
   # (optional) defaults to 7413
   port: 7413
+  # (optional) Shown by the clients in onboarding screens (GET /server-info/). Default: the
+  # host of wikiUrl, else of auth.clientUrl, else of the request.
+  #instanceName: "My Wiki"
+  # (optional) The published MkDocs site, reported by GET /server-info/
+  #wikiUrl: "https://wiki.mycompany.com"
+  # (optional) The public base URL of this API, put into the links that connect the Android
+  # app. Default: derived from the request (scheme from trusted proxies, Host header).
+  #backendUrl: "https://backend.wiki.mycompany.com"
   # (optional) Addresses of reverse proxies (CIDRs or single IPs) whose X-Forwarded-For and
   # X-Forwarded-Proto headers are trusted. Default: none, the TCP peer is the client.
   #trustedProxies:
@@ -13,8 +21,8 @@ server:
   # Without any account, the backend starts in setup mode and prints a setup link for the
   # first admin (again with: mkdocsrest setup-link). Further users join by invite links.
   auth:
-    # (optional) The web client, used to build setup, invite and reset links and as the
-    # default passkey origin and RP ID. Without it, only the tokens are shown.
+    # (optional) The web client, used to build setup, invite, reset and connect links and as
+    # the default passkey origin and RP ID. Without it, only the tokens are shown.
     clientUrl: "https://edit.wiki.mycompany.com"
     # (optional) Accept HTTP basic auth with account passwords (accounts without a second
     # factor). Only for the transition from the old configuration. Default: true for now.

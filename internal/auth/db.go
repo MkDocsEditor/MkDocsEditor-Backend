@@ -146,6 +146,23 @@ CREATE TABLE app_tokens (
 );
 CREATE INDEX app_tokens_account ON app_tokens(account_id);
 `,
+	// 6: device links that pair a new device with a signed-in account
+	`
+CREATE TABLE device_links (
+	id                   TEXT PRIMARY KEY,
+	account_id           TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	token_hash           BLOB NOT NULL UNIQUE,
+	device_name          TEXT NOT NULL DEFAULT '',
+	created_by_session   TEXT NOT NULL DEFAULT '',
+	created_at           INTEGER NOT NULL,
+	expires_at           INTEGER NOT NULL,
+	redeemed_at          INTEGER NOT NULL DEFAULT 0,
+	redeemed_session     TEXT NOT NULL DEFAULT '',
+	redeemed_device_name TEXT NOT NULL DEFAULT '',
+	revoked_at           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX device_links_account ON device_links(account_id, created_at);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

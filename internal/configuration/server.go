@@ -6,6 +6,14 @@ type (
 	ServerConfiguration struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
+		// InstanceName is shown by clients in onboarding screens (default: host of WikiURL,
+		// else of auth.clientUrl, else of the request)
+		InstanceName string `yaml:"instanceName"`
+		// WikiURL is the published MkDocs site, reported by GET /server-info/
+		WikiURL string `yaml:"wikiUrl"`
+		// BackendURL is the public base URL of this API, used in connect links (default:
+		// derived from the request)
+		BackendURL string `yaml:"backendUrl"`
 		// TrustedProxies are the addresses (CIDRs or IPs) of reverse proxies whose
 		// X-Forwarded-For and X-Forwarded-Proto headers are trusted
 		TrustedProxies []string `yaml:"trustedProxies"`

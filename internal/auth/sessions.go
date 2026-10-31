@@ -22,6 +22,7 @@ const (
 	PrefixAppToken  = "mdp_"
 	PrefixLink      = "mdl_"
 	PrefixChallenge = "mdc_"
+	PrefixDevice    = "mdd_"
 )
 
 // Session is a login of one device
@@ -329,6 +330,12 @@ func (s *Service) RecentlyAuthenticated(sess *Session) bool {
 	return sess != nil && s.now().Before(ReauthenticatedUntil(sess))
 }
 
+// RecentlyCreated reports whether the session was created within the step-up window. Such a
+// session may register a passkey without step-up (docs/auth.md, step-up).
+func (s *Service) RecentlyCreated(sess *Session) bool {
+	return sess != nil && s.now().Before(sess.CreatedAt.Add(ReauthWindow))
+}
+
 // markReauthenticated starts a new step-up window for a session
 func (s *Service) markReauthenticated(sess *Session) error {
 	now := s.now().UTC()
@@ -345,6 +352,7 @@ func (s *Service) pruneExpired() {
 	_, _ = s.db.Exec("DELETE FROM sessions WHERE expires_at <= ? OR last_used_at <= ?", toMillis(now), toMillis(now.Add(-s.cfg.idleTimeout)))
 	_, _ = s.db.Exec("DELETE FROM audit_events WHERE time < ?", toMillis(now.Add(-s.cfg.auditRetention)))
 	_, _ = s.db.Exec("DELETE FROM app_tokens WHERE expires_at != 0 AND expires_at <= ?", toMillis(now))
+	_, _ = s.db.Exec("DELETE FROM device_links WHERE expires_at <= ?", toMillis(now.Add(-deviceLinkKeep)))
 }
 
 // Revoke reasons

@@ -26,6 +26,11 @@ sessions of that account. Admins manage accounts under `/admin/` (roles, disabli
 deletion as a tombstone that keeps authorship, sessions, reset links, the instance-wide
 `require2FA` setting and the audit log).
 
+**Connecting the Android app:** a signed-in user creates a device link in the web client
+(`POST /account/device-links/`) and scans its QR code with the app. The single-use link is
+valid for 5 minutes and signs the app in without typing the server address or the
+password. `GET /server-info/` describes the instance for onboarding screens.
+
 **Scripts** use app tokens (`POST /account/tokens/`, scope `read` or `write`) as
 `Authorization: Bearer mdp_…`, or as the password of HTTP basic auth.
 

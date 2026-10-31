@@ -162,8 +162,11 @@ func (rs *RestService) listPasskeys(c echo.Context) error {
 
 // POST /account/passkeys/begin/
 func (rs *RestService) addPasskeyBegin(c echo.Context) error {
-	if err := rs.requireReauth(c); err != nil {
-		return err
+	// a new session may add a passkey without step-up (passkey right after sign-in)
+	if !rs.authenticator.RecentlyCreated(SessionFromContext(c)) {
+		if err := rs.requireReauth(c); err != nil {
+			return err
+		}
 	}
 	id, options, err := rs.authenticator.BeginAddPasskey(UserFromContext(c))
 	return rs.writeCeremony(c, id, options, err)

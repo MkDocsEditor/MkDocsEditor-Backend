@@ -20,6 +20,9 @@ func (s *Service) revokeCredentialsOnReset(tx *sql.Tx, accountID string, resetSe
 	if _, err := tx.Exec("DELETE FROM app_tokens WHERE account_id = ?", accountID); err != nil {
 		return err
 	}
+	if err := revokeDeviceLinks(tx, accountID, s.now()); err != nil {
+		return err
+	}
 	if !resetSecondFactors {
 		return nil
 	}

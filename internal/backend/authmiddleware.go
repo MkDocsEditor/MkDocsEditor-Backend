@@ -128,10 +128,11 @@ func isReadOnlyMethod(method string) bool {
 // isPublicPath reports whether a path is reachable without authentication
 func isPublicPath(path string) bool {
 	switch path {
-	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/":
+	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/", "/server-info/":
 		return true
 	}
-	return strings.HasPrefix(path, "/auth/login/") || strings.HasPrefix(path, "/auth/passkey/login/") || strings.HasPrefix(path, "/auth/link/")
+	return strings.HasPrefix(path, "/auth/login/") || strings.HasPrefix(path, "/auth/passkey/login/") || strings.HasPrefix(path, "/auth/link/") ||
+		strings.HasPrefix(path, "/auth/device-link/")
 }
 
 // restrictedPaths are reachable by a session that must still set up a second factor
@@ -503,6 +504,8 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
 	case errors.Is(err, auth.ErrInvalidTokenName), errors.Is(err, auth.ErrInvalidTokenScope), errors.Is(err, auth.ErrInvalidTokenExpiry):
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
+	case errors.Is(err, auth.ErrDeviceLinkRedeemed):
+		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
 	case errors.Is(err, auth.ErrNotFound):
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)
 	case errors.Is(err, auth.ErrUnauthenticated):

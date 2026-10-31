@@ -125,6 +125,9 @@ func TestInitConfigAuthSettings(t *testing.T) {
 	path := writeConfig(t, `
 server:
   trustedProxies: [ "10.42.0.0/16" ]
+  instanceName: "Example Wiki"
+  wikiUrl: "https://wiki.example.com"
+  backendUrl: "https://api.example.com"
   auth:
     clientUrl: "https://edit.example.com"
     legacyBasicAuth: false
@@ -152,6 +155,9 @@ mkdocs:
 
 	s := CurrentConfig.Server
 	a := s.Auth
+	if s.InstanceName != "Example Wiki" || s.WikiURL != "https://wiki.example.com" || s.BackendURL != "https://api.example.com" {
+		t.Errorf("server = %+v", s)
+	}
 	if len(s.TrustedProxies) != 1 || a.ClientURL != "https://edit.example.com" || a.LegacyBasicAuth == nil || *a.LegacyBasicAuth ||
 		a.SessionIdleTimeout != 720*time.Hour || a.SessionMaxLifetime != 2160*time.Hour || a.CookieSecure != "always" {
 		t.Errorf("auth = %+v", a)
