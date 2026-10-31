@@ -131,6 +131,10 @@ authorship or actor data should key it on `accountId`. Presence messages, `you`,
 
 ## 3. Authentication
 
+> Accounts, registration, sessions, passkeys and TOTP are specified in
+> [`auth.md`](auth.md). Once implemented, its sections 4 to 6 replace this section; the
+> ticket flow below stays as it is.
+
 All REST endpoints except `GET /alive/` require authentication.
 
 - **REST:** HTTP Basic auth (`Authorization: Basic …`) against the configured users. A
