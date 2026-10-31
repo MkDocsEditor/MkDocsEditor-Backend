@@ -132,6 +132,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupDocuments.GET("/:"+urlParamId+"/", rs.getDocumentDescription)
 	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamId+"/content/", rs.getDocumentContent)
+	groupDocuments.GET("/:"+urlParamId+"/authorship/", rs.getDocumentAuthorship)
 	groupDocuments.POST("/", rs.createDocument)
 	groupDocuments.PUT("/:"+urlParamId+"/", rs.renameDocument)
 	groupDocuments.DELETE("/:"+urlParamId+"/", rs.deleteDocument)
@@ -517,6 +518,23 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 		Name:    "Not found",
 		Message: "No item with id '" + id + "' found",
 	}, indentationChar)
+}
+
+// returns the per-character authorship of a document
+func (rs *RestService) getDocumentAuthorship(c echo.Context) error {
+	id := c.Param(urlParamId)
+	d := rs.treeManager.GetDocument(id)
+	if d == nil {
+		return rs.ReturnNotFound(c, id)
+	}
+	if rs.sync == nil {
+		return echo.ErrNotFound
+	}
+	result, err := rs.sync.Authorship(d)
+	if err != nil {
+		return rs.ReturnError(c, err)
+	}
+	return c.JSONPretty(http.StatusOK, result, indentationChar)
 }
 
 // returns the actor map (Automerge actor id -> user)

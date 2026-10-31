@@ -420,6 +420,42 @@ func (s *SyncServer) join(conn *wsConn, d *Document) (*docSession, error) {
 	return session, nil
 }
 
+// withSession runs f with the session of a document, holding its lock. A document that is not
+// loaded is loaded for the call and unloaded again afterwards.
+func (s *SyncServer) withSession(d *Document, f func(session *docSession) error) error {
+	rel, err := s.relPath(d.Path)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("server is shutting down")
+	}
+	session := s.sessions[rel]
+	temporary := session == nil
+	if temporary {
+		session, err = s.loadSession(rel, d.Path, d.ID)
+		if err != nil {
+			return err
+		}
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	err = f(session)
+	if temporary {
+		session.flushLocked()
+		if session.dirty {
+			// keep it loaded until the flush succeeds
+			s.sessions[rel] = session
+			session.scheduleFlushLocked()
+		} else {
+			session.closed = true
+		}
+	}
+	return err
+}
+
 // leave removes a connection and unloads the document when it was the last one
 func (s *SyncServer) leave(conn *wsConn) {
 	session := conn.session

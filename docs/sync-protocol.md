@@ -6,9 +6,8 @@ realtime collaborative editing. It covers authentication, the document websocket
 documents and commits them to git.
 
 Status: **version 1**. Implemented: authentication, roles, the document websocket,
-presence, persistence, external changes, readers, rename and delete. Not yet
-implemented: authorship (section 7), git integration (section 10), revision history
-(section 11). The REST API reference is
+presence, authorship, persistence, external changes, readers, rename and delete. Not
+yet implemented: git integration (section 10), revision history (section 11). The REST API reference is
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
@@ -373,6 +372,14 @@ Presence is ephemeral. The server relays it and never stores it.
   code point indexing. A receiver that cannot resolve a cursor yet, because it has not
   received the change it points into, keeps the last position and retries after the
   next sync.
+- Two literal strings are reserved for positions where no character exists to point at:
+  `"end"` is the caret after the last character, and `"start"` is position 0 of an
+  empty text. automerge-java cannot make a cursor at index `length`
+  (`makeCursor(length)` throws), so clients send `"end"` there and `"start"` when the
+  text is empty. Every client checks for these two strings before calling the Automerge
+  cursor lookup: `"start"` resolves to 0, `"end"` to the current text length. A client
+  may send them in other cases too (for example `"start"` for index 0 of a non-empty
+  text), so receivers always handle both.
 - The server overwrites `clientId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
@@ -402,6 +409,11 @@ GET /document/{id}/authorship/
 - The server replays the document history in causal order and attributes every
   inserted text range to the change's actor (a text diff per change). `username` comes
   from the actor map. `:disk` and `:server` runs are external or imported text.
+- While a document is loaded, the server keeps the replay state and only applies the
+  changes made since the last request, so repeated requests are cheap. The first
+  request replays the whole history, which takes about 1.5 s for a page with 3000
+  changes.
+- Readers may call it. Adjacent runs of the same actor are merged.
 - Clients fetch it when they open a document and then update it themselves: text a
   local or remote change inserts belongs to that change's actor (from the sync
   messages, or from `Automerge.diff` in JS). Fetch it again after a reconnect, or when

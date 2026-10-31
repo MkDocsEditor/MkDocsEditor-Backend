@@ -105,6 +105,7 @@ checks that it lists exactly the routes the backend serves. Overview:
 | POST | `/document/` | Create a document (`{"parent","name"}`) |
 | GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while it is open) |
 | GET | `/document/{id}/content/` | The markdown text (live while open) |
+| GET | `/document/{id}/authorship/` | Who wrote which part of the text |
 | GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
 | POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
 | GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`), delete |
