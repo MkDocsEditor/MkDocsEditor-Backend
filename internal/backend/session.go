@@ -325,20 +325,21 @@ func (ds *docSession) actorInfos() []ActorInfo {
 	return out
 }
 
-// countChangesLocked records the changes per user since the last commit
+// countChangesLocked records the changes per user for the git commits
 func (ds *docSession) countChangesLocked(changes []*automerge.Change) {
 	if len(changes) == 0 {
 		return
 	}
-	if ds.meta.PendingChanges == nil {
-		ds.meta.PendingChanges = map[string]int{}
-	}
+	counts := map[string]int{}
 	for _, ch := range changes {
 		if owner := ds.server.actors.Owner(ch.ActorID()); owner != "" {
-			ds.meta.PendingChanges[owner]++
+			counts[owner]++
 		}
 	}
 	ds.meta.LastChange = time.Now().UTC()
+	if r := ds.server.changeRecorder; r != nil && len(counts) > 0 {
+		r.RecordChanges(ds.meta.Path, counts)
+	}
 }
 
 func encodeBase64(b []byte) string {

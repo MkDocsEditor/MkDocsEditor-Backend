@@ -68,6 +68,28 @@ var rootCmd = &cobra.Command{
 
 		restService := backend.NewRestService(treeManager, syncServer, authenticator)
 
+		var gitCommitter *backend.GitCommitter
+		if conf.Git.Enabled {
+			repo, err := backend.OpenGitRepo(conf.MkDocs.DocsPath, backend.GitSignature{Name: conf.Git.CommitterName, Email: conf.Git.CommitterEmail})
+			if err != nil {
+				log.Fatalf("git is enabled, but: %v", err)
+			}
+			gitCommitter, err = backend.NewGitCommitter(repo, authenticator, conf.MkDocs.StateDir, backend.GitCommitterOptions{
+				AfterLeave:  time.Duration(conf.Git.CommitAfterLeave) * time.Minute,
+				AfterIdle:   time.Duration(conf.Git.CommitAfterIdle) * time.Minute,
+				MaxInterval: time.Duration(conf.Git.CommitMaxInterval) * time.Minute,
+				Push:        conf.Git.Push,
+				Remote:      conf.Git.Remote,
+				Branch:      conf.Git.Branch,
+			})
+			if err != nil {
+				log.Fatalf("Unable to start the git committer: %v", err)
+			}
+			gitCommitter.Start(syncServer)
+			restService.SetGitCommitter(gitCommitter)
+			log.Printf("git commits enabled")
+		}
+
 		// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -82,6 +104,10 @@ var rootCmd = &cobra.Command{
 		restService.Start()
 		syncServer.Close()
 		log.Printf("All documents saved")
+		if gitCommitter != nil {
+			gitCommitter.Close()
+			log.Printf("All changes committed")
+		}
 	},
 }
 

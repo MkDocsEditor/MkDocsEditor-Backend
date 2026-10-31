@@ -47,6 +47,9 @@ type SyncServer struct {
 	// OnFileWritten is called (with the session lock held) after the server wrote a document file
 	OnFileWritten func(relPath string)
 
+	// changeRecorder is told which users changed which document (the git committer)
+	changeRecorder ChangeRecorder
+
 	mu sessionMutex
 	// loaded documents by path relative to the docs folder
 	sessions map[string]*docSession
@@ -126,6 +129,56 @@ func (s *SyncServer) relPath(absPath string) (string, error) {
 		return "", fmt.Errorf("%s is outside the docs folder", absPath)
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+// ChangeRecorder is told about the changes users make to documents. RecordChanges is called with
+// the session lock held, so it must not block or call back into the sync server.
+type ChangeRecorder interface {
+	RecordChanges(relPath string, countsByUser map[string]int)
+}
+
+// SetChangeRecorder sets the recorder of user changes. Call it before serving requests.
+func (s *SyncServer) SetChangeRecorder(r ChangeRecorder) {
+	s.changeRecorder = r
+}
+
+// FlushPath writes a loaded document (path relative to the docs folder) to disk now
+func (s *SyncServer) FlushPath(relPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if session := s.sessions[relPath]; session != nil {
+		session.mu.Lock()
+		if !session.closed {
+			session.flushLocked()
+		}
+		session.mu.Unlock()
+	}
+}
+
+// FlushAll writes all loaded documents to disk now
+func (s *SyncServer) FlushAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, session := range s.sessions {
+		session.mu.Lock()
+		if !session.closed {
+			session.flushLocked()
+		}
+		session.mu.Unlock()
+	}
+}
+
+// HasConnections reports whether clients are connected to a document (path relative to the docs folder)
+func (s *SyncServer) HasConnections(relPath string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session := s.sessions[relPath]
+	if session == nil {
+		return false
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	return len(session.conns) > 0
 }
 
 func (s *SyncServer) notifyWritten(relPath string) {
