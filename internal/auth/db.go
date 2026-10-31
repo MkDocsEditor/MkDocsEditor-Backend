@@ -65,6 +65,39 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX audit_events_time ON audit_events(time);
 `,
+	// 2: sessions and links (setup, invite, reset)
+	`
+CREATE TABLE sessions (
+	id           TEXT PRIMARY KEY,
+	account_id   TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	token_hash   BLOB NOT NULL UNIQUE,
+	type         TEXT NOT NULL CHECK (type IN ('cookie', 'bearer')),
+	device_name  TEXT NOT NULL DEFAULT '',
+	user_agent   TEXT NOT NULL DEFAULT '',
+	ip           TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	last_used_at INTEGER NOT NULL,
+	expires_at   INTEGER NOT NULL,
+	reauth_at    INTEGER NOT NULL
+);
+CREATE INDEX sessions_account ON sessions(account_id);
+CREATE TABLE links (
+	id                   TEXT PRIMARY KEY,
+	kind                 TEXT NOT NULL CHECK (kind IN ('setup', 'invite', 'reset')),
+	token_hash           BLOB NOT NULL UNIQUE,
+	role                 TEXT NOT NULL DEFAULT '',
+	account_id           TEXT NOT NULL DEFAULT '',
+	note                 TEXT NOT NULL DEFAULT '',
+	reset_second_factors INTEGER NOT NULL DEFAULT 0,
+	created_by           TEXT NOT NULL DEFAULT '',
+	created_at           INTEGER NOT NULL,
+	expires_at           INTEGER NOT NULL,
+	used_at              INTEGER NOT NULL DEFAULT 0,
+	used_by              TEXT NOT NULL DEFAULT '',
+	revoked_at           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX links_kind ON links(kind, created_at);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,8 +32,10 @@ const (
 
 type (
 	ErrorResult struct {
-		Name    string `json:"name" xml:"name" form:"name" query:"name"`
-		Message string `json:"message" xml:"message" form:"message" query:"message"`
+		Name    string         `json:"name"`
+		Code    string         `json:"code,omitempty"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details,omitempty"`
 	}
 
 	NewSectionRequest struct {
@@ -59,11 +62,13 @@ type (
 )
 
 type RestService struct {
-	echoRest      *echo.Echo
-	authenticator *auth.Service
-	treeManager   *TreeManager
-	sync          *SyncServer
-	git           *GitCommitter
+	echoRest       *echo.Echo
+	allowedOrigins []string
+	trustedProxies []*net.IPNet
+	authenticator  *auth.Service
+	treeManager    *TreeManager
+	sync           *SyncServer
+	git            *GitCommitter
 }
 
 func NewRestService(
@@ -71,10 +76,16 @@ func NewRestService(
 	syncServer *SyncServer,
 	authenticator *auth.Service,
 ) *RestService {
+	trusted, err := ParseTrustedProxies(configuration.CurrentConfig.Server.TrustedProxies)
+	if err != nil {
+		log.Printf("Ignoring server.trustedProxies: %v", err)
+	}
 	rs := &RestService{
-		treeManager:   treeManager,
-		sync:          syncServer,
-		authenticator: authenticator,
+		treeManager:    treeManager,
+		sync:           syncServer,
+		authenticator:  authenticator,
+		allowedOrigins: configuration.CurrentConfig.Server.CORS.AllowedOrigins,
+		trustedProxies: trusted,
 	}
 	rs.echoRest = rs.createRestService()
 	return rs
@@ -115,10 +126,7 @@ func unescapePathParams(next echo.HandlerFunc) echo.HandlerFunc {
 		for i, v := range values {
 			d, err := url.PathUnescape(v)
 			if err != nil {
-				return c.JSONPretty(http.StatusBadRequest, &ErrorResult{
-					Name:    "Bad Request",
-					Message: "invalid percent-encoding in the path",
-				}, indentationChar)
+				return apiError(c, http.StatusBadRequest, CodeBadRequest, "invalid percent-encoding in the path", nil)
 			}
 			decoded[i] = d
 		}
@@ -130,11 +138,26 @@ func unescapePathParams(next echo.HandlerFunc) echo.HandlerFunc {
 func (rs *RestService) createRestService() *echo.Echo {
 	echoRest := echo.New()
 	echoRest.HideBanner = true
+	echoRest.IPExtractor = rs.ipExtractor()
+	defaultErrorHandler := echoRest.DefaultHTTPErrorHandler
+	echoRest.HTTPErrorHandler = func(err error, c echo.Context) {
+		if errors.Is(err, errResponded) {
+			return
+		}
+		defaultErrorHandler(err, c)
+	}
 
 	// Root level middleware
 	echoRest.Pre(middleware.AddTrailingSlash())
 
-	echoRest.Use(middleware.Secure())
+	echoRest.Use(middleware.SecureWithConfig(middleware.SecureConfig{
+		XSSProtection:         "0",
+		ContentTypeNosniff:    "nosniff",
+		XFrameOptions:         "DENY",
+		ContentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'",
+		ReferrerPolicy:        "no-referrer",
+	}))
+	echoRest.Use(rs.securityHeaders)
 
 	echoRest.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogMethod:   true,
@@ -144,7 +167,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 		LogError:    true,
 		HandleError: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			if v.Error != nil {
+			if v.Error != nil && !errors.Is(v.Error, errResponded) {
 				log.Printf("%s %s %d %v error=%v", v.Method, v.URIPath, v.Status, v.Latency, v.Error)
 			} else {
 				log.Printf("%s %s %d %v", v.Method, v.URIPath, v.Status, v.Latency)
@@ -160,8 +183,22 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.Use(rs.authMiddleware)
 	echoRest.Use(unescapePathParams)
 
+	echoRest.GET("/auth/status/", rs.authStatus)
+	echoRest.POST("/auth/login/", rs.login)
+	echoRest.POST("/auth/logout/", rs.logout)
+	echoRest.POST("/auth/link/inspect/", rs.inspectLink)
+	echoRest.POST("/auth/link/redeem/", rs.redeemLink)
 	echoRest.GET(EndpointPathWhoAmI, rs.whoAmI)
 	echoRest.POST(EndpointPathWsTicket, rs.issueWsTicket)
+
+	echoRest.GET("/account/sessions/", rs.accountSessions)
+	echoRest.DELETE("/account/sessions/:"+urlParamId+"/", rs.revokeAccountSession)
+	echoRest.POST("/account/sessions/revoke-others/", rs.revokeOtherSessions)
+
+	echoRest.GET("/admin/invites/", rs.listInvites)
+	echoRest.POST("/admin/invites/", rs.createInvite)
+	echoRest.DELETE("/admin/invites/:"+urlParamId+"/", rs.revokeInvite)
+
 	echoRest.GET("/actors/", rs.getActors)
 	echoRest.GET("/events/ws/", rs.handleEventsWebsocket)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
@@ -211,11 +248,11 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 		AllowHeaders: []string{
 			echo.HeaderAuthorization, echo.HeaderContentType, echo.HeaderAccept, "X-Requested-With",
 		},
-		ExposeHeaders: []string{echo.HeaderContentDisposition},
+		ExposeHeaders: []string{echo.HeaderContentDisposition, "Retry-After"},
 		MaxAge:        3600,
 	}
 	if len(c.AllowMethods) == 0 {
-		c.AllowMethods = []string{http.MethodHead, http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete}
+		c.AllowMethods = []string{http.MethodHead, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete}
 	}
 	if len(conf.AllowedOrigins) > 0 {
 		c.AllowOrigins = conf.AllowedOrigins
@@ -503,6 +540,7 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 	if errors.Is(err, ErrDocumentInUse) {
 		return c.JSONPretty(http.StatusConflict, &ErrorResult{
 			Name:    "Conflict",
+			Code:    CodeConflict,
 			Message: err.Error() + " (use ?force=true to delete anyway)",
 		}, indentationChar)
 	}
@@ -547,6 +585,7 @@ func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 	} else {
 		return c.JSONPretty(http.StatusBadRequest, &ErrorResult{
 			Name:    "Bad Request",
+			Code:    CodeBadRequest,
 			Message: "missing multipart form field 'file'",
 		}, indentationChar)
 	}
@@ -571,8 +610,13 @@ func (rs *RestService) ReturnError(c echo.Context, e error) (err error) {
 	case errors.Is(e, ErrNotFound):
 		status, name = http.StatusNotFound, "Not found"
 	}
+	code := map[int]string{http.StatusBadRequest: CodeBadRequest, http.StatusConflict: CodeConflict, http.StatusNotFound: CodeNotFound}[status]
+	if code == "" {
+		code = CodeInternal
+	}
 	return c.JSONPretty(status, &ErrorResult{
 		Name:    name,
+		Code:    code,
 		Message: e.Error(),
 	}, indentationChar)
 }
@@ -581,6 +625,7 @@ func (rs *RestService) ReturnError(c echo.Context, e error) (err error) {
 func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
 		Name:    "Not found",
+		Code:    CodeNotFound,
 		Message: "No item with id '" + id + "' found",
 	}, indentationChar)
 }

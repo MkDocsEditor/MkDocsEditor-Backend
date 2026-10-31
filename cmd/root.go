@@ -47,13 +47,22 @@ var rootCmd = &cobra.Command{
 		if err := backend.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
 			log.Fatalf("Invalid state directory: %v", err)
 		}
+		if _, err := backend.ParseTrustedProxies(conf.Server.TrustedProxies); err != nil {
+			log.Fatalf("Invalid server.trustedProxies: %v", err)
+		}
 		authenticator, err := auth.Open(auth.Options{StateDir: conf.MkDocs.StateDir, Server: conf.Server})
 		if err != nil {
 			log.Fatalf("Unable to open the account database: %v", err)
 		}
 		defer func() { _ = authenticator.Close() }()
-		if !authenticator.Enabled() {
-			_, _ = color.New(color.FgYellow).Println("WARNING: No users configured (server.auth.users), unauthorized access to all files in document path is possible!")
+		switch {
+		case !authenticator.Enabled():
+			_, _ = color.New(color.FgYellow).Println("WARNING: server.auth.disabled is set: there is no authentication, everyone has full access to all files in the document path!")
+		case authenticator.SetupRequired():
+			log.Printf("No account exists yet. Create the first admin with this one-time setup link (valid 24 hours, `mkdocsrest setup-link` prints a new one):")
+			if err := authenticator.PrintSetupLink(); err != nil {
+				log.Fatalf("Unable to create a setup link: %v", err)
+			}
 		}
 
 		syncServer, err := backend.NewSyncServer(treeManager, authenticator, conf.MkDocs.StateDir, conf.Server.CORS.AllowedOrigins)

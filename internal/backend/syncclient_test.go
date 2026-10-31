@@ -193,7 +193,7 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 	}
 	c.mu.Unlock()
 	if o.useTicket {
-		ticket, _, err := c.env.authn.IssueTicket(c.env.authn.UserByUsername(c.user))
+		ticket, _, err := c.env.authn.IssueTicket(c.env.authn.UserByUsername(c.user), "")
 		if err != nil {
 			return err
 		}

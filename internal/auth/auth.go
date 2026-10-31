@@ -101,7 +101,19 @@ type Options struct {
 type Service struct {
 	db   *sql.DB
 	opts Options
+	cfg  settings
 	now  func() time.Time
+
+	limiter *limiter
+
+	listenersMu sync.Mutex
+	listeners   []func(RevokeEvent)
+
+	challengesMu sync.Mutex
+	challenges   map[string]*challenge
+
+	stop     chan struct{}
+	stopOnce sync.Once
 
 	// in-memory view of all accounts, rebuilt after every change
 	cacheMu    sync.Mutex
@@ -120,6 +132,10 @@ type Service struct {
 // Open opens the account database in the state directory and imports the configured users
 // and the actor bindings of actors.json on the first start.
 func Open(opts Options) (*Service, error) {
+	cfg, err := newSettings(opts.Server.Auth)
+	if err != nil {
+		return nil, err
+	}
 	db, err := openDatabase(filepath.Join(opts.StateDir, DatabaseFileName))
 	if err != nil {
 		return nil, err
@@ -127,7 +143,11 @@ func Open(opts Options) (*Service, error) {
 	s := &Service{
 		db:         db,
 		opts:       opts,
+		cfg:        cfg,
 		now:        time.Now,
+		limiter:    newLimiter(),
+		challenges: map[string]*challenge{},
+		stop:       make(chan struct{}),
 		tickets:    map[string]ticket{},
 		basicCache: map[string]cachedVerification{},
 	}
@@ -139,21 +159,34 @@ func Open(opts Options) (*Service, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	s.pruneExpired()
+	go s.maintenance()
 	return s, nil
+}
+
+func (s *Service) maintenance() {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.pruneExpired()
+		}
+	}
 }
 
 // Close closes the database
 func (s *Service) Close() error {
+	s.stopOnce.Do(func() { close(s.stop) })
 	return s.db.Close()
 }
 
-// Enabled reports whether authentication is on. It is off while no account exists and no
-// user is configured.
+// Enabled reports whether authentication is on (not server.auth.disabled). While no
+// account exists, the server waits for the setup (SetupRequired).
 func (s *Service) Enabled() bool {
-	s.loadCache()
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	return s.active > 0
+	return !s.cfg.disabled
 }
 
 func (s *Service) invalidateCache() {
@@ -252,6 +285,11 @@ func newID() string {
 
 // ErrNotFound is returned for unknown objects
 var ErrNotFound = errors.New("not found")
+
+// ValidateRole checks that a role is admin, editor or reader
+func ValidateRole(role string) error {
+	return validateRole(role)
+}
 
 func validateRole(role string) error {
 	switch role {
