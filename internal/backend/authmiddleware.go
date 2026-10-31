@@ -15,6 +15,7 @@ const (
 	contextKeyUser       = "mkdocseditor.user"
 	contextKeySession    = "mkdocseditor.session"
 	contextKeyAuthMethod = "mkdocseditor.authMethod"
+	contextKeyAppToken   = "mkdocseditor.appToken" //nolint:gosec // a context key
 
 	EndpointPathWhoAmI   = "/auth/whoami/"
 	EndpointPathWsTicket = "/auth/ws-ticket/"
@@ -80,6 +81,33 @@ func UserFromContext(c echo.Context) *auth.User {
 func SessionFromContext(c echo.Context) *auth.Session {
 	s, _ := c.Get(contextKeySession).(*auth.Session)
 	return s
+}
+
+// AppTokenFromContext returns the app token of a request authenticated by one, or nil
+func AppTokenFromContext(c echo.Context) *auth.AppToken {
+	t, _ := c.Get(contextKeyAppToken).(*auth.AppToken)
+	return t
+}
+
+func (rs *RestService) authenticateAppToken(c echo.Context, token string, username string) error {
+	user, t, err := rs.authenticator.AuthenticateAppToken(token)
+	if err != nil || (username != "" && !strings.EqualFold(username, user.Username)) {
+		if err := rs.limitIP(c); err != nil {
+			return err
+		}
+		return responded(rs.unauthorized(c))
+	}
+	if t.Scope != auth.ScopeWrite && user.CanWrite() {
+		// the effective rights are the intersection of scope and role; websockets read
+		// the role of the context user
+		readOnly := *user
+		readOnly.Role = auth.RoleReader
+		user = &readOnly
+	}
+	c.Set(contextKeyUser, user)
+	c.Set(contextKeyAppToken, t)
+	c.Set(contextKeyAuthMethod, AuthMethodAppToken)
+	return nil
 }
 
 func authMethodFromContext(c echo.Context) string {
@@ -220,6 +248,9 @@ func (rs *RestService) authenticateHeader(c echo.Context, authorization string) 
 			c.Set(contextKeyAuthMethod, AuthMethodSession)
 			return nil
 		}
+		if auth.ValidAppToken(value) {
+			return rs.authenticateAppToken(c, value, "")
+		}
 		return responded(rs.unauthorized(c))
 	case "basic":
 		if !rs.authenticator.LegacyBasicAuth() {
@@ -228,6 +259,10 @@ func (rs *RestService) authenticateHeader(c echo.Context, authorization string) 
 		username, password, ok := c.Request().BasicAuth()
 		if !ok {
 			return responded(rs.unauthorized(c))
+		}
+		if auth.ValidAppToken(password) {
+			// username + app token, for tools that only speak basic auth
+			return rs.authenticateAppToken(c, password, username)
 		}
 		user := rs.authenticator.AuthenticateBasic(username, password)
 		if user == nil {
@@ -265,6 +300,10 @@ func (rs *RestService) authorize(c echo.Context, user *auth.User) error {
 	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))
+	}
+	if t := AppTokenFromContext(c); t != nil && t.Scope != auth.ScopeWrite && !isReadOnlyMethod(req.Method) {
+		// also no websocket tickets: a ticket carries the account, not the token's scope
+		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "the app token has the scope 'read' and may not change anything", nil))
 	}
 	return nil
 }
@@ -416,6 +455,7 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 	var rl *auth.RateLimitError
 	var weak *auth.WeakPasswordError
 	var second *auth.SecondFactorError
+	var guard *auth.ErrAdminGuard
 	switch {
 	case errors.As(err, &rl):
 		c.Response().Header().Set("Retry-After", itoa(rl.Seconds()))
@@ -458,6 +498,10 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 	case errors.Is(err, auth.ErrPasskeyRegistrationFailed):
 		return apiError(c, http.StatusBadRequest, CodePasskeyRegistrationFailed, err.Error(), nil)
 	case errors.Is(err, auth.ErrInvalidPasskeyName):
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
+	case errors.As(err, &guard):
+		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
+	case errors.Is(err, auth.ErrInvalidTokenName), errors.Is(err, auth.ErrInvalidTokenScope), errors.Is(err, auth.ErrInvalidTokenExpiry):
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
 	case errors.Is(err, auth.ErrNotFound):
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)

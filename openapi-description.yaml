@@ -741,6 +741,67 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /account/tokens/:
+    get:
+      summary: "The app tokens of the signed-in user"
+      operationId: listAppTokens
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "App tokens, newest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      summary: "Create an app token (step-up)"
+      description: "App tokens authenticate as Authorization: Bearer mdp_... (or basic auth with the username and the token). The rights are the intersection of the scope and the role; they never reach /account/ or /admin/."
+      operationId: createAppToken
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppTokenRequest"
+      responses:
+        "200":
+          description: "The token, returned only now"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedAppToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/tokens/{tokenId}/:
+    parameters:
+      - $ref: "#/components/parameters/tokenId"
+    delete:
+      summary: "Revoke an app token"
+      operationId: revokeAppToken
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "Revoked"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /account/sessions/:
     get:
       summary: "The sessions of the signed-in user"
@@ -854,6 +915,295 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /admin/users/:
+    get:
+      summary: "List the accounts"
+      operationId: adminListUsers
+      tags: [ Admin ]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: "Comma-separated states (active, disabled, deleted); default: all"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Accounts, by username"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/users/{userId}/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+    patch:
+      summary: "Change an account"
+      description: "role and status need a step-up. Admins cannot demote or disable themselves, and the last active admin stays (409 conflict). A role change closes the user's websockets with 4003; disabling ends the sessions, app tokens and reset links."
+      operationId: adminUpdateUser
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserUpdate"
+      responses:
+        "200":
+          description: "The account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+    delete:
+      summary: "Delete an account (step-up)"
+      operationId: adminDeleteUser
+      tags: [ Admin ]
+      responses:
+        "204":
+          description: "Deleted: a tombstone keeps id, username, display name and colour"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /admin/users/{userId}/sessions/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+    get:
+      summary: "The sessions of an account"
+      operationId: adminUserSessions
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "Active sessions"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/users/{userId}/sessions/revoke/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+    post:
+      summary: "End all sessions of an account"
+      operationId: adminRevokeUserSessions
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "How many sessions ended"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revoked"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/users/{userId}/reset-link/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+    post:
+      summary: "Create a reset link (step-up)"
+      operationId: adminCreateResetLink
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetLinkRequest"
+      responses:
+        "200":
+          description: "The link with its token and URL (shown only now)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedLink"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/sessions/{sessionId}/:
+    parameters:
+      - $ref: "#/components/parameters/sessionId"
+    delete:
+      summary: "End a session of any account"
+      operationId: adminRevokeSession
+      tags: [ Admin ]
+      responses:
+        "204":
+          description: "The session ended"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/reset-links/:
+    get:
+      summary: "List reset links"
+      operationId: adminListResetLinks
+      tags: [ Admin ]
+      parameters:
+        - $ref: "#/components/parameters/linkStatus"
+      responses:
+        "200":
+          description: "Reset links, newest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Link"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/reset-links/{linkId}/:
+    parameters:
+      - $ref: "#/components/parameters/linkId"
+    delete:
+      summary: "Revoke a reset link"
+      operationId: adminRevokeResetLink
+      tags: [ Admin ]
+      responses:
+        "204":
+          description: "Revoked (or already used, expired or revoked)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/settings/:
+    get:
+      summary: "The instance settings"
+      operationId: adminSettings
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "The settings"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    patch:
+      summary: "Change the instance settings (step-up)"
+      operationId: adminUpdateSettings
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstanceSettings"
+      responses:
+        "200":
+          description: "The settings"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/audit/:
+    get:
+      summary: "The audit log"
+      operationId: adminAudit
+      tags: [ Admin ]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: before
+          in: query
+          required: false
+          description: "Continue below this event id (next of the previous page)"
+          schema:
+            type: integer
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "login.failed"
+        - name: account
+          in: query
+          required: false
+          description: "Only events where this account acted or was affected"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Events, newest first"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /actors/:
     get:
@@ -1483,6 +1833,20 @@ components:
       description: "Id of a resource"
       schema:
         type: string
+    userId:
+      name: userId
+      in: path
+      required: true
+      description: "Id of an account"
+      schema:
+        type: string
+    tokenId:
+      name: tokenId
+      in: path
+      required: true
+      description: "Id of an app token"
+      schema:
+        type: string
     passkeyId:
       name: passkeyId
       in: path
@@ -2108,6 +2472,167 @@ components:
         provider:
           type: string
           description: "Known passkey provider of the AAGUID, for example Bitwarden"
+
+    AppToken:
+      type: object
+      required: [ id, name, scope, createdAt, lastUsedAt, expiresAt ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [ read, write ]
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AppTokenRequest:
+      type: object
+      required: [ name, scope ]
+      properties:
+        name:
+          type: string
+          maxLength: 64
+        scope:
+          type: string
+          enum: [ read, write ]
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: "Absent: no expiry"
+
+    CreatedAppToken:
+      type: object
+      required: [ appToken, token ]
+      properties:
+        appToken:
+          $ref: "#/components/schemas/AppToken"
+        token:
+          type: string
+          description: "mdp_..., returned only once"
+
+    AdminUser:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [ email, status, createdAt, lastLoginAt, hasPassword, totpEnabled, passkeyCount, sessionCount ]
+          properties:
+            email:
+              type: string
+            status:
+              type: string
+              enum: [ active, disabled, deleted ]
+            createdAt:
+              type: string
+              format: date-time
+            lastLoginAt:
+              type: string
+              format: date-time
+              nullable: true
+            hasPassword:
+              type: boolean
+            totpEnabled:
+              type: boolean
+            passkeyCount:
+              type: integer
+            sessionCount:
+              type: integer
+
+    AdminUserUpdate:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        status:
+          type: string
+          enum: [ active, disabled ]
+        username:
+          type: string
+        displayName:
+          type: string
+        color:
+          type: string
+        email:
+          type: string
+
+    ResetLinkRequest:
+      type: object
+      properties:
+        expiresInMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: "Default 60"
+        resetSecondFactors:
+          type: boolean
+          description: "Remove TOTP, recovery codes and passkeys when the link is redeemed"
+
+    InstanceSettings:
+      type: object
+      properties:
+        require2FA:
+          type: boolean
+
+    AuditEvent:
+      type: object
+      required: [ id, time, type, actor, target, ip, userAgent, details ]
+      properties:
+        id:
+          type: integer
+        time:
+          type: string
+          format: date-time
+        type:
+          type: string
+        actor:
+          type: object
+          nullable: true
+          required: [ id ]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+        target:
+          type: object
+          nullable: true
+          required: [ id ]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+        ip:
+          type: string
+        userAgent:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    AuditPage:
+      type: object
+      required: [ events, next ]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        next:
+          type: integer
+          nullable: true
 
     Revoked:
       type: object
