@@ -254,16 +254,17 @@ func (rs *RestService) authenticateHeader(c echo.Context, authorization string) 
 		}
 		return responded(rs.unauthorized(c))
 	case "basic":
-		if !rs.authenticator.LegacyBasicAuth() {
-			return responded(rs.unauthorized(c))
-		}
 		username, password, ok := c.Request().BasicAuth()
 		if !ok {
 			return responded(rs.unauthorized(c))
 		}
 		if auth.ValidAppToken(password) {
-			// username + app token, for tools that only speak basic auth
+			// username + app token, for tools that only speak basic auth; no password is sent,
+			// so this works without legacy basic auth
 			return rs.authenticateAppToken(c, password, username)
+		}
+		if !rs.authenticator.LegacyBasicAuth() {
+			return responded(rs.unauthorized(c))
 		}
 		user := rs.authenticator.AuthenticateBasic(username, password)
 		if user == nil {

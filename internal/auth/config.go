@@ -52,7 +52,7 @@ func newSettings(conf configuration.AuthConfiguration) (settings, error) {
 	s := settings{
 		disabled:        conf.Disabled,
 		clientURL:       strings.TrimRight(conf.ClientURL, "/"),
-		legacyBasicAuth: true,
+		legacyBasicAuth: false,
 		idleTimeout:     conf.SessionIdleTimeout,
 		maxLifetime:     conf.SessionMaxLifetime,
 		cookieSecure:    conf.CookieSecure,

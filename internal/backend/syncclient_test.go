@@ -199,9 +199,7 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 		}
 		hello["ticket"] = ticket
 	} else if c.user != "" {
-		req, _ := http.NewRequest(http.MethodGet, "/", nil)
-		req.SetBasicAuth(c.user, testPasswords[c.user])
-		header.Set("Authorization", req.Header.Get("Authorization"))
+		header.Set("Authorization", authHeader(c.env.t, c.env.authn, c.user, testPasswords[c.user]))
 	}
 	for k, v := range o.hello {
 		hello[k] = v

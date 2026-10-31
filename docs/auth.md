@@ -236,10 +236,11 @@ Each request is authenticated by the first matching method:
 
 1. `Authorization: Bearer mds_…`: a bearer session.
 2. `Authorization: Bearer mdp_…`: an app token.
-3. `Authorization: Basic …`: only when `server.auth.legacyBasicAuth: true` (default
-   `false`), see [Migration](#14-migration-from-configured-users). Username and password
-   of an account **without** a second factor. Accounts with TOTP or passkeys can use an
-   app token as the password instead (scripts).
+3. `Authorization: Basic …` with the username and an **app token** as the password, for
+   tools that only speak Basic auth. This always works, since no password is sent.
+   Username and **account password** only when `server.auth.legacyBasicAuth: true`
+   (default `false`), see [Migration](#14-migration-from-configured-users), and only for
+   accounts **without** a second factor.
 4. The session cookie (`__Host-mkdocseditor_session` over HTTPS,
    `mkdocseditor_session` over plain HTTP).
 
@@ -319,7 +320,8 @@ by the official web client).
 3. a **ticket** in the `hello` message, as before: `POST /auth/ws-ticket/` returns
    `{"ticket": "…", "expiresAt": "…"}`, valid for 60 s, single use. Tickets keep working
    for every client and are the fallback when the upgrade cannot carry a cookie.
-4. `Authorization: Basic …` only with legacy Basic auth enabled.
+4. `Authorization: Basic …` with an app token, or with the account password when legacy
+   Basic auth is enabled.
 
 A ticket remembers the session it was issued for and is refused when that session ended
 in the meantime. When a session is revoked, an account is disabled or deleted, its
@@ -1003,9 +1005,9 @@ server:
     # The web client, used to build setup, invite, reset and connect links, reported as
     # webClientUrl by /server-info/, and the default passkey origin and RP ID.
     clientUrl: "https://edit.wiki.markusressel.de"
-    # Accept HTTP Basic (username + password of accounts without a second factor, or
-    # username + app token). Only for the transition from server.auth.users. Default: true
-    # until the web and Android clients use sessions, then false.
+    # Accept HTTP Basic with username + password (accounts without a second factor). Only
+    # for the transition from server.auth.users. Default: false. Username + app token
+    # works without it.
     legacyBasicAuth: false
     # Session lifetimes (Go durations).
     sessionIdleTimeout: "720h"   # 30 days
@@ -1090,18 +1092,17 @@ On start, after opening `auth.db`:
    Before, such a server ran without authentication; it now requires the setup link. To
    keep the old behaviour for development, set `server.auth.disabled: true`.
 
-**Transition for clients.** Until the web and Android clients use sessions, the operator
-sets `server.auth.legacyBasicAuth: true`, so the clients keep working with HTTP Basic
-against the imported accounts (same usernames and passwords). Once both clients are
-updated, remove the flag. During the implementation, master keeps Basic auth working
-until the final cleanup pull request, which makes `legacyBasicAuth` default to `false`.
+**Transition for clients.** `legacyBasicAuth` defaults to `false`. Clients older than the
+account system (HTTP Basic with the configured passwords) only keep working when the
+operator sets `server.auth.legacyBasicAuth: true`; the imported accounts keep the same
+usernames and passwords. Once all clients use sessions, remove the flag.
 
 Steps for a running deployment:
 
 1. Back up the state directory.
 2. Deploy the new version with the old configuration plus `server.auth.clientUrl`,
-   `server.trustedProxies`, `server.auth.webauthn.*` and, during the transition,
-   `server.auth.legacyBasicAuth: true`.
+   `server.trustedProxies`, `server.auth.webauthn.*` and, only while old clients are
+   still in use, `server.auth.legacyBasicAuth: true`.
 3. Check the log for the import lines. Log in with the web client using the existing
    passwords; set up passkeys or TOTP.
 4. After the clients are updated: remove `server.auth.users`, `server.basicAuth` and

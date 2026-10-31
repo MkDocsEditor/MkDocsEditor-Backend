@@ -16,7 +16,8 @@ info:
     Accounts, sessions and the login flows are specified in
     [docs/auth.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/auth.md).
     Requests authenticate with the session cookie (web), `Authorization: Bearer mds_…`
-    (Android) or, during the transition, HTTP basic auth (`server.auth.legacyBasicAuth`).
+    (Android), an app token (`Bearer mdp_…`, or as the basic auth password) or, only with
+    `server.auth.legacyBasicAuth: true`, HTTP basic auth with the account password.
     Every request with a method other than `GET`/`HEAD`/`OPTIONS` and without an
     `Authorization` header must send `X-Requested-With`, and an `Origin` header must be an
     allowed origin (CSRF protection). Users with the role `reader` get `403` when they try to
@@ -1926,7 +1927,7 @@ components:
     basicAuth:
       type: http
       scheme: basic
-      description: "Only with `server.auth.legacyBasicAuth` (transition)"
+      description: "Username and app token; username and account password only with `server.auth.legacyBasicAuth` (transition, default off)"
 
   parameters:
     sectionId:

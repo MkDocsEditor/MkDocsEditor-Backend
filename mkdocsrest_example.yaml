@@ -25,7 +25,8 @@ server:
     # the default passkey origin and RP ID. Without it, only the tokens are shown.
     clientUrl: "https://edit.wiki.mycompany.com"
     # (optional) Accept HTTP basic auth with account passwords (accounts without a second
-    # factor). Only for the transition from the old configuration. Default: true for now.
+    # factor). Only for old clients during the transition. Default: false. Basic auth with
+    # the username and an app token works without it.
     #legacyBasicAuth: false
     # (optional) Session lifetimes. Defaults: 720h idle, 2160h absolute
     #sessionIdleTimeout: "720h"
