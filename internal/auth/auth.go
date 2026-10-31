@@ -103,6 +103,8 @@ type Service struct {
 	opts Options
 	cfg  settings
 	keys *serverKeys
+	pk   *passkeyConfig
+	cer  ceremonies
 	now  func() time.Time
 
 	limiter *limiter
@@ -140,6 +142,10 @@ func Open(opts Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	pk, err := newPasskeyConfig(opts.Server, cfg)
+	if err != nil {
+		return nil, err
+	}
 	db, err := openDatabase(filepath.Join(opts.StateDir, DatabaseFileName))
 	if err != nil {
 		return nil, err
@@ -154,6 +160,8 @@ func Open(opts Options) (*Service, error) {
 		opts:       opts,
 		cfg:        cfg,
 		keys:       keys,
+		pk:         pk,
+		cer:        ceremonies{m: map[string]*ceremony{}},
 		now:        time.Now,
 		limiter:    newLimiter(),
 		challenges: map[string]*challenge{},

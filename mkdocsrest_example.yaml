@@ -36,6 +36,24 @@ server:
     #  perIpRefill: "6s"
     #  accountFailuresBeforeBackoff: 5
     #  maxBackoff: "15m"
+    # (optional) Passkeys (WebAuthn), see docs/auth.md section 12. Without rpId and clientUrl,
+    # passkeys are off.
+    #webauthn:
+    #  # Relying party id: the client's host or a parent domain of it. Changing it later makes
+    #  # all passkeys useless. Default: host of clientUrl
+    #  rpId: "wiki.mycompany.com"
+    #  # Name shown by authenticators and authenticator apps. Default: MkDocsEditor
+    #  rpName: "MkDocsEditor"
+    #  # Allowed web origins. Default: origin of clientUrl and server.cors.allowedOrigins
+    #  origins:
+    #    - "https://edit.wiki.mycompany.com"
+    #  # Android apps that may use the passkeys (their signing certificate fingerprints)
+    #  android:
+    #    - packageName: "de.markusressel.mkdocseditor"
+    #      sha256CertFingerprints:
+    #        - "AB:CD:EF:..."
+    #  # Serve /.well-known/assetlinks.json for these apps from the backend. Default: false
+    #  serveAssetLinks: false
     # (optional) Development only: no authentication, every request is the anonymous admin.
     #disabled: false
     # (optional, deprecated) Users of earlier versions. They are imported once into the

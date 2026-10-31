@@ -558,7 +558,8 @@ possible; see the threat model.
 2. User opens the link: `POST /auth/link/inspect/` →
    `{"kind": "reset", "username": "anna", "displayName": "Anna", "resetSecondFactors": false, "expiresAt": "…"}`.
 3. User sets a new password (`POST /auth/link/redeem/` `{"token", "password",
-   "sessionType", "deviceName"}`) or registers a passkey (link passkey begin/finish).
+   "sessionType", "deviceName"}`) or registers a passkey (link passkey begin/finish;
+   the password, if any, stays as it is).
 4. All sessions and app tokens of the account are revoked, then the new session is
    returned. If the account still has TOTP, the reset sign-in does **not** ask for it
    (the admin vouched for the user); with `require2FA` and no second factor left the
@@ -599,8 +600,11 @@ responses use the format of [Errors](#10-errors).
 **Passkey object:**
 
 ```json
-{"id": "f7g8…", "name": "Pixel 8", "createdAt": "…", "lastUsedAt": "…", "backedUp": true, "transports": ["internal", "hybrid"]}
+{"id": "f7g8…", "name": "Pixel 8", "createdAt": "…", "lastUsedAt": "…", "backedUp": true, "transports": ["internal", "hybrid"], "provider": "Bitwarden"}
 ```
+
+`lastUsedAt` is `null` until the first use. `provider` is the name of a known passkey
+provider (from the AAGUID) and absent for unknown authenticators.
 
 **App token object:** `{"id", "name", "scope", "createdAt", "lastUsedAt", "expiresAt"}`.
 

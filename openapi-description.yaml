@@ -207,6 +207,194 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /auth/passkey/login/begin/:
+    post:
+      summary: "Start a passkey login"
+      description: "Without challenge: a discoverable login (empty allowCredentials, works with conditional UI). With the challenge of a password login: the second factor."
+      operationId: passkeyLoginBegin
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasskeyLoginBegin"
+      responses:
+        "200":
+          description: "Options for navigator.credentials or Android Credential Manager"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ceremony"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/passkey/login/finish/:
+    post:
+      summary: "Complete a passkey login"
+      operationId: passkeyLoginFinish
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasskeyLoginFinish"
+      responses:
+        "200":
+          description: "A session"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/link/passkey/begin/:
+    post:
+      summary: "Start the passkey registration of a setup, invite or reset link"
+      operationId: linkPasskeyBegin
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkPasskeyBegin"
+      responses:
+        "200":
+          description: "Options for navigator.credentials or Android Credential Manager"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ceremony"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/link/passkey/finish/:
+    post:
+      summary: "Register the passkey and redeem the link"
+      operationId: linkPasskeyFinish
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkPasskeyFinish"
+      responses:
+        "200":
+          description: "A session"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/reauth/passkey/begin/:
+    post:
+      summary: "Start a step-up with a passkey"
+      operationId: reauthPasskeyBegin
+      tags: [ Auth ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: "Options for navigator.credentials or Android Credential Manager"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ceremony"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /auth/reauth/passkey/finish/:
+    post:
+      summary: "Complete a step-up with a passkey"
+      operationId: reauthPasskeyFinish
+      tags: [ Auth ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasskeyFinish"
+      responses:
+        "200":
+          description: "The end of the new step-up window"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reauthenticated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /.well-known/assetlinks.json:
+    get:
+      summary: "Digital Asset Links for the Android app"
+      description: "Only with server.auth.webauthn.serveAssetLinks, see docs/auth.md section 12."
+      operationId: assetLinks
+      tags: [ Auth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The statement list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /auth/logout/:
     post:
       summary: "End the current session"
@@ -432,6 +620,124 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /account/passkeys/:
+    get:
+      summary: "The passkeys of the signed-in user"
+      operationId: listPasskeys
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "Passkeys, oldest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Passkey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/passkeys/begin/:
+    post:
+      summary: "Start adding a passkey (step-up)"
+      operationId: addPasskeyBegin
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: "Options for navigator.credentials or Android Credential Manager"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ceremony"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/passkeys/finish/:
+    post:
+      summary: "Add the passkey"
+      operationId: addPasskeyFinish
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasskeyFinish"
+      responses:
+        "200":
+          description: "The new passkey"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Passkey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /account/passkeys/{passkeyId}/:
+    parameters:
+      - $ref: "#/components/parameters/passkeyId"
+    patch:
+      summary: "Rename a passkey"
+      operationId: renamePasskey
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasskeyRename"
+      responses:
+        "200":
+          description: "The passkey"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Passkey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: "Delete a passkey (step-up)"
+      description: "409 last-login-method for the last passkey of an account without password, 409 second-factor-required for the last second factor under require2FA."
+      operationId: deletePasskey
+      tags: [ Account ]
+      responses:
+        "204":
+          description: "Deleted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
 
@@ -1177,6 +1483,13 @@ components:
       description: "Id of a resource"
       schema:
         type: string
+    passkeyId:
+      name: passkeyId
+      in: path
+      required: true
+      description: "Id of a passkey"
+      schema:
+        type: string
     sessionId:
       name: sessionId
       in: path
@@ -1672,6 +1985,129 @@ components:
           items:
             type: string
             example: "abcd-efgh-jkmn"
+
+    EmptyObject:
+      type: object
+
+    Ceremony:
+      type: object
+      required: [ ceremonyId, publicKey ]
+      properties:
+        ceremonyId:
+          type: string
+          description: "Valid 5 minutes, single use"
+        publicKey:
+          type: object
+          additionalProperties: true
+          description: "PublicKeyCredentialCreationOptionsJSON or PublicKeyCredentialRequestOptionsJSON (binary fields base64url)"
+
+    WebAuthnCredential:
+      type: object
+      additionalProperties: true
+      description: "The standard JSON of a PublicKeyCredential (RegistrationResponseJSON or AuthenticationResponseJSON)"
+      required: [ id, rawId, type, response ]
+      properties:
+        id:
+          type: string
+        rawId:
+          type: string
+        type:
+          type: string
+          enum: [ public-key ]
+        response:
+          type: object
+          additionalProperties: true
+
+    PasskeyLoginBegin:
+      type: object
+      properties:
+        challenge:
+          type: string
+          description: "The challenge of a password login (passkey as second factor)"
+
+    PasskeyLoginFinish:
+      allOf:
+        - $ref: "#/components/schemas/SessionFields"
+        - type: object
+          required: [ ceremonyId, credential ]
+          properties:
+            ceremonyId:
+              type: string
+            credential:
+              $ref: "#/components/schemas/WebAuthnCredential"
+
+    LinkPasskeyBegin:
+      type: object
+      required: [ token ]
+      properties:
+        token:
+          type: string
+        username:
+          type: string
+          description: "Setup and invite links only"
+        displayName:
+          type: string
+
+    LinkPasskeyFinish:
+      allOf:
+        - $ref: "#/components/schemas/SessionFields"
+        - type: object
+          required: [ ceremonyId, credential ]
+          properties:
+            ceremonyId:
+              type: string
+            credential:
+              $ref: "#/components/schemas/WebAuthnCredential"
+            passkeyName:
+              type: string
+              maxLength: 64
+
+    PasskeyFinish:
+      type: object
+      required: [ ceremonyId, credential ]
+      properties:
+        ceremonyId:
+          type: string
+        credential:
+          $ref: "#/components/schemas/WebAuthnCredential"
+        name:
+          type: string
+          maxLength: 64
+          description: "Default: the provider name (from the AAGUID) or Passkey"
+
+    PasskeyRename:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          maxLength: 64
+
+    Passkey:
+      type: object
+      required: [ id, name, createdAt, lastUsedAt, backedUp, transports ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        backedUp:
+          type: boolean
+          description: "Synced passkey (backup state flag)"
+        transports:
+          type: array
+          items:
+            type: string
+        provider:
+          type: string
+          description: "Known passkey provider of the AAGUID, for example Bitwarden"
 
     Revoked:
       type: object

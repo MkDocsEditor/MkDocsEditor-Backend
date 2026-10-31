@@ -34,6 +34,10 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 			if method == "parameters" {
 				continue
 			}
+			if path == "/.well-known/assetlinks.json" {
+				// the well-known file is documented as it is fetched; the router adds the slash
+				path += "/"
+			}
 			documented[strings.ToUpper(method)+" "+param.ReplaceAllString(path, ":p")] = true
 		}
 	}

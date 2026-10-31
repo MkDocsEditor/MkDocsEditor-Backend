@@ -115,6 +115,23 @@ CREATE TABLE recovery_codes (
 	PRIMARY KEY (account_id, code_hash)
 );
 `,
+	// 4: passkeys (WebAuthn credentials) and the random WebAuthn user handle of each account
+	`
+CREATE TABLE webauthn_handles (
+	account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+	handle     BLOB NOT NULL UNIQUE
+);
+CREATE TABLE passkeys (
+	id            TEXT PRIMARY KEY,
+	account_id    TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	credential_id BLOB NOT NULL UNIQUE,
+	name          TEXT NOT NULL,
+	credential    TEXT NOT NULL,
+	created_at    INTEGER NOT NULL,
+	last_used_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX passkeys_account ON passkeys(account_id);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

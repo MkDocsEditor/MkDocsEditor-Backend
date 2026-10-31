@@ -451,6 +451,14 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 		return apiError(c, http.StatusConflict, CodeLastLoginMethod, err.Error(), nil)
 	case errors.Is(err, auth.ErrSecondFactorRequired):
 		return apiError(c, http.StatusConflict, CodeSecondFactorRequired, err.Error(), nil)
+	case errors.Is(err, auth.ErrPasskeysDisabled):
+		return apiError(c, http.StatusNotFound, CodePasskeysDisabled, err.Error(), nil)
+	case errors.Is(err, auth.ErrPasskeyVerificationFailed):
+		return apiError(c, http.StatusUnauthorized, CodePasskeyVerificationFailed, err.Error(), nil)
+	case errors.Is(err, auth.ErrPasskeyRegistrationFailed):
+		return apiError(c, http.StatusBadRequest, CodePasskeyRegistrationFailed, err.Error(), nil)
+	case errors.Is(err, auth.ErrInvalidPasskeyName):
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
 	case errors.Is(err, auth.ErrNotFound):
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)
 	case errors.Is(err, auth.ErrUnauthenticated):
