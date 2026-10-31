@@ -395,13 +395,15 @@ and answers with a **session response**:
 ```json
 {
   "status": "ok",
-  "user": { "id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "secondFactorSetupRequired": false },
+  "user": { "id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "secondFactorSetupRequired": false, "passkeyCount": 0 },
   "session": { "id": "p1q2…", "type": "bearer", "deviceName": "Pixel 8", "createdAt": "…", "expiresAt": "…", "idleExpiresAt": "…" },
   "token": "mds_…"
 }
 ```
 
-`token` is only present for `bearer` sessions. For `cookie` sessions the response sets
+`user.passkeyCount` is the number of passkeys of the account, for the passkey step
+after sign-in (see [Step-up](#step-up-re-authentication)). `token` is only present for
+`bearer` sessions. For `cookie` sessions the response sets
 the cookie:
 
 ```
@@ -558,6 +560,15 @@ change one's own username, TOTP enroll and disable, regenerate recovery codes, a
 delete passkeys, create app tokens and device links, and the admin actions: change a role, disable,
 delete, create reset links, change settings.
 
+**Passkey right after sign-in.** Clients suggest creating a passkey right after the
+first sign-in on a device (setup, invite, password login, device pairing). So that this
+needs no extra prompt, `POST /account/passkeys/begin/` also accepts a session that was
+created less than 10 minutes ago, by any complete authentication: a login (with its
+second factor, if the account has one), a link redeem, or a device link redeem. Clients
+decide whether to show the step from `user.passkeyCount` in the session response (or
+`passkeyCount` in `GET /account/`): offer it when it is `0`, or when this device has no
+passkey of its own yet and the user wants one.
+
 Step-up does not issue a new token. Tokens are only ever created after a complete
 authentication (no pre-login session is upgraded in place), so session fixation is not
 possible; see the threat model.
@@ -626,7 +637,9 @@ QR code with error correction level M.
   device links; creating a sixth revokes the oldest.
 - Redeeming creates a normal session of the account, like a login. The second factor
   counts as satisfied, because the creator passed step-up. The new session is **not**
-  recently authenticated: sensitive actions on the new device need their own step-up.
+  recently authenticated, with one exception: like every new session it may register a
+  passkey during its first 10 minutes (see [Step-up](#step-up-re-authentication)). All
+  other sensitive actions on the new device need their own step-up.
 - `username` in the redeem request is optional; when sent, it must match the account
   (ignoring case), otherwise the request fails like an unknown token.
 - `sessionType` defaults to `"bearer"`; `"cookie"` is also accepted.
