@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 )
 
-const mkdocsConfigFileDefaultName = "mkdocsrest.yaml"
+// default name of the MkDocs configuration file inside the project folder
+const mkdocsConfigFileDefaultName = "mkdocs.yml"
 
 type Configuration struct {
 	Server ServerConfiguration `yaml:"server"`
@@ -51,8 +52,6 @@ func InitConfig(cfgFile string) {
 }
 
 func setDefaultValues() {
-	viper.SetDefault("MkDocs.ConfigFile", filepath.Join(CurrentConfig.MkDocs.ProjectPath, mkdocsConfigFileDefaultName))
-
 	if CurrentConfig.MkDocs.DocsPath == "" {
 		CurrentConfig.MkDocs.DocsPath = filepath.Join(CurrentConfig.MkDocs.ProjectPath, "docs")
 	}

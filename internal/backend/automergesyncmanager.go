@@ -90,9 +90,16 @@ func (sm *AutomergeSyncManager) getDocument(documentId string) (doc *automerge.D
 	// doc.NewText(documentId)
 
 	d := sm.treeManager.GetDocument(documentId)
+	if d == nil {
+		return nil, ErrNotFound
+	}
+	content, err := sm.treeManager.ReadDocumentContent(d)
+	if err != nil {
+		return nil, err
+	}
 
 	text := doc.Path(ContentPath).Text()
-	err = text.Set(d.Content)
+	err = text.Set(content)
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +142,7 @@ func (sm *AutomergeSyncManager) handleSyncRequest(client *websocket.Conn, syncRe
 	//}
 
 	// then patch the server document version
-	d := sm.treeManager.GetDocument(documentId)
-	patchedText := text.String()
-	if d.Content != patchedText {
-		// TODO: maybe we need to save the automerge documents here too?
-		defer sm.saveCurrentDocumentContent(documentId)
-	}
-	d.Content = patchedText
+	sm.saveDocumentContent(documentId, text.String())
 
 	//err = sm.sendSyncRequestResponse(client, documentId)
 	//if err != nil {
@@ -155,16 +156,13 @@ func (sm *AutomergeSyncManager) handleSyncRequest(client *websocket.Conn, syncRe
 // send the latest document state to the client
 func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, document *Document) (err error) {
 	automergeDocument, err := sm.getDocument(document.ID)
+	if err != nil {
+		return err
+	}
 
 	heads := automergeDocument.Heads()
 
 	syncState := automerge.NewSyncState(automergeDocument)
-
-	documentContentText := automergeDocument.Path(ContentPath).Text()
-	err = documentContentText.Set(document.Content)
-	if err != nil {
-		return err
-	}
 
 	commitMessage := "Initial Text"
 	commit, err := automergeDocument.Commit(commitMessage)
@@ -180,7 +178,7 @@ func (sm *AutomergeSyncManager) sendInitialTextResponse(client *websocket.Conn, 
 	sm.initClient(client, automergeDocument)
 
 	syncStateMessage, valid := syncState.GenerateMessage()
-	if valid == false {
+	if !valid {
 		log.Printf("Error generating sync state message: %v", err)
 		return err
 	}
@@ -206,51 +204,23 @@ func encodeBase64(buffer []byte) string {
 	return base64.StdEncoding.EncodeToString(buffer)
 }
 
-// responds to a client with the changes from the server site document version
-func (sm *AutomergeSyncManager) sendSyncRequestResponse(client *websocket.Conn, documentId string) (err error) {
-	// d := sm.treeManager.GetDocument(documentId)
-
-	automergeDocument, err := sm.getDocument(documentId)
-	if err != nil {
-		log.Printf("%v: error getting document: %v", client.RemoteAddr(), err)
-		return err
-	}
-
-	syncState := automerge.NewSyncState(automergeDocument)
-	syncStateMessage, valid := syncState.GenerateMessage()
-	if valid == false {
-		log.Printf("Error generating sync state message: %v", err)
-		return err
-	}
-
-	return sm.websocketConnectionManager.syncStateToClient(
-		client,
-		SyncRequest{
-			Type:          TypeSyncRequest,
-			RequestId:     "",
-			DocumentId:    documentId,
-			DocumentState: encodeBase64(automergeDocument.Save()),
-			SyncMessage:   encodeBase64(syncStateMessage.Bytes()),
-		})
-}
-
-func (sm *AutomergeSyncManager) saveCurrentDocumentContent(documentId string) {
-	sm.lock.RLock()
-	defer sm.lock.RUnlock()
-
-	log.Printf("Synchronizing document '%s' synchronized to disk", documentId)
+func (sm *AutomergeSyncManager) saveDocumentContent(documentId string, content string) {
+	sm.lock.Lock()
+	defer sm.lock.Unlock()
 
 	d := sm.treeManager.GetDocument(documentId)
 	if d == nil {
 		log.Printf("Unable to write document content for document %s: Document was nil", documentId)
 		return
 	}
-
-	err := WriteFile(d.Path, []byte(d.Content))
-	if err != nil {
-		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
+	current, err := sm.treeManager.ReadDocumentContent(d)
+	if err == nil && current == content {
+		return
 	}
-
+	if err = WriteFile(d.Path, []byte(content)); err != nil {
+		log.Printf("Unable to write modified document content for document %s: %v", documentId, err)
+		return
+	}
 	log.Printf("Document '%s' synchronized to disk successfully", documentId)
 }
 
@@ -268,8 +238,5 @@ func (sm *AutomergeSyncManager) SetWebsocketConnectionManager(manager *Websocket
 	sm.websocketConnectionManager.SetOnClientDisconnectedListener(func(client *websocket.Conn, documentId string, remainingConnections uint) {
 		fmt.Println("Client disconnected", client)
 		sm.removeClient(client)
-		if remainingConnections <= 0 {
-			sm.saveCurrentDocumentContent(documentId)
-		}
 	})
 }

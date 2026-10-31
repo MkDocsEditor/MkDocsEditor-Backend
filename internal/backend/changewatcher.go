@@ -67,5 +67,5 @@ func (fw *FileWatcher) addFolderWatch(path string, fi os.FileInfo, err error) er
 
 // stop watching any files
 func (fw *FileWatcher) Close() {
-	watcher.Close()
+	_ = watcher.Close()
 }
