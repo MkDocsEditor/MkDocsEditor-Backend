@@ -67,6 +67,22 @@ jobs:
         with:
           version: v2.15.0
 
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      # the latest stable release, like the Docker image, so the standard library is current
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Check for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
   openapi:
     name: OpenAPI lint
     runs-on: ubuntu-latest
