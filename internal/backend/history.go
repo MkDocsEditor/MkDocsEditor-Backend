@@ -35,49 +35,80 @@ type GitCommit struct {
 	Path string
 }
 
-// FileHistory returns the commits that changed a file, following renames, newest first
+// FileHistory returns the commits that changed a file, following renames, newest first.
+//
+// It does not use "git log --follow": that also follows copies, and every new empty page is an
+// exact copy of any other empty file, so unrelated pages would show up in the history. Instead
+// it follows a file back to the commit that added it, and continues with the old path only if
+// that commit renamed the file (status R, the old path is gone in that commit).
 func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	format := "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
-	out, err := g.run(nil, "log", "--follow", "--relative", "--name-only", "--max-count="+strconv.Itoa(limit),
-		"--format="+format, "--", path)
-	if err != nil {
-		if strings.Contains(err.Error(), "does not have any commits") {
-			return []GitCommit{}, nil
-		}
-		return nil, err
-	}
 	commits := []GitCommit{}
-	for _, record := range strings.Split(out, "\x1e") {
-		if strings.TrimSpace(record) == "" {
-			continue
+	current, start := path, "HEAD"
+	seen := map[string]bool{}
+	for len(commits) < limit && !seen[current] {
+		seen[current] = true
+		out, err := g.run(nil, "-c", "diff.renames=false", "log", "--relative", "--name-status",
+			"--max-count="+strconv.Itoa(limit-len(commits)), "--format="+format, start, "--", current)
+		if err != nil {
+			if strings.Contains(err.Error(), "does not have any commits") {
+				return commits, nil
+			}
+			return nil, err
 		}
-		fields := strings.Split(record, "\x00")
-		if len(fields) < 7 {
-			return nil, fmt.Errorf("unexpected git log output %q", record)
+		added := ""
+		for _, record := range strings.Split(out, "\x1e") {
+			if strings.TrimSpace(record) == "" {
+				continue
+			}
+			fields := strings.Split(record, "\x00")
+			if len(fields) < 7 {
+				return nil, fmt.Errorf("unexpected git log output %q", record)
+			}
+			t, _ := time.Parse(time.RFC3339, fields[1])
+			c := GitCommit{
+				Revision:  fields[0],
+				Time:      t,
+				Author:    GitSignature{Name: fields[2], Email: fields[3]},
+				CoAuthors: []GitSignature{},
+				Subject:   fields[4],
+				Path:      current,
+			}
+			for _, co := range strings.Split(fields[5], "\x01") {
+				if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
+					c.CoAuthors = append(c.CoAuthors, sig)
+				}
+			}
+			added = ""
+			for _, line := range strings.Split(fields[6], "\n") {
+				if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
+					added = c.Revision
+				}
+			}
+			commits = append(commits, c)
 		}
-		t, _ := time.Parse(time.RFC3339, fields[1])
-		c := GitCommit{
-			Revision:  fields[0],
-			Time:      t,
-			Author:    GitSignature{Name: fields[2], Email: fields[3]},
-			CoAuthors: []GitSignature{},
-			Subject:   fields[4],
-			Path:      path,
+		if added == "" || len(commits) >= limit {
+			break
 		}
-		for _, co := range strings.Split(fields[5], "\x01") {
-			if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
-				c.CoAuthors = append(c.CoAuthors, sig)
+		// was the file renamed in the commit that added it?
+		out, err = g.run(nil, "-c", "diff.renames=true", "show", "--relative", "-M",
+			"--name-status", "--format=", added)
+		if err != nil {
+			return nil, err
+		}
+		renamedFrom := ""
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.Split(strings.TrimSpace(line), "\t")
+			if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == current {
+				renamedFrom = parts[1]
 			}
 		}
-		for _, line := range strings.Split(fields[6], "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				c.Path = line
-				break
-			}
+		if renamedFrom == "" {
+			break
 		}
-		commits = append(commits, c)
+		current, start = renamedFrom, added+"^"
 	}
 	return commits, nil
 }
