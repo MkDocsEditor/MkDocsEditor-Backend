@@ -84,14 +84,6 @@ func (e *gitError) Unwrap() error {
 	return e.err
 }
 
-func exitCode(err error) int {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return -1
-}
-
 // Commit commits the given paths (files or folders, existing or deleted, relative to the docs
 // folder) and nothing else. Other staged changes in the repository stay staged and uncommitted.
 // It returns false if the paths have no changes.
