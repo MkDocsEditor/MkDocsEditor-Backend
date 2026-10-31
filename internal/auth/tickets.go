@@ -1,9 +1,9 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"time"
@@ -22,7 +22,7 @@ type ticket struct {
 }
 
 type cachedVerification struct {
-	digest  [32]byte
+	digest  []byte
 	hash    string
 	expires time.Time
 }
@@ -85,11 +85,15 @@ func (s *Service) AuthenticateBasic(username, password string) *User {
 		return nil
 	}
 
-	digest := sha256.Sum256([]byte(u.ID + "\x00" + password))
+	// a keyed digest of the verified password: repeated requests of the same client skip
+	// the expensive password hash
+	mac := hmac.New(sha256.New, s.basicKey)
+	mac.Write([]byte(u.ID + "\x00" + password))
+	digest := mac.Sum(nil)
 	s.basicMu.Lock()
 	cached, hit := s.basicCache[u.ID]
 	s.basicMu.Unlock()
-	if hit && cached.hash == hash && s.now().Before(cached.expires) && subtle.ConstantTimeCompare(cached.digest[:], digest[:]) == 1 {
+	if hit && cached.hash == hash && s.now().Before(cached.expires) && hmac.Equal(cached.digest, digest) {
 		return u
 	}
 

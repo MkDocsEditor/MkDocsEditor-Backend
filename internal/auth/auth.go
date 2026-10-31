@@ -115,6 +115,9 @@ type Service struct {
 
 	basicMu    sync.Mutex
 	basicCache map[string]cachedVerification
+	// basicKey keys the digests in basicCache; it exists only in memory and changes on
+	// every start, so a memory dump of the cache cannot be brute-forced offline without it
+	basicKey []byte
 }
 
 // Open opens the account database in the state directory and imports the configured users
@@ -130,6 +133,11 @@ func Open(opts Options) (*Service, error) {
 		now:        time.Now,
 		tickets:    map[string]ticket{},
 		basicCache: map[string]cachedVerification{},
+		basicKey:   make([]byte, 32),
+	}
+	if _, err = rand.Read(s.basicKey); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if err = s.importConfiguredUsers(); err != nil {
 		_ = db.Close()
