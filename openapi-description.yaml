@@ -1,688 +1,720 @@
----
+openapi: "3.0.3"
+info:
+  title: "MkDocsEditor Backend API"
+  version: "2.0.0"
+  description: |
+    REST API of the MkDocsEditor backend. It serves the section, document and resource tree
+    of an MkDocs wiki and the websocket for realtime collaborative editing.
 
-openapi: "3.0.0"
+    The websocket protocol (Automerge sync, presence, close codes) is specified in
+    [docs/sync-protocol.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/sync-protocol.md).
+
+    All paths also work without the trailing slash. Ids of sections, documents and
+    resources are derived from their path, so they change when an item (or a section
+    above it) is renamed. The root section has the id `root`.
+
+    Every endpoint except `GET /alive/` requires HTTP basic auth when users are configured.
+    Users with the role `reader` get `403` on every method except `GET`, `HEAD` and
+    `POST /auth/ws-ticket/`. Requests with the header `X-Requested-With` get no
+    `WWW-Authenticate` header on a `401`.
+  license:
+    name: "AGPL-3.0-or-later"
+    url: "https://www.gnu.org/licenses/agpl-3.0.html"
 servers:
   - url: "http://localhost:7413"
-info:
-  title: "MkDocsRest API"
-  version: 1.0.0
-  license:
-    name: "AGPL+"
+security:
+  - basicAuth: []
+tags:
+  - name: Status
+    description: "Health"
+  - name: Auth
+    description: "Users, websocket tickets and the Automerge actor map"
+  - name: MkDocs
+    description: "The MkDocs project"
+  - name: Sections
+    description: "Folders of the docs tree"
+  - name: Documents
+    description: "Markdown files"
+  - name: Resources
+    description: "Other files (images, attachments)"
+
 paths:
   /alive/:
     get:
-      summary: "Check the status of the service"
-      description: "This endpoint can be used to check if the service is up and running."
+      summary: "Liveness probe"
       operationId: alive
-      tags:
-        - Status
+      tags: [ Status ]
+      security: [ ]
       responses:
-        '200':
-          description: "Service is up and running."
-        '401':
-          description: "Unauthorized"
+        "200":
+          description: "The service is up."
+
+  /auth/whoami/:
+    get:
+      summary: "The authenticated user"
+      description: "Without configured users, this is the user `anonymous` with the role `admin`."
+      operationId: whoAmI
+      tags: [ Auth ]
+      responses:
+        "200":
+          description: "The authenticated user"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "Something is wrong."
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/ws-ticket/:
+    post:
+      summary: "Issue a websocket ticket"
+      description: |
+        Returns a single-use ticket that is valid for 60 seconds. Browsers cannot set headers on
+        a websocket, so they send the ticket in the `hello` message of the document websocket.
+        Tickets are kept in memory only; a backend restart invalidates them.
+      operationId: issueWsTicket
+      tags: [ Auth ]
+      responses:
+        "200":
+          description: "A new ticket"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/Ticket"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /actors/:
+    get:
+      summary: "The actor map"
+      description: |
+        Maps every Automerge actor id the backend has seen to its user. Changes made by the
+        server use actors of the pseudo users `:disk` (external changes) and `:server`.
+      operationId: getActors
+      tags: [ Auth ]
+      responses:
+        "200":
+          description: "All actor bindings, sorted by actor id"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Actor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /mkdocs/config/:
+    get:
+      summary: "The MkDocs configuration"
+      description: "The content of `mkdocs.yml` as JSON."
+      operationId: getMkDocsConfig
+      tags: [ MkDocs ]
+      responses:
+        "200":
+          description: "The parsed mkdocs.yml"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/Error"
 
   /section/:
     get:
-      summary: "Returns the root section"
-      description: "Returns the description of the head of the section tree, including all subsections, documents and resources in it."
-      operationId: getRootSection
-      tags:
-        - Sections
+      summary: "The whole tree"
+      description: "The root section with all subsections, documents and resources, recursively."
+      operationId: getTree
+      tags: [ Sections ]
       responses:
-        '200':
+        "200":
           description: "The root section"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Section"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
-      summary: "Creates a new section"
-      description: "The response will contain the metadata of the section, but not the section itself."
+      summary: "Create a section"
+      description: "Creates a folder in the parent section."
       operationId: createSection
-      tags:
-        - Sections
+      tags: [ Sections ]
       requestBody:
-        description: "The data used to create a new section"
+        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NewSectionRequest"
+              $ref: "#/components/schemas/NewItemRequest"
       responses:
-        '201':
-          description: "The section that was created"
+        "200":
+          description: "The new section"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Section"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
-  /section/{sectionId}:
+  /section/{sectionId}/:
+    parameters:
+      - $ref: "#/components/parameters/sectionId"
     get:
-      summary: "Returns the description of a section"
-      description: "The response will contain the metadata of the section as well its direct subsections, documents and resources."
-      operationId: showSectionById
-      tags:
-        - Sections
-      parameters:
-        - name: sectionId
-          in: path
-          required: true
-          description: "The id of the section to retrieve"
-          schema:
-            type: string
+      summary: "A section"
+      description: "The section with its subsections, documents and resources, recursively."
+      operationId: getSection
+      tags: [ Sections ]
       responses:
-        '200':
-          description: "Expected response to a valid request"
+        "200":
+          description: "The section"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Section"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The section could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      summary: "Updates a section"
-      description: "The response will contain the metadata of the section, but not the section itself."
-      operationId: updateSectionById
-      tags:
-        - Sections
-      parameters:
-        - name: sectionId
-          in: path
-          required: true
-          description: "The id of the section to update"
-          schema:
-            type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: "Rename a section"
+      description: |
+        Renames the folder. The ids of the section and of everything in it change. Clients
+        connected to a document in it get `document-renamed` on the websocket.
+      operationId: renameSection
+      tags: [ Sections ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
       responses:
-        '200':
-          description: "Expected response to a valid request"
+        "200":
+          description: "The renamed section"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Section"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The section could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
     delete:
-      summary: "Deletes a section (and all of its children)"
-      description: "Deletes a section and all of the subsections, documents and resources that it contains. This action cannot be undone."
-      operationId: deleteSectionById
-      tags:
-        - Sections
+      summary: "Delete a section"
+      description: |
+        Deletes the folder with everything in it. While clients are connected to a document in
+        it, the request fails with `409` unless `force=true` is given.
+      operationId: deleteSection
+      tags: [ Sections ]
       parameters:
-        - name: sectionId
-          in: path
-          required: true
-          description: "The id of the section to delete"
-          schema:
-            type: string
+        - $ref: "#/components/parameters/force"
       responses:
-        '200':
-          description: "Expected response to a valid request"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The section could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
+        "200":
+          description: "Deleted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /document/:
     post:
-      summary: "Creates a new document"
-      description: "The response will contain the metadata of the document, but not the document itself."
+      summary: "Create a document"
+      description: "Creates an empty `<name>.md` in the parent section."
       operationId: createDocument
-      tags:
-        - Documents
+      tags: [ Documents ]
       requestBody:
-        description: "The data used to create a new document"
+        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NewDocumentRequest"
+              $ref: "#/components/schemas/NewItemRequest"
       responses:
-        '201':
-          description: "The document that was created"
+        "200":
+          description: "The new document"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Document"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
-  /document/{documentId}:
+  /document/{documentId}/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
     get:
-      summary: "Returns the description of a document"
-      description: "The response will contain the metadata of the document, but not the document itself."
-      operationId: showDocumentById
-      tags:
-        - Documents
-      parameters:
-        - name: documentId
-          in: path
-          required: true
-          description: "The id of the document to retrieve"
-          schema:
-            type: string
+      summary: "A document's metadata"
+      operationId: getDocument
+      tags: [ Documents ]
       responses:
-        '200':
-          description: "Expected response to a valid request"
+        "200":
+          description: "The document"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Document"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The document could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    delete:
-      summary: "Deletes a document"
-      description: "The document file itself will be deleted from the project. This action cannot be undone."
-      operationId: deleteDocumentById
-      tags:
-        - Documents
-      parameters:
-        - name: documentId
-          in: path
-          required: true
-          description: "The id of the document to delete"
-          schema:
-            type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: "Rename a document"
+      description: |
+        Renames the file to `<name>.md`. The id changes. Connected clients get
+        `document-renamed` on the websocket and reconnect to the new id.
+      operationId: renameDocument
+      tags: [ Documents ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
       responses:
-        '200':
-          description: "Expected response to a valid request"
-        '401':
-          description: "Unauthorized"
+        "200":
+          description: "The renamed document"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The section could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/Document"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: "Delete a document"
+      description: |
+        While clients are connected to the document, the request fails with `409` unless
+        `force=true` is given. Connected clients then get `document-deleted`.
+      operationId: deleteDocument
+      tags: [ Documents ]
+      parameters:
+        - $ref: "#/components/parameters/force"
+      responses:
+        "200":
+          description: "Deleted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /document/{documentId}/content/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
     get:
-      summary: "Returns the current content of the given document"
-      description: "The content will be returned as plain text."
-      operationId: showDocumentContent
-      tags:
-        - Documents
-      parameters:
-        - name: documentId
-          in: path
-          required: true
-          description: "The id of the user to retrieve the profile image for"
-          schema:
-            type: integer
-            format: int64
+      summary: "A document's content"
+      description: "The markdown text. While the document is open for editing, this is the live text."
+      operationId: getDocumentContent
+      tags: [ Documents ]
       responses:
-        '200':
-          description: "The current content of the document"
+        "200":
+          description: "The markdown text"
           content:
-            text/plain; charset=utf-8:
+            text/plain:
               schema:
                 type: string
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The document could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /document/{documentId}/ws/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
     get:
-      summary: "Document Websocket"
-      description: "Opens a websocket for the given document to engage in realtime editing."
-      operationId: getDocumentWebsocket
-      tags:
-        - Documents
-      parameters:
-        - name: documentId
-          in: path
-          required: true
-          description: "The id of the document to open a websocket for"
-          schema:
-            type: integer
-            format: int64
+      summary: "Realtime editing websocket"
+      description: |
+        Upgrades to a websocket for realtime collaborative editing of the document. The
+        protocol is specified in docs/sync-protocol.md. Authenticate with a basic auth header
+        on the upgrade request or with a ticket (`POST /auth/ws-ticket/`) in the first
+        message (`hello`). Without either, the upgrade succeeds and the connection is
+        closed with code 4001 if no valid ticket arrives within 10 seconds.
+      operationId: documentWebsocket
+      tags: [ Documents ]
+      security:
+        - basicAuth: [ ]
+        - { }
       responses:
-        '200':
-          description: "The current content of the document"
-          content:
-            text/plain; charset=utf-8:
-              schema:
-                type: string
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The document could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "101":
+          description: "Switching protocols"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "The Origin header is not in server.cors.allowedOrigins."
+        "404":
+          $ref: "#/components/responses/NotFound"
 
-
-  /resource/:
-    post:
-      summary: "Upload a new resource"
-      description: "The response will contain the metadata of the resource, but not the resource itself."
-      operationId: uploadResource
-      tags:
-        - Resources
-      requestBody:
-        description: "The resource file content"
-        content:
-          text/plain; charset=utf-8:
-            schema:
-              type: string
-              format: binary
+  /resource/{resourceId}/:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      summary: "A resource's metadata"
+      operationId: getResource
+      tags: [ Resources ]
       responses:
-        '201':
-          description: "The resource that was created"
+        "200":
+          description: "The resource"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Resource"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /resource/{resourceId}:
-    get:
-      summary: "Returns the description of a resource"
-      description: "The response will contain the metadata of the resource, but not the resource itself."
-      operationId: showResourceById
-      tags:
-        - Resources
-      parameters:
-        - name: resourceId
-          in: path
-          required: true
-          description: "The id of the resource to retrieve"
-          schema:
-            type: string
-      responses:
-        '200':
-          description: "Expected response to a valid request"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Resource"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The resource could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
-      summary: "Updates a resource"
-      description: "The response will contain the metadata of the resource, but not the resource itself."
-      operationId: updateResourceById
-      tags:
-        - Resources
+      summary: "Rename a resource"
+      operationId: renameResource
+      tags: [ Resources ]
       requestBody:
-        description: "The new metadata of the resource"
+        required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Resource"
+              $ref: "#/components/schemas/RenameRequest"
       responses:
-        '200':
-          description: "Expected response to a valid request"
+        "200":
+          description: "The renamed resource"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Resource"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The resource could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
     delete:
-      summary: "Deletes a resource"
-      description: "The resource file itself will be deleted from the project. This action cannot be undone."
-      operationId: deleteResourceById
-      tags:
-        - Resources
-      parameters:
-        - name: resourceId
-          in: path
-          required: true
-          description: "The id of the resource to delete"
-          schema:
-            type: string
+      summary: "Delete a resource"
+      operationId: deleteResource
+      tags: [ Resources ]
       responses:
-        '200':
-          description: "Expected response to a valid request"
-        '401':
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '404':
-          description: "The resource could not be found"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: "unexpected error"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+        "200":
+          description: "Deleted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
-security:
-  - basicAuth: [ ]
+  /resource/{resourceId}/content/:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      summary: "A resource's content"
+      operationId: getResourceContent
+      tags: [ Resources ]
+      responses:
+        "200":
+          description: "The file, with a content type derived from its name"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /resource/{sectionId}/{name}/:
+    parameters:
+      - $ref: "#/components/parameters/sectionId"
+      - name: name
+        in: path
+        required: true
+        description: "File name of the new resource"
+        schema:
+          type: string
+    post:
+      summary: "Upload a resource"
+      description: "Uploads a file into the section. The content is the multipart field `file`."
+      operationId: uploadResource
+      tags: [ Resources ]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [ file ]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: "The new resource"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Resource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
 components:
-
   securitySchemes:
-    basicAuth: # <-- arbitrary name for the security scheme
+    basicAuth:
       type: http
       scheme: basic
 
+  parameters:
+    sectionId:
+      name: sectionId
+      in: path
+      required: true
+      description: "Id of a section (`root` for the root section)"
+      schema:
+        type: string
+    documentId:
+      name: documentId
+      in: path
+      required: true
+      description: "Id of a document"
+      schema:
+        type: string
+    resourceId:
+      name: resourceId
+      in: path
+      required: true
+      description: "Id of a resource"
+      schema:
+        type: string
+    force:
+      name: force
+      in: query
+      required: false
+      description: "Delete even while clients are connected to an affected document"
+      schema:
+        type: boolean
+        default: false
+
+  responses:
+    BadRequest:
+      description: "Invalid request, for example a name with a slash or a leading dot"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: "Missing or invalid credentials"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: "The user's role does not allow this"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: "No item with this id"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: "The target already exists, or clients are connected to the document"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Error:
+      description: "Unexpected error"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
   schemas:
     Section:
-      required:
-        - id
-        - type
-        - name
-        - subsections
-        - documents
-        - resources
+      type: object
+      required: [ type, id, name, subsections, documents, resources ]
       properties:
-        id:
-          description: "A unique identifier for this section"
-          type: string
         type:
-          description: "The type of this object in the document tree"
           type: string
-          enum: [ "Section" ]
+          enum: [ section ]
+        id:
+          type: string
+          example: "root"
         name:
-          description: "The name of this section"
           type: string
-          example: "Home"
+          description: "Folder name"
         subsections:
-          description: "A list of sections in this section"
           type: array
           items:
             $ref: "#/components/schemas/Section"
         documents:
-          description: "A list documents in this section"
           type: array
           items:
             $ref: "#/components/schemas/Document"
         resources:
-          description: "A list resource files in this section"
           type: array
           items:
             $ref: "#/components/schemas/Resource"
 
     Document:
-      required:
-        - id
-        - type
-        - name
-        - filesize
-        - modtime
-        - url
+      type: object
+      required: [ type, id, name, filesize, modtime, url ]
       properties:
-        id:
-          description: "A unique identifier for this document"
-          type: string
         type:
-          description: "The type of this object in the document tree"
           type: string
-          enum: [ "Document" ]
+          enum: [ document ]
+        id:
+          type: string
+          example: "5772684240079201105"
         name:
-          description: "The name of this section"
           type: string
-          example: "Main.md"
+          description: "File name without the .md extension"
         filesize:
-          description: "The size of this document in bytes"
           type: integer
           format: int64
         modtime:
-          description: "The last time this document was edited"
           type: string
           format: date-time
         url:
-          description: "The suburl at which this document can be found on the original mkdocs server. This URL does **not** contain the host since the mkdocsrest service might be running on a different host."
           type: string
-          example: "/My/Random/File/Path/"
+          description: "Path of the page relative to the site root, for example `guide/setup/`"
 
     Resource:
-      required:
-        - id
-        - type
-        - name
-        - filesize
-        - modtime
+      type: object
+      required: [ type, id, name, filesize, modtime ]
       properties:
-        id:
-          description: "A unique identifier for this document"
-          type: string
         type:
-          description: "The type of this object in the document tree"
           type: string
-          enum: [ "Resource" ]
+          enum: [ resource ]
+        id:
+          type: string
         name:
-          description: "The name of this section"
           type: string
-          example: "fancy_stuff.zip"
+          description: "File name"
         filesize:
-          description: "The size of this document in bytes"
           type: integer
           format: int64
         modtime:
-          description: "The last time this document was edited"
           type: string
           format: date-time
 
-    NewSectionRequest:
-      required:
-        - parent
-        - name
+    NewItemRequest:
+      type: object
+      required: [ parent, name ]
       properties:
-        id:
-          description: "The id of the parent section in which the new section should be created"
+        parent:
           type: string
+          description: "Id of the parent section"
         name:
-          description: "The name of the new section"
           type: string
-          example: "MyNewSection"
+          description: "Name of the new section, or of the document without .md"
 
-    NewDocumentRequest:
-      required:
-        - parent
-        - name
+    RenameRequest:
+      type: object
+      required: [ name ]
       properties:
-        id:
-          description: "The id of the parent section in which the document should be created"
-          type: string
         name:
-          description: "The name of the new document"
           type: string
-          example: "MyNewDocument"
+          description: "New name (for documents without .md)"
+
+    User:
+      type: object
+      required: [ username, displayName, role, color ]
+      properties:
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        color:
+          type: string
+          example: "#1971c2"
+
+    Ticket:
+      type: object
+      required: [ ticket, expiresAt ]
+      properties:
+        ticket:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    Actor:
+      type: object
+      required: [ actorId, username, displayName, color ]
+      properties:
+        actorId:
+          type: string
+          description: "Automerge actor id, hex"
+        username:
+          type: string
+          description: "Username, or `:disk` / `:server` for changes made by the server"
+        displayName:
+          type: string
+        color:
+          type: string
 
     Error:
-      required:
-        - code
-        - message
+      type: object
+      required: [ name, message ]
       properties:
-        code:
-          description: "A code for the error"
-          type: integer
-          format: int32
-        message:
-          description: "A description of the error"
+        name:
           type: string
-
-...
+          example: "Not found"
+        message:
+          type: string

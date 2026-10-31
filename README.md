@@ -89,45 +89,26 @@ storage and git architecture are specified in [docs/sync-protocol.md](docs/sync-
 
 [OpenAPI Documentation](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml)
 
-### General
+The [OpenAPI file](openapi-description.yaml) is the reference for the REST API. CI lints it and
+checks that it lists exactly the routes the backend serves. Overview:
 
-| Method | Path           | Description                                  |
-|--------|----------------|----------------------------------------------|
-| GET    | /alive         | Liveness probe endpoint                      |
-| GET    | /mkdocs/config | Retrieve the MkDocs configuration (`mkdocs.yml`) |
-| GET    | /auth/whoami   | The authenticated user                       |
-| POST   | /auth/ws-ticket | A single-use websocket ticket (60 s)        |
-
-### Sections
-
-| Method | Path                 | Description                                           |
-|--------|----------------------|-------------------------------------------------------|
-| GET    | /section             | Retrieve the whole section tree                       |
-| GET    | /section/<sectionId> | Retrieve the section with the given `sectionId`       |
-| POST   | /section             | Create a new section                                  |
-| PUT    | /section/<sectionId> | Update an existing section with the given `sectionId` |
-| DELETE | /section/<sectionId> | Delete the section with the given `sectionId`         |
-
-### Documents
-
-| Method | Path                           | Description                                                                                                 |
-|--------|:-------------------------------|-------------------------------------------------------------------------------------------------------------|
-| GET    | /document/<documentId>         | Retrieve the document with the given `documentId`                                                           |
-| GET    | /document/<documentId>/ws      | Websocket endpoint for realtime communication regarding updates of the document with the given `documentId` |
-| GET    | /document/<documentId>/content | Retrieve the current content of the document with the given `documentId`                                    |
-| POST   | /document                      | Create a new document                                                                                       |
-| PUT    | /document/<documentId>         | Rename an existing document with the given `documentId`                                                     |
-| DELETE | /document/<documentId>         | Delete the document with the given `documentId`                                                             |
-
-### Resources
-
-| Method | Path                           | Description                                                              |
-|--------|--------------------------------|--------------------------------------------------------------------------|
-| GET    | /resource/<resourceId>         | Retrieve the resource with the given `resourceId`                        |
-| GET    | /resource/<resourceId>/content | Retrieve the current content of the resource with the given `resourceId` |
-| POST   | /resource                      | Upload a new resource                                                    |
-| PUT    | /resource/<resourceId>         | Rename an existing resource with the given `resourceId`                  |
-| DELETE | /resource/<resourceId>         | Delete the resource with the given `resourceId`                          |
+| Method | Path | Description |
+|---|---|---|
+| GET | `/alive/` | Liveness probe, no authentication |
+| GET | `/auth/whoami/` | The authenticated user |
+| POST | `/auth/ws-ticket/` | A single-use websocket ticket (60 s) |
+| GET | `/actors/` | Automerge actor id to user map |
+| GET | `/mkdocs/config/` | The MkDocs configuration (`mkdocs.yml`) as JSON |
+| GET | `/section/` | The whole tree |
+| POST | `/section/` | Create a section (`{"parent","name"}`) |
+| GET, PUT, DELETE | `/section/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while documents in it are open) |
+| POST | `/document/` | Create a document (`{"parent","name"}`) |
+| GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while it is open) |
+| GET | `/document/{id}/content/` | The markdown text (live while open) |
+| GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
+| POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
+| GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`), delete |
+| GET | `/resource/{id}/content/` | The file |
 
 # Contributing
 
