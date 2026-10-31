@@ -61,3 +61,22 @@ mkdocs:
   # (optional) List of files and directories to exclude from the document tree
   blacklist:
     - "stylesheets"
+
+# (optional) Commit the changes made through the backend to git, see docs/sync-protocol.md section 10.
+# The docs folder must be inside a git repository. Only files the backend changed are committed.
+git:
+  enabled: false
+  # commit a document when all users have left it for this many minutes (default: 5)
+  commitAfterLeave: 5
+  # commit a document after this many minutes without a change, even while users are connected (default: 10)
+  commitAfterIdle: 10
+  # commit at least every this many minutes during continuous editing (default: 60)
+  commitMaxInterval: 60
+  # the committer; the author is the user who made the most changes (default: MkDocsEditor)
+  committerName: "MkDocsEditor"
+  committerEmail: "mkdocseditor@mkdocseditor.invalid"
+  # run "git push" after each commit (default: false). Credentials come from the environment
+  # (GIT_SSH_COMMAND, a credential helper), never from this file.
+  push: false
+  #remote: "origin"
+  #branch: "master"

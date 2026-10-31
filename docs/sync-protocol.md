@@ -6,8 +6,8 @@ realtime collaborative editing. It covers authentication, the document websocket
 documents and commits them to git.
 
 Status: **version 1**. Implemented: authentication, roles, the document websocket,
-presence, authorship, persistence, external changes, readers, rename and delete. Not
-yet implemented: git integration (section 10), revision history (section 11). The REST API reference is
+presence, authorship, persistence, external changes, readers, rename and delete, git
+integration. Not yet implemented: revision history (section 11). The REST API reference is
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
@@ -524,6 +524,15 @@ Commits are batched per document:
 Tree operations over REST (create, rename, delete, upload) are committed right away,
 together with pending edits of the affected files.
 
+The triggers are checked every 15 seconds. Before committing a document the backend
+writes its current text to disk. The uncommitted change counts per document and user
+are kept in `<stateDir>/git-pending.json`, so a crash or a restart does not lose the
+attribution: the edits are committed by the triggers after the restart. The commit
+includes only the paths of that document or tree operation (`git commit --only`), so
+other staged or unstaged work in the repository is left as it is. The backend runs git
+with `safe.directory=*`, because the repository may belong to another uid (an NFS
+volume), and without commit signing or hooks.
+
 ### Authors
 
 - The author of an edit commit is the user with the most Automerge changes in that file
@@ -542,7 +551,8 @@ Commit message: `Update guide/setup.md` (or `Create`, `Rename … to …`, `Dele
 ### Push
 
 `git.push: false` by default. When enabled, the backend runs `git push` after each
-commit to the configured remote. Credentials come only from the environment or
+commit, to `git.remote` and `HEAD:git.branch` when they are set, otherwise to git's
+default upstream. Credentials come only from the environment or
 mounted files (an SSH key with `GIT_SSH_COMMAND`, or a credential helper), never from
 the repository or the backend configuration. A failed push is logged and retried after
 the next commit.

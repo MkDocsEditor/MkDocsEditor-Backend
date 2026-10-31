@@ -32,8 +32,6 @@ type DocumentMeta struct {
 	Epoch string `json:"epoch"`
 	// DiskBaseHeads are the heads of the document whose text was last read from or written to disk
 	DiskBaseHeads []string `json:"diskBaseHeads"`
-	// PendingChanges counts the changes per username since the last git commit
-	PendingChanges map[string]int `json:"pendingChanges,omitempty"`
 	// LastChange is the time of the last change by a user
 	LastChange time.Time `json:"lastChange,omitempty"`
 }
@@ -253,12 +251,6 @@ func movePath(p string, oldPath string, newPath string) (string, bool) {
 func copyMeta(m *DocumentMeta) *DocumentMeta {
 	c := *m
 	c.DiskBaseHeads = append([]string(nil), m.DiskBaseHeads...)
-	if m.PendingChanges != nil {
-		c.PendingChanges = make(map[string]int, len(m.PendingChanges))
-		for k, v := range m.PendingChanges {
-			c.PendingChanges[k] = v
-		}
-	}
 	return &c
 }
 

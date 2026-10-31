@@ -61,6 +61,7 @@ type RestService struct {
 	authenticator *auth.Authenticator
 	treeManager   *TreeManager
 	sync          *SyncServer
+	git           *GitCommitter
 }
 
 func NewRestService(
@@ -75,6 +76,32 @@ func NewRestService(
 	}
 	rs.echoRest = rs.createRestService()
 	return rs
+}
+
+// SetGitCommitter makes tree changes over REST commit to git. Call it before Start.
+func (rs *RestService) SetGitCommitter(c *GitCommitter) {
+	rs.git = c
+}
+
+// commitTree commits a tree change of the requesting user, if git is enabled.
+// format gets the paths relative to the docs folder.
+func (rs *RestService) commitTree(c echo.Context, format string, absPaths ...string) {
+	if rs.git == nil {
+		return
+	}
+	rels := make([]string, 0, len(absPaths))
+	args := make([]any, 0, len(absPaths))
+	for _, p := range absPaths {
+		rel, err := filepath.Rel(rs.treeManager.RootPath(), p)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			log.Printf("Not committing %s: outside the docs folder", p)
+			return
+		}
+		rel = filepath.ToSlash(rel)
+		rels = append(rels, rel)
+		args = append(args, rel)
+	}
+	rs.git.CommitTreeChange(UserFromContext(c), fmt.Sprintf(format, args...), rels...)
 }
 
 func (rs *RestService) createRestService() *echo.Echo {
@@ -304,13 +331,15 @@ func (rs *RestService) renameSection(c echo.Context) (err error) {
 	}
 
 	var section *Section
-	err = rs.moveItem(s.Path, filepath.Join(filepath.Dir(s.Path), r.Name), func() (err error) {
+	newPath := filepath.Join(filepath.Dir(s.Path), r.Name)
+	err = rs.moveItem(s.Path, newPath, func() (err error) {
 		section, err = rs.treeManager.RenameSection(s, r.Name)
 		return err
 	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.commitTree(c, "Rename %s to %s", s.Path, newPath)
 
 	return c.JSONPretty(http.StatusOK, section, indentationChar)
 }
@@ -330,6 +359,7 @@ func (rs *RestService) createDocument(c echo.Context) (err error) {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.commitTree(c, "Create %s", document.Path)
 
 	return c.JSONPretty(http.StatusOK, document, indentationChar)
 }
@@ -347,13 +377,15 @@ func (rs *RestService) renameDocument(c echo.Context) (err error) {
 	}
 
 	var document *Document
-	err = rs.moveItem(d.Path, filepath.Join(filepath.Dir(d.Path), r.Name+markdownFileExtension), func() (err error) {
+	newPath := filepath.Join(filepath.Dir(d.Path), r.Name+markdownFileExtension)
+	err = rs.moveItem(d.Path, newPath, func() (err error) {
 		document, err = rs.treeManager.RenameDocument(d, r.Name)
 		return err
 	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.commitTree(c, "Rename %s to %s", d.Path, newPath)
 	return c.JSONPretty(http.StatusOK, document, indentationChar)
 }
 
@@ -370,13 +402,15 @@ func (rs *RestService) renameResource(c echo.Context) (err error) {
 	}
 
 	var resource *Resource
-	err = rs.moveItem(d.Path, filepath.Join(filepath.Dir(d.Path), r.Name), func() (err error) {
+	newPath := filepath.Join(filepath.Dir(d.Path), r.Name)
+	err = rs.moveItem(d.Path, newPath, func() (err error) {
 		resource, err = rs.treeManager.RenameResource(d, r.Name)
 		return err
 	})
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.commitTree(c, "Rename %s to %s", d.Path, newPath)
 	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }
 
@@ -449,6 +483,7 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 	if !success {
 		return rs.ReturnNotFound(c, id)
 	}
+	rs.commitTree(c, "Delete %s", path)
 	return c.NoContent(http.StatusOK)
 }
 
@@ -491,6 +526,7 @@ func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.commitTree(c, "Upload %s", resource.Path)
 
 	return c.JSONPretty(http.StatusOK, resource, indentationChar)
 }

@@ -58,6 +58,20 @@ later. If the project is a git repository, the backend adds the folder to
 writes every change to them within two seconds, and merges changes made on disk (git
 pull, manual edits) into the live documents.
 
+### Git commits
+
+With `git.enabled: true` the backend commits the changes made through it to the git
+repository that holds the docs folder (see `mkdocsrest_example.yaml` for the settings).
+Edits are batched per document: a commit is made when all users have left the document
+for 5 minutes, after 10 minutes without a change, or at least every 60 minutes during
+continuous editing, and on shutdown. The author is the user with the most changes, the
+other contributors are added as `Co-authored-by:` trailers, and the backend is the
+committer. Creating, renaming, deleting and uploading over the API is committed right
+away. The backend commits only the files it changed, so other uncommitted or staged work
+in the repository stays untouched, and changes made on disk (for example by `git pull`)
+are never committed by it. `git.push: true` pushes after each commit. The repository may
+belong to another user (an NFS volume), git's ownership check is skipped for it.
+
 ### Docker
 
 Run the service using Docker and mount the configuration file and the wiki folder:

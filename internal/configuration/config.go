@@ -16,6 +16,7 @@ const DefaultStateDirName = ".mkdocseditor"
 type Configuration struct {
 	Server ServerConfiguration `yaml:"server"`
 	MkDocs MkDocsConfiguration `yaml:"mkdocs"`
+	Git    GitConfiguration    `yaml:"git"`
 }
 
 var CurrentConfig Configuration
@@ -55,6 +56,7 @@ func InitConfig(cfgFile string) {
 }
 
 func setDefaultValues() {
+	CurrentConfig.Git.setDefaults()
 	if CurrentConfig.MkDocs.DocsPath == "" {
 		CurrentConfig.MkDocs.DocsPath = filepath.Join(CurrentConfig.MkDocs.ProjectPath, "docs")
 	}

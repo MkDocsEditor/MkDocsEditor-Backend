@@ -56,6 +56,34 @@ mkdocs:
 	if len(c.MkDocs.Blacklist) != 1 {
 		t.Errorf("blacklist = %v", c.MkDocs.Blacklist)
 	}
+	if c.Git.Enabled || c.Git.CommitAfterLeave != 5 || c.Git.CommitAfterIdle != 10 || c.Git.CommitMaxInterval != 60 ||
+		c.Git.CommitterName != "MkDocsEditor" || c.Git.Push {
+		t.Errorf("git = %+v", c.Git)
+	}
+}
+
+func TestInitConfigGit(t *testing.T) {
+	path := writeConfig(t, `
+mkdocs:
+  projectPath: "/wiki"
+git:
+  enabled: true
+  commitAfterLeave: 1
+  commitAfterIdle: 2
+  commitMaxInterval: 3
+  committerName: "Wiki"
+  committerEmail: "wiki@example.com"
+  push: true
+  remote: "origin"
+  branch: "main"
+`)
+	CurrentConfig = Configuration{}
+	InitConfig(path)
+	want := GitConfiguration{Enabled: true, CommitAfterLeave: 1, CommitAfterIdle: 2, CommitMaxInterval: 3,
+		CommitterName: "Wiki", CommitterEmail: "wiki@example.com", Push: true, Remote: "origin", Branch: "main"}
+	if CurrentConfig.Git != want {
+		t.Errorf("git = %+v", CurrentConfig.Git)
+	}
 }
 
 func TestInitConfigUsers(t *testing.T) {

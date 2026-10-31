@@ -30,6 +30,10 @@ type syncEnv struct {
 	http     *httptest.Server
 	authn    *auth.Authenticator
 	stateDir string
+
+	// gitOpts enables the git committer when set
+	gitOpts *GitCommitterOptions
+	git     *GitCommitter
 }
 
 var testPasswords = map[string]string{"alice": "alice-pw", "bob": "bob-pw", "carol": "carol-pw"}
@@ -70,6 +74,18 @@ func (e *syncEnv) start() {
 	ss.FlushDelay = 50 * time.Millisecond
 	e.ss = ss
 	e.rs = NewRestService(e.tm, ss, e.authn)
+	if e.gitOpts != nil {
+		repo, err := OpenGitRepo(filepath.Join(e.project, "docs"), GitSignature{Name: "Backend", Email: "backend@example.com"})
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		e.git, err = NewGitCommitter(repo, e.authn, e.stateDir, *e.gitOpts)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		e.git.Start(ss)
+		e.rs.SetGitCommitter(e.git)
+	}
 	e.http = httptest.NewServer(e.rs.echoRest)
 }
 
@@ -78,6 +94,10 @@ func (e *syncEnv) stop() {
 		e.http.CloseClientConnections()
 		e.http.Close()
 		e.ss.Close()
+		if e.git != nil {
+			e.git.Close()
+			e.git = nil
+		}
 		e.http = nil
 	}
 }
