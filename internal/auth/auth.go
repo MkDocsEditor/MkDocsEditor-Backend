@@ -102,6 +102,7 @@ type Service struct {
 	db   *sql.DB
 	opts Options
 	cfg  settings
+	keys *serverKeys
 	now  func() time.Time
 
 	limiter *limiter
@@ -143,10 +144,16 @@ func Open(opts Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	keys, err := loadServerKeys(opts.StateDir, cfg.secretKeyFile)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	s := &Service{
 		db:         db,
 		opts:       opts,
 		cfg:        cfg,
+		keys:       keys,
 		now:        time.Now,
 		limiter:    newLimiter(),
 		challenges: map[string]*challenge{},
@@ -195,6 +202,11 @@ func (s *Service) Close() error {
 // account exists, the server waits for the setup (SetupRequired).
 func (s *Service) Enabled() bool {
 	return !s.cfg.disabled
+}
+
+// SetClock replaces the time source. Only for tests.
+func (s *Service) SetClock(now func() time.Time) {
+	s.now = now
 }
 
 func (s *Service) invalidateCache() {

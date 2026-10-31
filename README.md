@@ -31,7 +31,13 @@ sessions of that account.
 | `reader` | read everything and follow live edits, change nothing |
 
 Passwords need at least 10 characters and must not be on a list of common passwords.
-They are stored as Argon2id hashes.
+They are stored as Argon2id hashes. Users can add TOTP (any authenticator app or password
+manager) with 10 single-use recovery codes. Sensitive changes ask for the password again
+when the last login is older than 10 minutes.
+
+**Back up `auth.key` with `auth.db`.** The server key in the state directory (or in
+`MKDOCSREST_AUTH_SECRET_KEY`) encrypts the TOTP secrets; without it, users with TOTP need
+a reset link.
 
 **Upgrading from configured users.** On the first start of this version, the users of
 `server.auth.users` (and the old `server.basicAuth` user) are imported into the database

@@ -98,6 +98,23 @@ CREATE TABLE links (
 );
 CREATE INDEX links_kind ON links(kind, created_at);
 `,
+	// 3: TOTP (secret encrypted with the server key) and recovery codes (keyed hashes)
+	`
+CREATE TABLE totp (
+	account_id         TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+	secret             BLOB NOT NULL,
+	enabled            INTEGER NOT NULL DEFAULT 0,
+	pending_expires_at INTEGER NOT NULL DEFAULT 0,
+	last_step          INTEGER NOT NULL DEFAULT 0,
+	created_at         INTEGER NOT NULL
+);
+CREATE TABLE recovery_codes (
+	account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	code_hash  BLOB NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (account_id, code_hash)
+);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

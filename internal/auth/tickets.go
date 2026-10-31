@@ -110,7 +110,7 @@ func (s *Service) AuthenticateBasic(username, password string) *User {
 		return nil
 	}
 	// accounts with a second factor cannot use their password for basic auth
-	if len(s.secondFactorMethods(u.ID)) > 0 {
+	if totp, passkeys := s.secondFactors(u.ID); totp || passkeys > 0 {
 		return nil
 	}
 	if rehash {
@@ -122,6 +122,14 @@ func (s *Service) AuthenticateBasic(username, password string) *User {
 	s.basicCache[u.ID] = cachedVerification{digest: digest, hash: hash, expires: s.now().Add(verificationCacheLifetime)}
 	s.basicMu.Unlock()
 	return u
+}
+
+// invalidateBasicCache forgets the cached basic auth verification of an account, after its
+// password or second factors changed
+func (s *Service) invalidateBasicCache(accountID string) {
+	s.basicMu.Lock()
+	delete(s.basicCache, accountID)
+	s.basicMu.Unlock()
 }
 
 // rehashPassword replaces an old hash (bcrypt, older Argon2id parameters) after a
