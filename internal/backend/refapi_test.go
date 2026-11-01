@@ -19,7 +19,7 @@ var referenceWikiFiles = map[string]string{
 	"docs/guide/setup.md": "# Setup\n\nZurück zur [Startseite](../index.md).\n![Bild](image.png)\n" +
 		"<img src=\"../img/Strand%20(2).png\" alt=\"Strand\">\n[raus](../../x.md)\n",
 	"docs/rezepte/index.md":       "# Rezepte\n\n[Käsekuchen](Käsekuchen.md)\n",
-	"docs/rezepte/Käsekuchen.md":  "# Käsekuchen\n\n![Foto][foto]\n\n[foto]: ../img/logo.png\n",
+	"docs/rezepte/Käsekuchen.md":  "# Käsekuchen\n\n![Bild][bild]\n\n[bild]: ../img/logo.png\n",
 	"docs/img/logo.png":           "png",
 	"docs/img/Strand (2).png":     "png",
 	"docs/img/unbenutzt.pdf":      "pdf",

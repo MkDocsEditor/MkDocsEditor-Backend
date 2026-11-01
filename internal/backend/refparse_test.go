@@ -9,7 +9,7 @@ func TestParseReferences(t *testing.T) {
 	text := "---\n" +
 		"image: front/matter.png\n" +
 		"---\n" +
-		"# Titel\n" +
+		"# Name\n" +
 		"\n" +
 		"Siehe [Einrichtung](guide/setup.md) und ![Logo](img/logo.png \"Logo\").\n" +
 		"[![Bild](img/a.png)](seite.md#oben) und [leer]() und [extern](https://example.org)\n" +
@@ -28,10 +28,10 @@ func TestParseReferences(t *testing.T) {
 		"~~~\n" +
 		"[immer noch code](code2.md)\n" +
 		"~~~~\n" +
-		"[ref]: <mit leerzeichen.md> \"Titel\"\n" +
+		"[ref]: <mit leerzeichen.md> \"Name\"\n" +
 		"  [ref2]: ../oben.md\n" +
 		"[^1]: [fußnote](fn.md)\n" +
-		"[Klammern](datei_(1).md) [spitz](<a b.md>) [titel](t.md 'x') [paren](p.md (y))\n" +
+		"[Klammern](datei_(1).md) [spitz](<a b.md>) [name](t.md 'x') [paren](p.md (y))\n" +
 		"Umlaute: [Käse](Käse.md)\n"
 	refs := parseReferences(text)
 
@@ -64,8 +64,8 @@ func TestParseReferences(t *testing.T) {
 		{RefKindLink, 25, 17, "fn.md"},
 		{RefKindLink, 26, 12, "datei_(1).md"},
 		{RefKindLink, 26, 35, "a b.md"},
-		{RefKindLink, 26, 52, "t.md"},
-		{RefKindLink, 26, 70, "p.md"},
+		{RefKindLink, 26, 51, "t.md"},
+		{RefKindLink, 26, 69, "p.md"},
 		{RefKindLink, 27, 17, "Käse.md"},
 	}
 	if !reflect.DeepEqual(got, want) {
