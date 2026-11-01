@@ -76,10 +76,10 @@ func TestParseReferences(t *testing.T) {
 func TestParseReferencesRawSpaces(t *testing.T) {
 	cases := map[string]string{
 		"![Checkliste Erstausstattung.png](./Checkliste Erstausstattung.png)": "./Checkliste Erstausstattung.png",
-		"[a](a b.md \"Titel\")":          "a b.md",
-		"[a](a b.md 'Titel')":            "a b.md",
+		"[a](a b.md \"title\")":          "a b.md",
+		"[a](a b.md 'title')":            "a b.md",
 		"[a]( a b.md )":                  "a b.md",
-		"[a](Foto (2) neu.png)":          "Foto (2) neu.png",
+		"[a](photo (2) new.png)":         "photo (2) new.png",
 		"[a](a b.md){ width=300 }":       "a b.md",
 		"[a](a%20b.md \"it's\")":         "a%20b.md",
 		"[a](p.md (y))":                  "p.md",
