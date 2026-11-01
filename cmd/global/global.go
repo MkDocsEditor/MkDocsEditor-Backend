@@ -6,5 +6,4 @@ var (
 	CfgFile string
 	NoColor bool
 	NoStyle bool
-	Verbose bool
 )

@@ -6,7 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	mutexSync "sync"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -31,7 +32,7 @@ type RedirectStore struct {
 	// idOf derives the id of a path relative to the docs folder
 	idOf func(relPath string) string
 
-	mu      mutexSync.Mutex
+	mu      sync.Mutex
 	entries []RedirectEntry
 	// byOldID maps an old id to the indexes of its entries, oldest first
 	byOldID map[string][]int
@@ -111,8 +112,8 @@ func (rs *RedirectStore) Resolve(id string, epoch string, r redirectResolver) (r
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	indexes := rs.byOldID[id]
-	for k := len(indexes) - 1; k >= 0; k-- {
-		i := indexes[k]
+	for _, i := range slices.Backward(indexes) {
+
 		e := rs.entries[i]
 		if e.UUID != "" && r.stateByUUID != nil {
 			if p, ep, ok := r.stateByUUID(e.UUID); ok && (epoch == "" || ep == epoch) && r.exists(e.Type, p) {

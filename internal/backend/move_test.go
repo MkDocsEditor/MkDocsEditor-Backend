@@ -13,12 +13,12 @@ import (
 )
 
 func TestReferenceEditsKeepTheMarkup(t *testing.T) {
-	root := &Section{Type: TypeSection, ID: RootSectionID, Documents: &[]*Document{}, Subsections: &[]*Section{}, Resources: &[]*Resource{}}
-	guide := &Section{Type: TypeSection, ID: "g", Name: "guide", RelPath: "guide", Documents: &[]*Document{}, Subsections: &[]*Section{}, Resources: &[]*Resource{}}
-	*root.Subsections = append(*root.Subsections, guide)
-	*root.Documents = append(*root.Documents, &Document{RelPath: "index.md", Name: "index"})
-	*guide.Documents = append(*guide.Documents, &Document{RelPath: "guide/setup.md", Name: "setup"})
-	*guide.Resources = append(*guide.Resources, &Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
+	root := &Section{Type: TypeSection, ID: RootSectionID, Documents: []*Document{}, Subsections: []*Section{}, Resources: []*Resource{}}
+	guide := &Section{Type: TypeSection, ID: "g", Name: "guide", RelPath: "guide", Documents: []*Document{}, Subsections: []*Section{}, Resources: []*Resource{}}
+	root.Subsections = append(root.Subsections, guide)
+	root.Documents = append(root.Documents, &Document{RelPath: "index.md", Name: "index"})
+	guide.Documents = append(guide.Documents, &Document{RelPath: "guide/setup.md", Name: "setup"})
+	guide.Resources = append(guide.Resources, &Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
 	lookup := newTreeLookup(root)
 	op := &moveOp{oldRel: "guide", newRel: "Anleitungen/guide"}
 
@@ -131,7 +131,7 @@ func (e *restTestEnv) read(rel string) string {
 
 func TestMoveSection(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	rec := e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: RootSectionID, Name: "Handbuch"})
+	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "Handbuch"})
 	expectStatus(t, rec, http.StatusOK)
 	handbuch := decode[Section](t, rec)
 	guide := findSectionByName(e.tm.Root(), "guide")
@@ -225,7 +225,7 @@ func TestMoveValidation(t *testing.T) {
 	root := e.tm.Root()
 	guide := findSectionByName(root, "guide")
 	rezepte := findSectionByName(root, "rezepte")
-	sub := decode[Section](t, e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: guide.ID, Name: "sub"}))
+	sub := decode[Section](t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: guide.ID, Name: "sub"}))
 	logo := findResourceByName(root, "logo.png")
 
 	reason := func(body map[string]any) any {
@@ -245,7 +245,7 @@ func TestMoveValidation(t *testing.T) {
 		{"invalid name", MoveRequest{Type: TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, MoveReasonInvalidName},
 		{"hidden name", MoveRequest{Type: TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, MoveReasonInvalidName},
 		{"blacklisted", MoveRequest{Type: TypeSection, ID: sub.ID, Parent: RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, MoveReasonBlacklisted},
-		{"extra_css", MoveRequest{Type: TypeResource, ID: logo.ID, Parent: e.tm.GenerateId(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
+		{"extra_css", MoveRequest{Type: TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
 		{"invalid type", MoveRequest{Type: "folder", ID: guide.ID}, http.StatusBadRequest, MoveReasonInvalidType},
 		{"exists", MoveRequest{Type: TypeDocument, ID: e.docID("rezepte/index.md"), Parent: RootSectionID}, http.StatusConflict, MoveReasonExists},
 		{"unknown item", MoveRequest{Type: TypeDocument, ID: "nope", Parent: RootSectionID}, http.StatusNotFound, ""},
@@ -273,7 +273,7 @@ func TestMoveValidation(t *testing.T) {
 func TestRenameRewritesReferences(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
 	logo := findResourceByName(e.tm.Root(), "logo.png")
-	rec := e.doJSON(http.MethodPut, "/resource/"+logo.ID+"/", RenameResourceRequest{Name: "Logo groß.png"})
+	rec := e.doJSON(http.MethodPut, "/resource/"+logo.ID+"/", RenameRequest{Name: "Logo groß.png"})
 	expectStatus(t, rec, http.StatusOK)
 	if r := decode[Resource](t, rec); r.Name != "Logo groß.png" || r.RelPath != "img/Logo groß.png" {
 		t.Errorf("renamed: %+v", r)
@@ -287,7 +287,7 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 	// renaming a document to its own name answers the document, as before
 	id := e.docID("rezepte/Käsekuchen.md")
-	expectStatus(t, e.doJSON(http.MethodPut, "/document/"+id+"/", RenameDocumentRequest{Name: "Käsekuchen"}), http.StatusOK)
+	expectStatus(t, e.doJSON(http.MethodPut, "/document/"+id+"/", RenameRequest{Name: "Käsekuchen"}), http.StatusOK)
 
 	// updateReferences: false only moves
 	off := false

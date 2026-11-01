@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -48,13 +48,13 @@ type GitCommitter struct {
 	statePath string
 	sync      *SyncServer
 
-	mu      mutexSync.Mutex
+	mu      sync.Mutex
 	pending map[string]*pendingEdits
 	dirty   bool
 
 	stop     chan struct{}
 	done     chan struct{}
-	stopOnce mutexSync.Once
+	stopOnce sync.Once
 }
 
 // NewGitCommitter creates the committer and loads the uncommitted changes of the last run
@@ -92,9 +92,9 @@ func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts G
 }
 
 // Start registers the committer with the sync server and starts checking the triggers
-func (c *GitCommitter) Start(sync *SyncServer) {
-	c.sync = sync
-	sync.SetChangeRecorder(c)
+func (c *GitCommitter) Start(syncServer *SyncServer) {
+	c.sync = syncServer
+	syncServer.SetChangeRecorder(c)
 	go c.loop()
 }
 
@@ -182,7 +182,7 @@ func (c *GitCommitter) takePending(paths ...string) map[string]int {
 	total := map[string]int{}
 	for p, e := range c.pending {
 		for _, q := range paths {
-			if _, ok := movePath(p, q, q); ok {
+			if isInside(p, q) {
 				for user, n := range e.Changes {
 					total[user] += n
 				}
@@ -245,11 +245,8 @@ func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string,
 	}
 	hash, err := c.commit(paths, author, coAuthors, subject, body)
 	if err != nil {
-		for _, p := range paths {
-			// attribute the edits to the first path, the next edit commit takes them along
-			c.restorePending(p, changes)
-			break
-		}
+		// attribute the edits to the first path, the next edit commit takes them along
+		c.restorePending(paths[0], changes)
 	}
 	c.saveIfDirty()
 	return hash
@@ -299,9 +296,6 @@ func (c *GitCommitter) rankUsers(changes map[string]int) []string {
 // migrateSubjects maps the usernames of a pending file written before the account database
 // to account ids
 func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
-	if c.authn == nil {
-		return changes
-	}
 	out := make(map[string]int, len(changes))
 	for subject, n := range changes {
 		if c.authn.UserByID(subject) == nil {
@@ -317,10 +311,8 @@ func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
 // signature returns the git author of a subject (account id)
 func (c *GitCommitter) signature(subject string) GitSignature {
 	name, email, username := subject, "", subject
-	if c.authn != nil {
-		if u := c.authn.UserByID(subject); u != nil {
-			name, email, username = u.DisplayName, u.Email, u.Username
-		}
+	if u := c.authn.UserByID(subject); u != nil {
+		name, email, username = u.DisplayName, u.Email, u.Username
 	}
 	if email == "" {
 		email = username + "@mkdocseditor.invalid"

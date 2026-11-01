@@ -50,7 +50,7 @@ type (
 // GET /admin/users/
 func (rs *RestService) adminListUsers(c echo.Context) error {
 	var statuses []string
-	for _, s := range strings.Split(c.QueryParam("status"), ",") {
+	for s := range strings.SplitSeq(c.QueryParam("status"), ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			statuses = append(statuses, s)
 		}
@@ -59,7 +59,7 @@ func (rs *RestService) adminListUsers(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, users, indentationChar)
+	return c.JSONPretty(http.StatusOK, users, jsonIndent)
 }
 
 // PATCH /admin/users/{id}/
@@ -79,12 +79,12 @@ func (rs *RestService) adminUpdateUser(c echo.Context) error {
 	if r.Status != nil && *r.Status != auth.StatusActive && *r.Status != auth.StatusDisabled {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "status must be active or disabled", map[string]any{"field": "status"})
 	}
-	u, err := rs.authenticator.UpdateUser(UserFromContext(c), c.Param(urlParamId), auth.AdminUpdate{Role: r.Role, Status: r.Status,
+	u, err := rs.authenticator.UpdateUser(UserFromContext(c), c.Param(urlParamID), auth.AdminUpdate{Role: r.Role, Status: r.Status,
 		ProfileUpdate: auth.ProfileUpdate{Username: r.Username, DisplayName: r.DisplayName, Color: r.Color, Email: r.Email}}, requestInfo(c))
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, u, indentationChar)
+	return c.JSONPretty(http.StatusOK, u, jsonIndent)
 }
 
 // DELETE /admin/users/{id}/
@@ -92,7 +92,7 @@ func (rs *RestService) adminDeleteUser(c echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
-	if err := rs.authenticator.DeleteUser(UserFromContext(c), c.Param(urlParamId), requestInfo(c)); err != nil {
+	if err := rs.authenticator.DeleteUser(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -100,15 +100,15 @@ func (rs *RestService) adminDeleteUser(c echo.Context) error {
 
 // GET /admin/users/{id}/sessions/
 func (rs *RestService) adminUserSessions(c echo.Context) error {
-	if _, err := rs.authenticator.AdminUser(c.Param(urlParamId)); err != nil {
+	if _, err := rs.authenticator.AdminUser(c.Param(urlParamID)); err != nil {
 		return rs.authError(c, err)
 	}
-	return rs.writeSessions(c, c.Param(urlParamId))
+	return rs.writeSessions(c, c.Param(urlParamID))
 }
 
 // POST /admin/users/{id}/sessions/revoke/
 func (rs *RestService) adminRevokeUserSessions(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	if _, err := rs.authenticator.AdminUser(id); err != nil {
 		return rs.authError(c, err)
 	}
@@ -121,12 +121,12 @@ func (rs *RestService) adminRevokeUserSessions(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, jsonIndent)
 }
 
 // DELETE /admin/sessions/{id}/
 func (rs *RestService) adminRevokeSession(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	if err := rs.authenticator.RevokeSession("", id, UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
@@ -148,13 +148,13 @@ func (rs *RestService) adminCreateResetLink(c echo.Context) error {
 	if r.ExpiresInMinutes < 0 || r.ExpiresInMinutes > int(auth.MaxResetLifetime/time.Minute) {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "expiresInMinutes must be between 1 and 1440", map[string]any{"field": "expiresInMinutes"})
 	}
-	l, token, err := rs.authenticator.CreateResetLink(UserFromContext(c), c.Param(urlParamId), time.Duration(r.ExpiresInMinutes)*time.Minute,
+	l, token, err := rs.authenticator.CreateResetLink(UserFromContext(c), c.Param(urlParamID), time.Duration(r.ExpiresInMinutes)*time.Minute,
 		r.ResetSecondFactors, requestInfo(c))
 	if err != nil {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Link: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkReset, token)}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Link: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkReset, token)}, jsonIndent)
 }
 
 // GET /admin/reset-links/
@@ -164,7 +164,7 @@ func (rs *RestService) adminListResetLinks(c echo.Context) error {
 
 // DELETE /admin/reset-links/{id}/
 func (rs *RestService) adminRevokeResetLink(c echo.Context) error {
-	if err := rs.authenticator.RevokeLink(auth.LinkReset, c.Param(urlParamId), UserFromContext(c), requestInfo(c)); err != nil {
+	if err := rs.authenticator.RevokeLink(auth.LinkReset, c.Param(urlParamID), UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -172,7 +172,7 @@ func (rs *RestService) adminRevokeResetLink(c echo.Context) error {
 
 // GET /admin/settings/
 func (rs *RestService) adminSettings(c echo.Context) error {
-	return c.JSONPretty(http.StatusOK, rs.authenticator.Settings(), indentationChar)
+	return c.JSONPretty(http.StatusOK, rs.authenticator.Settings(), jsonIndent)
 }
 
 // PATCH /admin/settings/
@@ -217,7 +217,7 @@ func (rs *RestService) adminAudit(c echo.Context) error {
 	if next != 0 {
 		resp.Next = &next
 	}
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // GET /account/tokens/
@@ -226,7 +226,7 @@ func (rs *RestService) listAppTokens(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, tokens, indentationChar)
+	return c.JSONPretty(http.StatusOK, tokens, jsonIndent)
 }
 
 // POST /account/tokens/
@@ -243,12 +243,12 @@ func (rs *RestService) createAppToken(c echo.Context) error {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CreatedAppTokenResponse{AppToken: t, Token: token}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CreatedAppTokenResponse{AppToken: t, Token: token}, jsonIndent)
 }
 
 // DELETE /account/tokens/{id}/
 func (rs *RestService) revokeAppToken(c echo.Context) error {
-	if err := rs.authenticator.RevokeAppToken(UserFromContext(c), c.Param(urlParamId), requestInfo(c)); err != nil {
+	if err := rs.authenticator.RevokeAppToken(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

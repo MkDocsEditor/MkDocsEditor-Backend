@@ -224,7 +224,7 @@ func parseDestination(fromPath string, raw string) (destination, bool) {
 // escapesRoot reports whether a slash separated path goes above its starting folder
 func escapesRoot(p string) bool {
 	depth := 0
-	for _, s := range strings.Split(p, "/") {
+	for s := range strings.SplitSeq(p, "/") {
 		switch s {
 		case "", ".":
 		case "..":
@@ -246,7 +246,7 @@ func encodingOf(raw string) linkEncoding {
 		rawSpaces: strings.Contains(raw, " "),
 		spelling:  map[string]string{},
 	}
-	for _, segment := range strings.Split(raw, "/") {
+	for segment := range strings.SplitSeq(raw, "/") {
 		if segment != "" && segment != "." && segment != ".." {
 			enc.spelling[percentDecode(segment)] = segment
 		}

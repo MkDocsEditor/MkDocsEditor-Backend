@@ -185,7 +185,7 @@ var ErrInvalidNote = errors.New("the note has at most 200 characters")
 
 // CreateInvite creates an invite link
 func (s *Service) CreateInvite(by *User, role, note string, lifetime time.Duration, ri RequestInfo) (*Link, string, error) {
-	if err := validateRole(role); err != nil {
+	if err := ValidateRole(role); err != nil {
 		return nil, "", err
 	}
 	note = strings.TrimSpace(note)

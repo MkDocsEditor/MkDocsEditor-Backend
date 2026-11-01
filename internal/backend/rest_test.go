@@ -16,6 +16,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -46,14 +47,14 @@ func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *co
 		// tests without users run without authentication, like before the account system
 		srv.Auth.Disabled = true
 	}
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	authenticator := newTestAuthenticator(t, filepath.Join(project, ".mkdocseditor"))
 	ss, err := NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(ss.Close)
-	rs := NewRestService(tm, ss, authenticator)
+	rs := NewRestService(configuration.CurrentConfig.Server, tm, ss, authenticator)
 	return &restTestEnv{t: t, project: project, tm: tm, rs: rs}
 }
 
@@ -166,7 +167,7 @@ func TestRestMkDocsConfig(t *testing.T) {
 func TestRestSectionLifecycle(t *testing.T) {
 	e := newRestTestEnv(t)
 
-	rec := e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: RootSectionID, Name: "notes"})
+	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "notes"})
 	expectStatus(t, rec, http.StatusOK)
 	section := decode[Section](t, rec)
 	if section.Name != "notes" || section.ID == "" {
@@ -176,17 +177,17 @@ func TestRestSectionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: RootSectionID, Name: "notes"}), http.StatusConflict)
-	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
-	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewSectionRequest{Parent: RootSectionID, Name: "../x"}), http.StatusBadRequest)
+	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "notes"}), http.StatusConflict)
+	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
+	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "../x"}), http.StatusBadRequest)
 
-	rec = e.doJSON(http.MethodPut, "/section/"+section.ID+"/", RenameSectionRequest{Name: "journal"})
+	rec = e.doJSON(http.MethodPut, "/section/"+section.ID+"/", RenameRequest{Name: "journal"})
 	expectStatus(t, rec, http.StatusOK)
 	renamed := decode[Section](t, rec)
 	if renamed.Name != "journal" || renamed.ID == section.ID {
 		t.Fatalf("unexpected renamed section: %+v", renamed)
 	}
-	expectStatus(t, e.doJSON(http.MethodPut, "/section/"+section.ID+"/", RenameSectionRequest{Name: "x"}), http.StatusNotFound)
+	expectStatus(t, e.doJSON(http.MethodPut, "/section/"+section.ID+"/", RenameRequest{Name: "x"}), http.StatusNotFound)
 
 	expectStatus(t, e.do(http.MethodDelete, "/section/"+renamed.ID+"/", nil, ""), http.StatusOK)
 	expectStatus(t, e.do(http.MethodDelete, "/section/"+renamed.ID+"/", nil, ""), http.StatusNotFound)
@@ -198,16 +199,16 @@ func TestRestSectionLifecycle(t *testing.T) {
 func TestRestDocumentLifecycle(t *testing.T) {
 	e := newRestTestEnv(t)
 
-	rec := e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "todo"})
+	rec := e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "todo"})
 	expectStatus(t, rec, http.StatusOK)
 	doc := decode[Document](t, rec)
-	if doc.Name != "todo" || doc.SubUrl != "todo/" {
+	if doc.Name != "todo" || doc.SubURL != "todo/" {
 		t.Fatalf("unexpected document: %+v", doc)
 	}
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "todo"}), http.StatusConflict)
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "todo"}), http.StatusConflict)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
 
-	rec = e.doJSON(http.MethodPut, "/document/"+doc.ID+"/", RenameDocumentRequest{Name: "done"})
+	rec = e.doJSON(http.MethodPut, "/document/"+doc.ID+"/", RenameRequest{Name: "done"})
 	expectStatus(t, rec, http.StatusOK)
 	renamed := decode[Document](t, rec)
 	if renamed.Name != "done" {
@@ -282,7 +283,7 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	_ = mw.Close()
 	expectStatus(t, e.do(http.MethodPost, "/resource/"+RootSectionID+"/empty.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
 
-	rec = e.doJSON(http.MethodPut, "/resource/"+res.ID+"/", RenameResourceRequest{Name: "renamed.bin"})
+	rec = e.doJSON(http.MethodPut, "/resource/"+res.ID+"/", RenameRequest{Name: "renamed.bin"})
 	expectStatus(t, rec, http.StatusOK)
 	renamed := decode[Resource](t, rec)
 	if renamed.Name != "renamed.bin" {
@@ -362,12 +363,12 @@ func TestRestMultiUserAuth(t *testing.T) {
 	if u := decode[auth.User](t, rec); u.Username != "anna" || u.Role != auth.RoleEditor || u.DisplayName != "anna" || u.Color == "" {
 		t.Errorf("whoami = %+v", u)
 	}
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK)
 
 	// readers may read, but not change anything
 	e.user, e.pass = "kid", "pw-kid"
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusOK)
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden)
 	expectStatus(t, e.do(http.MethodDelete, "/section/"+RootSectionID+"/", nil, ""), http.StatusForbidden)
 	// but they may get a websocket ticket
 	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusOK)
@@ -486,4 +487,34 @@ func authHeader(t *testing.T, a *auth.Service, user, pass string) string {
 	}
 	testSessions.Store(key, res.Token)
 	return "Bearer " + res.Token
+}
+
+func TestRestMalformedBodyIsABadRequest(t *testing.T) {
+	e := newRestTestEnv(t)
+	for _, path := range []string{"/section/", "/document/"} {
+		rec := e.do(http.MethodPost, path, strings.NewReader("{"), echo.MIMEApplicationJSON)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("POST %s: got %d: %s", path, rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), `"code": "`+CodeBadRequest+`"`) {
+			t.Errorf("POST %s: no error code: %s", path, rec.Body)
+		}
+	}
+}
+
+func TestRestInternalErrorHidesServerPaths(t *testing.T) {
+	e := newRestTestEnv(t)
+	if err := os.Remove(configuration.CurrentConfig.MkDocs.ConfigFile); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do(http.MethodGet, "/mkdocs/config/", nil, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), e.project) {
+		t.Fatalf("the response names a server path: %s", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"code": "`+CodeInternal+`"`) {
+		t.Fatalf("no error code: %s", rec.Body)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	automerge "github.com/automerge/automerge-go"
 )
 
@@ -328,7 +329,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	eventually(t, "edit on server", func() bool { return strings.HasSuffix(e.serverText("guide/setup.md"), "before rename\n") })
 
 	// rename the section above the document
-	guide := e.tm.GetSection(e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")))
+	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
 	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
@@ -480,7 +481,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 	for _, c := range clients {
 		c.connect(id)
 	}
-	for round := 0; round < 10; round++ {
+	for range 10 {
 		for i, c := range clients {
 			c.appendText(string(rune('a'+i)) + "\n")
 			time.Sleep(5 * time.Millisecond)
@@ -500,7 +501,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 
 func TestStateDirInsideDocsIsRefused(t *testing.T) {
 	project := newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	if _, err := NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
 		t.Error("state dir inside docs accepted")
 	}
@@ -514,7 +515,7 @@ func TestExcludeFromGit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, ".git", "info", "exclude"), []byte("*.tmp"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := ExcludeFromGit(project, filepath.Join(project, ".mkdocseditor")); err != nil {
 			t.Fatal(err)
 		}
@@ -607,4 +608,41 @@ func TestAuthorship(t *testing.T) {
 	if fmt.Sprint(au) != fmt.Sprint(*full) {
 		t.Errorf("incremental %+v, full %+v", au, *full)
 	}
+}
+
+// A failed write of the file is tried again, and the document is unloaded afterwards when nobody
+// is connected any more
+func TestSyncFailedWriteIsRetried(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only folders")
+	}
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	folder := filepath.Join(e.project, "docs", "guide")
+	before := e.readFile("guide/setup.md")
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	if err := os.Chmod(folder, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+	a.appendText("more")
+	a.flush()
+	a.waitFor("the change", func() bool { return e.serverText("guide/setup.md") == before+"more" })
+	time.Sleep(3 * e.ss.FlushDelay)
+	if got := e.readFile("guide/setup.md"); got != before {
+		t.Fatalf("the file changed in a read-only folder: %q", got)
+	}
+	a.disconnect()
+
+	if err := os.Chmod(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the change on disk", func() bool { return e.readFile("guide/setup.md") == before+"more" })
+	eventually(t, "the document to be unloaded", func() bool {
+		e.ss.mu.Lock()
+		defer e.ss.mu.Unlock()
+		return len(e.ss.sessions) == 0
+	})
 }

@@ -20,6 +20,7 @@ type FileWatcher struct {
 	onChange func()
 	watcher  *fsnotify.Watcher
 	done     chan struct{}
+	stopped  chan struct{}
 }
 
 // NewFileWatcher starts watching path and all folders below it
@@ -28,7 +29,7 @@ func NewFileWatcher(path string, onChange func()) (*FileWatcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	fw := &FileWatcher{path: path, onChange: onChange, watcher: w, done: make(chan struct{})}
+	fw := &FileWatcher{path: path, onChange: onChange, watcher: w, done: make(chan struct{}), stopped: make(chan struct{})}
 	fw.addRecursive(path)
 	go fw.loop()
 	return fw, nil
@@ -54,36 +55,34 @@ func (fw *FileWatcher) addRecursive(root string) {
 	}
 }
 
+// relevant reports whether an event can change the tree: hidden files (like the temporary files
+// of WriteFile) are not in the tree, and it does not show file modes
+func relevant(event fsnotify.Event) bool {
+	return event.Op != fsnotify.Chmod && !strings.HasPrefix(filepath.Base(event.Name), ".")
+}
+
 func (fw *FileWatcher) loop() {
-	var timer *time.Timer
-	fire := make(chan struct{}, 1)
+	defer close(fw.stopped)
+	var debounce <-chan time.Time
 	for {
 		select {
 		case <-fw.done:
-			if timer != nil {
-				timer.Stop()
-			}
 			return
 		case event, ok := <-fw.watcher.Events:
 			if !ok {
 				return
+			}
+			if !relevant(event) {
+				continue
 			}
 			if event.Has(fsnotify.Create) {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					fw.addRecursive(event.Name)
 				}
 			}
-			if timer == nil {
-				timer = time.AfterFunc(watcherDebounce, func() {
-					select {
-					case fire <- struct{}{}:
-					default:
-					}
-				})
-			} else {
-				timer.Reset(watcherDebounce)
-			}
-		case <-fire:
+			debounce = time.After(watcherDebounce)
+		case <-debounce:
+			debounce = nil
 			fw.onChange()
 		case err, ok := <-fw.watcher.Errors:
 			if !ok {
@@ -94,8 +93,9 @@ func (fw *FileWatcher) loop() {
 	}
 }
 
-// Close stops watching
+// Close stops watching. onChange is not called any more after it returned.
 func (fw *FileWatcher) Close() {
 	close(fw.done)
 	_ = fw.watcher.Close()
+	<-fw.stopped
 }

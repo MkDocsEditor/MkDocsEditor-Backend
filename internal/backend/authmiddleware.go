@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,7 +168,7 @@ func stop(err error) error {
 
 // apiError writes an error response with a machine-readable code
 func apiError(c echo.Context, status int, code string, message string, details map[string]any) error {
-	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, indentationChar)
+	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, jsonIndent)
 }
 
 // authMiddleware authenticates every request (session cookie, bearer session, legacy basic
@@ -452,6 +453,38 @@ func (rs *RestService) limitIP(c echo.Context) error {
 	return nil
 }
 
+// authErrorResponses maps the plain errors of the auth package to responses
+var authErrorResponses = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{auth.ErrInvalidCredentials, http.StatusUnauthorized, CodeInvalidCredentials},
+	{auth.ErrAccountDisabled, http.StatusForbidden, CodeAccountDisabled},
+	{auth.ErrChallengeExpired, http.StatusUnauthorized, CodeChallengeExpired},
+	{auth.ErrInvalidLink, http.StatusBadRequest, CodeInvalidLink},
+	{auth.ErrInvalidUsername, http.StatusBadRequest, CodeInvalidUsername},
+	{auth.ErrUsernameTaken, http.StatusConflict, CodeUsernameTaken},
+	{auth.ErrInvalidDisplayName, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidNote, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidColor, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidEmail, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidTOTPCode, http.StatusBadRequest, CodeInvalidSecondFactor},
+	{auth.ErrTOTPAlreadyEnabled, http.StatusConflict, CodeTOTPAlreadyEnabled},
+	{auth.ErrTOTPNotEnabled, http.StatusConflict, CodeTOTPNotEnabled},
+	{auth.ErrNoTOTPEnrollment, http.StatusConflict, CodeConflict},
+	{auth.ErrLastLoginMethod, http.StatusConflict, CodeLastLoginMethod},
+	{auth.ErrSecondFactorRequired, http.StatusConflict, CodeSecondFactorRequired},
+	{auth.ErrPasskeysDisabled, http.StatusNotFound, CodePasskeysDisabled},
+	{auth.ErrPasskeyVerificationFailed, http.StatusUnauthorized, CodePasskeyVerificationFailed},
+	{auth.ErrPasskeyRegistrationFailed, http.StatusBadRequest, CodePasskeyRegistrationFailed},
+	{auth.ErrInvalidPasskeyName, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidTokenName, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidTokenScope, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidTokenExpiry, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrDeviceLinkRedeemed, http.StatusConflict, CodeConflict},
+}
+
 // authError maps errors of the auth package to responses
 func (rs *RestService) authError(c echo.Context, err error) error {
 	var rl *auth.RateLimitError
@@ -460,57 +493,24 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 	var guard *auth.ErrAdminGuard
 	switch {
 	case errors.As(err, &rl):
-		c.Response().Header().Set("Retry-After", itoa(rl.Seconds()))
+		c.Response().Header().Set("Retry-After", strconv.Itoa(rl.Seconds()))
 		return apiError(c, http.StatusTooManyRequests, CodeRateLimited, err.Error(), map[string]any{"retryAfter": rl.Seconds()})
 	case errors.As(err, &weak):
 		return apiError(c, http.StatusBadRequest, CodeWeakPassword, err.Error(), map[string]any{
 			"reason": weak.Reason, "minLength": auth.PasswordMinLength, "maxLength": auth.PasswordMaxLength})
-	case errors.Is(err, auth.ErrInvalidCredentials):
-		return apiError(c, http.StatusUnauthorized, CodeInvalidCredentials, err.Error(), nil)
-	case errors.Is(err, auth.ErrAccountDisabled):
-		return apiError(c, http.StatusForbidden, CodeAccountDisabled, err.Error(), nil)
-	case errors.Is(err, auth.ErrChallengeExpired):
-		return apiError(c, http.StatusUnauthorized, CodeChallengeExpired, err.Error(), nil)
-	case errors.Is(err, auth.ErrInvalidLink):
-		return apiError(c, http.StatusBadRequest, CodeInvalidLink, err.Error(), nil)
-	case errors.Is(err, auth.ErrInvalidUsername):
-		return apiError(c, http.StatusBadRequest, CodeInvalidUsername, err.Error(), nil)
-	case errors.Is(err, auth.ErrUsernameTaken):
-		return apiError(c, http.StatusConflict, CodeUsernameTaken, err.Error(), nil)
-	case errors.Is(err, auth.ErrInvalidDisplayName), errors.Is(err, auth.ErrInvalidNote), errors.Is(err, auth.ErrInvalidColor), errors.Is(err, auth.ErrInvalidEmail):
-		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
 	case errors.As(err, &second):
 		return apiError(c, http.StatusUnauthorized, CodeInvalidSecondFactor, err.Error(), map[string]any{"attemptsLeft": second.AttemptsLeft})
-	case errors.Is(err, auth.ErrInvalidTOTPCode):
-		return apiError(c, http.StatusBadRequest, CodeInvalidSecondFactor, err.Error(), nil)
-	case errors.Is(err, auth.ErrTOTPAlreadyEnabled):
-		return apiError(c, http.StatusConflict, CodeTOTPAlreadyEnabled, err.Error(), nil)
-	case errors.Is(err, auth.ErrTOTPNotEnabled):
-		return apiError(c, http.StatusConflict, CodeTOTPNotEnabled, err.Error(), nil)
-	case errors.Is(err, auth.ErrNoTOTPEnrollment):
-		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
-	case errors.Is(err, auth.ErrLastLoginMethod):
-		return apiError(c, http.StatusConflict, CodeLastLoginMethod, err.Error(), nil)
-	case errors.Is(err, auth.ErrSecondFactorRequired):
-		return apiError(c, http.StatusConflict, CodeSecondFactorRequired, err.Error(), nil)
-	case errors.Is(err, auth.ErrPasskeysDisabled):
-		return apiError(c, http.StatusNotFound, CodePasskeysDisabled, err.Error(), nil)
-	case errors.Is(err, auth.ErrPasskeyVerificationFailed):
-		return apiError(c, http.StatusUnauthorized, CodePasskeyVerificationFailed, err.Error(), nil)
-	case errors.Is(err, auth.ErrPasskeyRegistrationFailed):
-		return apiError(c, http.StatusBadRequest, CodePasskeyRegistrationFailed, err.Error(), nil)
-	case errors.Is(err, auth.ErrInvalidPasskeyName):
-		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
 	case errors.As(err, &guard):
-		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
-	case errors.Is(err, auth.ErrInvalidTokenName), errors.Is(err, auth.ErrInvalidTokenScope), errors.Is(err, auth.ErrInvalidTokenExpiry):
-		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
-	case errors.Is(err, auth.ErrDeviceLinkRedeemed):
 		return apiError(c, http.StatusConflict, CodeConflict, err.Error(), nil)
 	case errors.Is(err, auth.ErrNotFound):
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)
 	case errors.Is(err, auth.ErrUnauthenticated):
 		return rs.unauthorized(c)
+	}
+	for _, r := range authErrorResponses {
+		if errors.Is(err, r.err) {
+			return apiError(c, r.status, r.code, err.Error(), nil)
+		}
 	}
 	c.Logger().Errorf("auth: %v", err)
 	return apiError(c, http.StatusInternalServerError, CodeInternal, "internal error", nil)

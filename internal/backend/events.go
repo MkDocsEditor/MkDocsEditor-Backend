@@ -2,7 +2,6 @@ package backend
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"sort"
 	"time"
@@ -29,8 +28,12 @@ type (
 	}
 )
 
-// onlineDebounce collects joins and leaves before the online list is sent
-const onlineDebounce = 100 * time.Millisecond
+const (
+	// onlineDebounce collects joins and leaves before the online list is sent
+	onlineDebounce = 100 * time.Millisecond
+	// maxEventMessageSize limits messages from clients: they only send hello and heartbeats
+	maxEventMessageSize = 64 << 10
+)
 
 // HandleEventsWebsocket serves GET /events/ws/
 func (s *SyncServer) HandleEventsWebsocket(c echo.Context) error {
@@ -38,7 +41,7 @@ func (s *SyncServer) HandleEventsWebsocket(c echo.Context) error {
 	if err != nil {
 		return nil
 	}
-	ws.SetReadLimit(64 << 10)
+	ws.SetReadLimit(maxEventMessageSize)
 	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
 	go conn.writeLoop()
 	conn.runEvents()
@@ -52,38 +55,12 @@ func (c *wsConn) runEvents() {
 		s.eventsMu.Lock()
 		delete(s.eventConns, c)
 		s.eventsMu.Unlock()
-		c.close(CloseNormal, "")
-		select {
-		case <-c.writerDone:
-		case <-time.After(2 * time.Second):
-		}
-		c.terminate()
+		c.shutdown()
 	}()
 
-	_ = c.ws.SetReadDeadline(time.Now().Add(s.HelloTimeout))
-	_, data, err := c.ws.ReadMessage()
-	if err != nil {
-		if c.user == nil {
-			c.close(CloseUnauthorized, "no hello received")
-		}
+	hello := c.readHello()
+	if hello == nil || !c.authenticate(hello) {
 		return
-	}
-	var hello HelloMessage
-	if err = json.Unmarshal(data, &hello); err != nil || hello.Type != MsgHello {
-		c.fail(CloseProtocolError, ErrCodeBadRequest, "the first message must be hello")
-		return
-	}
-	if c.user == nil {
-		if hello.Ticket == "" {
-			c.fail(CloseUnauthorized, ErrCodeUnauthorized, "authentication required")
-			return
-		}
-		user, sessionID, err := s.authenticator.RedeemTicket(hello.Ticket)
-		if err != nil {
-			c.fail(CloseUnauthorized, ErrCodeUnauthorized, err.Error())
-			return
-		}
-		c.user, c.sessionID = user, sessionID
 	}
 
 	s.eventsMu.Lock()
@@ -98,21 +75,16 @@ func (c *wsConn) runEvents() {
 	log.Printf("%s: %s (%s) subscribed to events", c.clientID, c.user.Username, hello.Client)
 
 	for {
-		_ = c.ws.SetReadDeadline(time.Now().Add(s.HeartbeatTimeout))
-		_, data, err := c.ws.ReadMessage()
-		if err != nil {
-			var netErr interface{ Timeout() bool }
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				c.close(CloseHeartbeatTimout, "heartbeat timeout")
-			}
-			return
-		}
-		var base MessageBase
-		if err = json.Unmarshal(data, &base); err != nil {
-			c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid JSON")
+		data, ok := c.readMessage()
+		if !ok {
 			return
 		}
 		// heartbeats keep the connection alive, other types are ignored
+		var base MessageBase
+		if err := json.Unmarshal(data, &base); err != nil {
+			c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid JSON")
+			return
+		}
 	}
 }
 

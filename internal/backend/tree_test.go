@@ -7,18 +7,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 )
 
 func TestTreeStructure(t *testing.T) {
 	project := newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	root := tm.Root()
 
 	if root.ID != RootSectionID || root.Type != TypeSection {
 		t.Fatalf("unexpected root: %+v", root)
 	}
-	if len(*root.Documents) != 1 || (*root.Documents)[0].Name != "index" {
-		t.Fatalf("expected only index in root documents, got %+v", *root.Documents)
+	if len(root.Documents) != 1 || root.Documents[0].Name != "index" {
+		t.Fatalf("expected only index in root documents, got %+v", root.Documents)
 	}
 	// stylesheets only contains an extra_css file, blacklisted is on the blacklist
 	if findDocumentByName(root, "secret") != nil {
@@ -43,10 +45,10 @@ func TestTreeStructure(t *testing.T) {
 	if setup.Path != wantPath {
 		t.Errorf("path = %s, want %s", setup.Path, wantPath)
 	}
-	if setup.SubUrl != "guide/setup/" {
-		t.Errorf("url = %q, want guide/setup/", setup.SubUrl)
+	if setup.SubURL != "guide/setup/" {
+		t.Errorf("url = %q, want guide/setup/", setup.SubURL)
 	}
-	if setup.ID != tm.GenerateId(wantPath) {
+	if setup.ID != tm.GenerateID(wantPath) {
 		t.Error("document id is not derived from its path")
 	}
 	if tm.GetDocument(setup.ID) != setup {
@@ -84,10 +86,10 @@ func TestValidateName(t *testing.T) {
 	}
 }
 
-func TestCreateRenameDelete(t *testing.T) {
+func TestCreateDelete(t *testing.T) {
 	project := newTestWiki(t)
 	docs := filepath.Join(project, "docs")
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 
 	section, err := tm.CreateSection(RootSectionID, "new")
 	if err != nil || section == nil {
@@ -125,35 +127,11 @@ func TestCreateRenameDelete(t *testing.T) {
 		t.Errorf("resource content %q", b)
 	}
 
-	renamedDoc, err := tm.RenameDocument(doc, "renamed")
-	if err != nil || renamedDoc == nil || renamedDoc.Name != "renamed" {
-		t.Fatalf("RenameDocument: %+v %v", renamedDoc, err)
-	}
-	if tm.GetDocument(doc.ID) != nil {
-		t.Error("old document id still resolves")
-	}
-
-	renamedRes, err := tm.RenameResource(res, "other.bin")
-	if err != nil || renamedRes == nil || renamedRes.Name != "other.bin" {
-		t.Fatalf("RenameResource: %+v %v", renamedRes, err)
-	}
-
-	renamedSection, err := tm.RenameSection(section, "moved")
-	if err != nil || renamedSection == nil || renamedSection.Name != "moved" {
-		t.Fatalf("RenameSection: %+v %v", renamedSection, err)
-	}
-	if findDocumentByName(renamedSection, "renamed") == nil {
-		t.Error("document did not move with its section")
-	}
-	if _, err = tm.RenameSection(tm.Root(), "x"); err == nil {
-		t.Error("root section was renamed")
-	}
-
-	ok, err := tm.DeleteItem(renamedSection.ID, TypeSection)
+	ok, err := tm.DeleteItem(section.ID, TypeSection)
 	if !ok || err != nil {
 		t.Fatalf("DeleteItem: %v %v", ok, err)
 	}
-	if _, err = os.Stat(filepath.Join(docs, "moved")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(docs, "new")); !os.IsNotExist(err) {
 		t.Error("section folder still exists")
 	}
 	if ok, _ = tm.DeleteItem("unknown", TypeDocument); ok {
@@ -166,7 +144,7 @@ func TestCreateRenameDelete(t *testing.T) {
 
 func TestTreeChangeListener(t *testing.T) {
 	newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	var calls int
 	tm.AddTreeChangeListener(func(oldTree, newTree *Section) {
 		calls++
@@ -185,13 +163,13 @@ func TestTreeChangeListener(t *testing.T) {
 // Readers and writers run concurrently; run with -race.
 func TestTreeConcurrentAccess(t *testing.T) {
 	newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		wg.Add(2)
 		go func(i int) {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				name := "doc" + string(rune('a'+i)) + string(rune('a'+j))
 				d, err := tm.CreateDocument(RootSectionID, name)
 				if err != nil {
@@ -205,7 +183,7 @@ func TestTreeConcurrentAccess(t *testing.T) {
 		}(i)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				root := tm.Root()
 				_ = findDocumentByName(root, "index")
 				tm.CreateItemTree()
@@ -213,4 +191,37 @@ func TestTreeConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// A plain string is a valid theme in mkdocs.yml, it must not hide the extra_css setting
+func TestExtraCSSIsIgnoredWithAPlainTheme(t *testing.T) {
+	project := newTestWiki(t)
+	config := "site_name: Test\ntheme: material\nextra_css:\n  - stylesheets/extra.css\n"
+	if err := os.WriteFile(filepath.Join(project, "mkdocs.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	if r := findResourceByName(tm.Root(), "extra.css"); r != nil {
+		t.Fatalf("extra.css is in the tree: %+v", r)
+	}
+}
+
+// Only the file extension is cut from the URL, not the ".md" of a folder name
+func TestDocumentURLKeepsFolderNames(t *testing.T) {
+	project := newTestWiki(t)
+	dir := filepath.Join(project, "docs", "notes.md")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a b.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	d := findDocumentByName(tm.Root(), "a b")
+	if d == nil {
+		t.Fatal("document not found")
+	}
+	if want := "notes.md/a%20b/"; d.SubURL != want {
+		t.Fatalf("got %q, want %q", d.SubURL, want)
+	}
 }

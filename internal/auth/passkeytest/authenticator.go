@@ -61,12 +61,9 @@ func (a *Authenticator) authData(withCredential *Key, counter uint32) []byte {
 		out = append(out, a.AAGUID[:]...)
 		out = binary.BigEndian.AppendUint16(out, uint16(len(withCredential.ID))) //nolint:gosec // short ids
 		out = append(out, withCredential.ID...)
-		pub := withCredential.Private.PublicKey
-		x := make([]byte, 32)
-		y := make([]byte, 32)
-		pub.X.FillBytes(x) //nolint:staticcheck // the raw coordinates are what COSE needs
-		pub.Y.FillBytes(y) //nolint:staticcheck // the raw coordinates are what COSE needs
-		cose, _ := webauthncbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: x, -3: y})
+		// the uncompressed form is 0x04, X and Y; COSE needs the raw coordinates
+		pub, _ := withCredential.Private.PublicKey.Bytes()
+		cose, _ := webauthncbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: pub[1:33], -3: pub[33:]})
 		out = append(out, cose...)
 	}
 	return out

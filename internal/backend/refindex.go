@@ -1,15 +1,15 @@
 package backend
 
 import (
-	"html"
+	"errors"
+	"io/fs"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	mutexSync "sync"
+	"sync"
 
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
 	"gopkg.in/yaml.v3"
 )
@@ -45,22 +45,15 @@ func newTreeLookup(root *Section) *treeLookup {
 		resources: map[string]*Resource{},
 		sections:  map[string]*Section{},
 	}
-	var walk func(s *Section)
-	walk = func(s *Section) {
+	for s := range root.walk() {
 		l.sections[s.RelPath] = s
-		for _, d := range *s.Documents {
+		for _, d := range s.Documents {
 			l.documents[d.RelPath] = d
 			l.documentList = append(l.documentList, d)
 		}
-		for _, r := range *s.Resources {
+		for _, r := range s.Resources {
 			l.resources[r.RelPath] = r
 		}
-		for _, sub := range *s.Subsections {
-			walk(sub)
-		}
-	}
-	if root != nil {
-		walk(root)
 	}
 	sort.Slice(l.documentList, func(i, j int) bool { return l.documentList[i].RelPath < l.documentList[j].RelPath })
 	return l
@@ -86,7 +79,7 @@ func (l *treeLookup) resolve(p string) *ItemRef {
 // sectionIndexDocument returns the index document of a section (index.md, else README.md), or nil
 func sectionIndexDocument(s *Section) *Document {
 	var readme *Document
-	for _, d := range *s.Documents {
+	for _, d := range s.Documents {
 		switch d.Name + markdownFileExtension {
 		case "index.md":
 			return d
@@ -146,11 +139,7 @@ type resolvedRef struct {
 func resolveReferences(l *treeLookup, source *Document, refs []parsedRef) []resolvedRef {
 	out := make([]resolvedRef, 0, len(refs))
 	for _, r := range refs {
-		raw := r.Raw
-		if r.HTML {
-			raw = html.UnescapeString(raw)
-		}
-		d, ok := parseDestination(source.RelPath, raw)
+		d, ok := parseDestination(source.RelPath, r.destinationText())
 		if !ok {
 			continue
 		}
@@ -175,7 +164,7 @@ type ReferenceIndex struct {
 	tm   *TreeManager
 	sync *SyncServer
 
-	mu    mutexSync.Mutex
+	mu    sync.Mutex
 	cache map[string]*indexedDocument
 }
 
@@ -184,9 +173,9 @@ type indexedDocument struct {
 	refs []parsedRef
 }
 
-// NewReferenceIndex creates the index. sync may be nil.
-func NewReferenceIndex(tm *TreeManager, sync *SyncServer) *ReferenceIndex {
-	return &ReferenceIndex{tm: tm, sync: sync, cache: map[string]*indexedDocument{}}
+// NewReferenceIndex creates the index
+func NewReferenceIndex(tm *TreeManager, syncServer *SyncServer) *ReferenceIndex {
+	return &ReferenceIndex{tm: tm, sync: syncServer, cache: map[string]*indexedDocument{}}
 }
 
 // Warm builds the index in the background
@@ -199,6 +188,8 @@ func (ri *ReferenceIndex) Warm() {
 // indexSnapshot is the resolved references of all documents for one tree snapshot
 type indexSnapshot struct {
 	lookup *treeLookup
+	// configFile is the path of mkdocs.yml
+	configFile string
 	// refs by source document path, in text order
 	refs map[string][]resolvedRef
 }
@@ -206,7 +197,7 @@ type indexSnapshot struct {
 // Snapshot returns the current references of all documents, resolved against the current tree
 func (ri *ReferenceIndex) Snapshot() *indexSnapshot {
 	lookup := newTreeLookup(ri.tm.Root())
-	snap := &indexSnapshot{lookup: lookup, refs: make(map[string][]resolvedRef, len(lookup.documentList))}
+	snap := &indexSnapshot{lookup: lookup, configFile: ri.tm.ConfigFile(), refs: make(map[string][]resolvedRef, len(lookup.documentList))}
 
 	ri.mu.Lock()
 	defer ri.mu.Unlock()
@@ -230,12 +221,8 @@ func (ri *ReferenceIndex) Snapshot() *indexSnapshot {
 // documentRefsLocked returns the parsed references of a document, from the cache if its text
 // did not change. Open documents are read from their live text. Caller holds mu.
 func (ri *ReferenceIndex) documentRefsLocked(d *Document) ([]parsedRef, bool) {
-	var text string
 	var key string
-	live := false
-	if ri.sync != nil {
-		text, live = ri.sync.CurrentText(d)
-	}
+	text, live := ri.sync.CurrentText(d)
 	if live {
 		key = "live:" + strconv.FormatUint(xxhash.ChecksumString64(text), 16)
 	} else {
@@ -247,7 +234,7 @@ func (ri *ReferenceIndex) documentRefsLocked(d *Document) ([]parsedRef, bool) {
 	if !live {
 		data, err := os.ReadFile(d.Path)
 		if err != nil {
-			if !os.IsNotExist(err) {
+			if !errors.Is(err, fs.ErrNotExist) {
 				log.Printf("Unable to index %s: %v", d.RelPath, err)
 			}
 			return nil, false
@@ -280,9 +267,9 @@ func (s *indexSnapshot) backlinks(match func(target *ItemRef) bool) []resolvedRe
 }
 
 // usedByConfig returns the string values of mkdocs.yml, which may name resources
-func usedByConfig() map[string]bool {
+func usedByConfig(configFile string) map[string]bool {
 	used := map[string]bool{}
-	data, err := os.ReadFile(configuration.CurrentConfig.MkDocs.ConfigFile)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return used
 	}
@@ -305,7 +292,7 @@ func usedByConfig() map[string]bool {
 
 // unusedResources returns the resources no reference and no value in mkdocs.yml points to
 func (s *indexSnapshot) unusedResources() []*Resource {
-	used := usedByConfig()
+	used := usedByConfig(s.configFile)
 	for _, r := range s.all() {
 		if r.Target != nil && r.Target.Type == TypeResource {
 			used[r.Target.Path] = true

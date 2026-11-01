@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"html"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -338,4 +339,21 @@ func skipSpaces(s string, i int) int {
 		i++
 	}
 	return i
+}
+
+// destinationText returns the destination as a path, with the entities of an HTML attribute resolved
+func (r parsedRef) destinationText() string {
+	if r.HTML {
+		return html.UnescapeString(r.Raw)
+	}
+	return r.Raw
+}
+
+// escapeReplacement prepares a new destination for the text: an attribute that escaped "&" keeps
+// doing so
+func (r parsedRef) escapeReplacement(replacement string) string {
+	if r.HTML && strings.Contains(r.Raw, "&amp;") {
+		return strings.ReplaceAll(replacement, "&", "&amp;")
+	}
+	return replacement
 }

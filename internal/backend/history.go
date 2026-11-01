@@ -44,14 +44,13 @@ type GitCommit struct {
 func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	format := "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
 	commits := []GitCommit{}
 	current, start := path, "HEAD"
 	seen := map[string]bool{}
 	for len(commits) < limit && !seen[current] {
 		seen[current] = true
 		out, err := g.run(nil, "-c", "diff.renames=false", "log", "--relative", "--name-status",
-			"--max-count="+strconv.Itoa(limit-len(commits)), "--format="+format, start, "--", current)
+			"--max-count="+strconv.Itoa(limit-len(commits)), "--format="+gitLogFormat, start, "--", current)
 		if err != nil {
 			if strings.Contains(err.Error(), "does not have any commits") {
 				return commits, nil
@@ -59,51 +58,26 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 			return nil, err
 		}
 		added := ""
-		for _, record := range strings.Split(out, "\x1e") {
+		for record := range strings.SplitSeq(out, "\x1e") {
 			if strings.TrimSpace(record) == "" {
 				continue
 			}
-			fields := strings.Split(record, "\x00")
-			if len(fields) < 7 {
-				return nil, fmt.Errorf("unexpected git log output %q", record)
-			}
-			t, _ := time.Parse(time.RFC3339, fields[1])
-			c := GitCommit{
-				Revision:  fields[0],
-				Time:      t,
-				Author:    GitSignature{Name: fields[2], Email: fields[3]},
-				CoAuthors: []GitSignature{},
-				Subject:   fields[4],
-				Path:      current,
-			}
-			for _, co := range strings.Split(fields[5], "\x01") {
-				if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
-					c.CoAuthors = append(c.CoAuthors, sig)
-				}
+			c, addsFile, err := parseLogRecord(record, current)
+			if err != nil {
+				return nil, err
 			}
 			added = ""
-			for _, line := range strings.Split(fields[6], "\n") {
-				if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
-					added = c.Revision
-				}
+			if addsFile {
+				added = c.Revision
 			}
 			commits = append(commits, c)
 		}
 		if added == "" || len(commits) >= limit {
 			break
 		}
-		// was the file renamed in the commit that added it?
-		out, err = g.run(nil, "-c", "diff.renames=true", "show", "--relative", "-M",
-			"--name-status", "--format=", added)
+		renamedFrom, err := g.renameSource(added, current)
 		if err != nil {
 			return nil, err
-		}
-		renamedFrom := ""
-		for _, line := range strings.Split(out, "\n") {
-			parts := strings.Split(strings.TrimSpace(line), "\t")
-			if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == current {
-				renamedFrom = parts[1]
-			}
 		}
 		if renamedFrom == "" {
 			break
@@ -111,6 +85,54 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 		current, start = renamedFrom, added+"^"
 	}
 	return commits, nil
+}
+
+// gitLogFormat separates records with 0x1e and fields with 0x00. parseLogRecord reads it.
+const gitLogFormat = "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
+
+// parseLogRecord parses a record of "git log --name-status --format=gitLogFormat" for the file at
+// path. addsFile is true if the commit added the file.
+func parseLogRecord(record string, path string) (commit GitCommit, addsFile bool, err error) {
+	fields := strings.Split(record, "\x00")
+	if len(fields) < 7 {
+		return GitCommit{}, false, fmt.Errorf("unexpected git log output %q", record)
+	}
+	t, _ := time.Parse(time.RFC3339, fields[1])
+	commit = GitCommit{
+		Revision:  fields[0],
+		Time:      t,
+		Author:    GitSignature{Name: fields[2], Email: fields[3]},
+		CoAuthors: []GitSignature{},
+		Subject:   fields[4],
+		Path:      path,
+	}
+	for co := range strings.SplitSeq(fields[5], "\x01") {
+		if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
+			commit.CoAuthors = append(commit.CoAuthors, sig)
+		}
+	}
+	for line := range strings.SplitSeq(fields[6], "\n") {
+		if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
+			addsFile = true
+		}
+	}
+	return commit, addsFile, nil
+}
+
+// renameSource returns the old path if a commit renamed a file to path, else ""
+func (g *GitRepo) renameSource(revision string, path string) (string, error) {
+	out, err := g.run(nil, "-c", "diff.renames=true", "show", "--relative", "-M", "--name-status", "--format=", revision)
+	if err != nil {
+		return "", err
+	}
+	source := ""
+	for line := range strings.SplitSeq(out, "\n") {
+		parts := strings.Split(strings.TrimSpace(line), "\t")
+		if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == path {
+			source = parts[1]
+		}
+	}
+	return source, nil
 }
 
 // parseSignature parses "Name <email>"
@@ -179,9 +201,6 @@ type HistoryAuthor struct {
 
 func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 	a := HistoryAuthor{Name: sig.Name, Email: sig.Email}
-	if rs.authenticator == nil {
-		return a
-	}
 	var user *auth.User
 	if name, ok := strings.CutSuffix(sig.Email, "@mkdocseditor.invalid"); ok {
 		// current or former username
@@ -202,22 +221,15 @@ func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 
 // historyContext resolves the document and the repository of a history request
 func (rs *RestService) historyContext(c echo.Context) (*Document, string, *GitRepo, error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
 		return nil, "", nil, rs.ReturnNotFound(c, id)
 	}
 	if rs.git == nil {
-		return nil, "", nil, c.JSONPretty(http.StatusNotFound, &ErrorResult{
-			Name:    "Not found",
-			Message: "the revision history requires git.enabled",
-		}, indentationChar)
+		return nil, "", nil, notFoundError(c, "the revision history requires git.enabled")
 	}
-	rel, err := filepath.Rel(rs.treeManager.RootPath(), d.Path)
-	if err != nil {
-		return nil, "", nil, rs.ReturnError(c, err)
-	}
-	return d, filepath.ToSlash(rel), rs.git.repo, nil
+	return d, d.RelPath, rs.git.repo, nil
 }
 
 // findRevision returns the commit of a revision in the history of a file
@@ -238,10 +250,7 @@ func findRevision(repo *GitRepo, rel string, revision string) (*GitCommit, error
 }
 
 func (rs *RestService) returnUnknownRevision(c echo.Context, revision string) error {
-	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
-		Name:    "Not found",
-		Message: fmt.Sprintf("revision %q is not in the history of this document", revision),
-	}, indentationChar)
+	return notFoundError(c, fmt.Sprintf("revision %q is not in the history of this document", revision))
 }
 
 // GET /document/:id/history/
@@ -253,7 +262,7 @@ func (rs *RestService) getDocumentHistory(c echo.Context) error {
 	limit := 100
 	if v := c.QueryParam("limit"); v != "" {
 		if limit, err = strconv.Atoi(v); err != nil || limit < 1 || limit > 1000 {
-			return c.JSONPretty(http.StatusBadRequest, &ErrorResult{Name: "Bad Request", Message: "limit must be between 1 and 1000"}, indentationChar)
+			return apiError(c, http.StatusBadRequest, CodeBadRequest, "limit must be between 1 and 1000", nil)
 		}
 	}
 	commits, err := repo.FileHistory(rel, limit)
@@ -275,16 +284,14 @@ func (rs *RestService) getDocumentHistory(c echo.Context) error {
 		}
 		entries = append(entries, e)
 	}
-	return c.JSONPretty(http.StatusOK, entries, indentationChar)
+	return c.JSONPretty(http.StatusOK, entries, jsonIndent)
 }
 
 // revisionText returns the text of a document at a revision, or the live text for "current"
 func (rs *RestService) revisionText(d *Document, rel string, repo *GitRepo, revision string) (string, string, error) {
 	if revision == RevisionCurrent {
-		if rs.sync != nil {
-			if text, ok := rs.sync.CurrentText(d); ok {
-				return text, rel, nil
-			}
+		if text, ok := rs.sync.CurrentText(d); ok {
+			return text, rel, nil
 		}
 		data, err := os.ReadFile(d.Path)
 		return string(data), rel, err
@@ -328,7 +335,7 @@ func (rs *RestService) getDocumentRevisionDiff(c echo.Context) error {
 		to = RevisionCurrent
 	}
 	if from == "" {
-		return c.JSONPretty(http.StatusBadRequest, &ErrorResult{Name: "Bad Request", Message: "missing query parameter 'from'"}, indentationChar)
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "missing query parameter 'from'", nil)
 	}
 	fromText, fromPath, err := rs.revisionText(d, rel, repo, from)
 	if errors.Is(err, ErrUnknownRevision) {
@@ -375,9 +382,6 @@ func (rs *RestService) restoreDocumentRevision(c echo.Context) error {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-	if rs.sync == nil {
-		return echo.ErrNotFound
-	}
 	if err = rs.sync.ReplaceText(d, text, UserFromContext(c), "restore "+shortRevision(revision)); err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -397,18 +401,10 @@ func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, mess
 		if current == text {
 			return nil
 		}
-		fork, err := ds.doc.Fork()
+		fork, err := ds.forkForServerChangeLocked(ActorUserServer)
 		if err != nil {
 			return err
 		}
-		actor, err := s.actors.NewServerActor(ActorUserServer)
-		if err != nil {
-			return err
-		}
-		if err = fork.SetActorID(actor); err != nil {
-			return err
-		}
-		ds.announceActorLocked(actor, ActorUserServer, nil)
 		if err = spliceDiff(fork.Path(contentKey).Text(), current, text); err != nil {
 			return err
 		}
@@ -429,8 +425,7 @@ func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, mess
 }
 
 func exitCode(err error) int {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exitErr.ExitCode()
 	}
 	return -1

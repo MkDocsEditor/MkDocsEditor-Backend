@@ -3,12 +3,13 @@ package backend
 import (
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,14 +65,14 @@ func newSyncEnv(t *testing.T) *syncEnv {
 
 func (e *syncEnv) start() {
 	e.t.Helper()
-	e.tm = NewTreeManager()
+	e.tm = NewTreeManager(configuration.CurrentConfig.MkDocs)
 	ss, err := NewSyncServer(e.tm, e.authn, e.stateDir, nil)
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	ss.FlushDelay = 50 * time.Millisecond
 	e.ss = ss
-	e.rs = NewRestService(e.tm, ss, e.authn)
+	e.rs = NewRestService(configuration.CurrentConfig.Server, e.tm, ss, e.authn)
 	if e.gitOpts != nil {
 		repo, err := OpenGitRepo(filepath.Join(e.project, "docs"), GitSignature{Name: "Backend", Email: "backend@example.com"})
 		if err != nil {
@@ -106,7 +107,7 @@ func (e *syncEnv) restart() {
 }
 
 func (e *syncEnv) docID(rel string) string {
-	return e.tm.GenerateId(filepath.Join(e.project, "docs", filepath.FromSlash(rel)))
+	return e.tm.GenerateID(filepath.Join(e.project, "docs", filepath.FromSlash(rel)))
 }
 
 func (e *syncEnv) readFile(rel string) string {
@@ -144,7 +145,7 @@ type testClient struct {
 	user    string
 	actorID string
 
-	mu        mutexSync.Mutex
+	mu        sync.Mutex
 	ws        *websocket.Conn
 	closed    chan struct{}
 	closeErr  error
@@ -201,9 +202,7 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 	} else if c.user != "" {
 		header.Set("Authorization", authHeader(c.env.t, c.env.authn, c.user, testPasswords[c.user]))
 	}
-	for k, v := range o.hello {
-		hello[k] = v
-	}
+	maps.Copy(hello, o.hello)
 	ws, resp, err := websocket.DefaultDialer.Dial(url, header)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()

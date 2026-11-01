@@ -55,7 +55,7 @@ func (rs *RestService) writeCeremony(c echo.Context, id string, options any, err
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CeremonyResponse{CeremonyID: id, PublicKey: options}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CeremonyResponse{CeremonyID: id, PublicKey: options}, jsonIndent)
 }
 
 func requireCredential(c echo.Context, id string, credential json.RawMessage) error {
@@ -148,7 +148,7 @@ func (rs *RestService) reauthPasskeyFinish(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &ReauthResponse{ReauthenticatedUntil: until}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &ReauthResponse{ReauthenticatedUntil: until}, jsonIndent)
 }
 
 // GET /account/passkeys/
@@ -157,7 +157,7 @@ func (rs *RestService) listPasskeys(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, passkeys, indentationChar)
+	return c.JSONPretty(http.StatusOK, passkeys, jsonIndent)
 }
 
 // POST /account/passkeys/begin/
@@ -185,7 +185,7 @@ func (rs *RestService) addPasskeyFinish(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, p, indentationChar)
+	return c.JSONPretty(http.StatusOK, p, jsonIndent)
 }
 
 // PATCH /account/passkeys/{id}/
@@ -194,11 +194,11 @@ func (rs *RestService) renamePasskey(c echo.Context) error {
 	if err := decodeJSON(c, &r); err != nil {
 		return err
 	}
-	p, err := rs.authenticator.RenamePasskey(UserFromContext(c), c.Param(urlParamId), r.Name, requestInfo(c))
+	p, err := rs.authenticator.RenamePasskey(UserFromContext(c), c.Param(urlParamID), r.Name, requestInfo(c))
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, p, indentationChar)
+	return c.JSONPretty(http.StatusOK, p, jsonIndent)
 }
 
 // DELETE /account/passkeys/{id}/
@@ -206,7 +206,7 @@ func (rs *RestService) deletePasskey(c echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
-	if err := rs.authenticator.DeletePasskey(UserFromContext(c), c.Param(urlParamId), requestInfo(c)); err != nil {
+	if err := rs.authenticator.DeletePasskey(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

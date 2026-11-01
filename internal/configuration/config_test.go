@@ -33,7 +33,9 @@ mkdocs:
     - "stylesheets"
 `)
 	CurrentConfig = Configuration{}
-	InitConfig(path)
+	if err := InitConfig(path); err != nil {
+		t.Fatal(err)
+	}
 
 	c := CurrentConfig
 	if c.Server.Host != "127.0.0.1" || c.Server.Port != 7413 {
@@ -79,7 +81,9 @@ git:
   branch: "main"
 `)
 	CurrentConfig = Configuration{}
-	InitConfig(path)
+	if err := InitConfig(path); err != nil {
+		t.Fatal(err)
+	}
 	want := GitConfiguration{Enabled: true, CommitAfterLeave: 1, CommitAfterIdle: 2, CommitMaxInterval: 3,
 		CommitterName: "Wiki", CommitterEmail: "wiki@example.com", Push: true, Remote: "origin", Branch: "main"}
 	if CurrentConfig.Git != want {
@@ -105,7 +109,9 @@ mkdocs:
   projectPath: "/wiki"
 `)
 	CurrentConfig = Configuration{}
-	InitConfig(path)
+	if err := InitConfig(path); err != nil {
+		t.Fatal(err)
+	}
 
 	users := CurrentConfig.Server.Auth.Users
 	if len(users) != 2 {
@@ -151,7 +157,9 @@ mkdocs:
   projectPath: "/wiki"
 `)
 	CurrentConfig = Configuration{}
-	InitConfig(path)
+	if err := InitConfig(path); err != nil {
+		t.Fatal(err)
+	}
 
 	s := CurrentConfig.Server
 	a := s.Auth

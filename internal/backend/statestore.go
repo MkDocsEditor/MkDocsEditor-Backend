@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"time"
 )
 
@@ -33,7 +34,7 @@ type DocumentMeta struct {
 	// DiskBaseHeads are the heads of the document whose text was last read from or written to disk
 	DiskBaseHeads []string `json:"diskBaseHeads"`
 	// LastChange is the time of the last change by a user
-	LastChange time.Time `json:"lastChange,omitempty"`
+	LastChange time.Time `json:"lastChange"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.
@@ -46,7 +47,7 @@ type DocumentMeta struct {
 type StateStore struct {
 	dir string
 
-	lock mutexSync.Mutex
+	lock sync.Mutex
 	// active documents: path -> meta
 	index map[string]*DocumentMeta
 	// deleted documents: path -> meta (the most recently deleted one)
@@ -230,11 +231,11 @@ func (s *StateStore) Archive(relPath string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for p, meta := range s.index {
-		if _, ok := movePath(p, relPath, relPath); !ok {
+		if !isInside(p, relPath) {
 			continue
 		}
 		for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
-			if err := os.Rename(f(s.activeDir(), meta.UUID), f(s.deletedDir(), meta.UUID)); err != nil && !os.IsNotExist(err) {
+			if err := os.Rename(f(s.activeDir(), meta.UUID), f(s.deletedDir(), meta.UUID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 		}
@@ -251,7 +252,7 @@ func (s *StateStore) MarkCorrupt(meta *DocumentMeta) error {
 	suffix := ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
 	for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
 		name := f(s.activeDir(), meta.UUID)
-		if err := os.Rename(name, name+suffix); err != nil && !os.IsNotExist(err) {
+		if err := os.Rename(name, name+suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
@@ -264,8 +265,8 @@ func movePath(p string, oldPath string, newPath string) (string, bool) {
 	if p == oldPath {
 		return newPath, true
 	}
-	if strings.HasPrefix(p, oldPath+"/") {
-		return path.Join(newPath, strings.TrimPrefix(p, oldPath+"/")), true
+	if after, ok := strings.CutPrefix(p, oldPath+"/"); ok {
+		return path.Join(newPath, after), true
 	}
 	return "", false
 }
@@ -285,18 +286,13 @@ func newRandomID() string {
 	return hex.EncodeToString(b)
 }
 
-// checkStateDir makes sure the state directory is not inside the docs folder
 // CheckStateDir checks that the state directory is not inside the docs folder
 func CheckStateDir(stateDir string, docsDir string) error {
-	return checkStateDir(stateDir, docsDir)
-}
-
-func checkStateDir(stateDir string, docsDir string) error {
 	rel, err := filepath.Rel(docsDir, stateDir)
 	if err != nil {
 		return err
 	}
-	if rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)) {
+	if filepath.IsLocal(rel) {
 		return fmt.Errorf("the state directory %s must not be inside the docs folder %s", stateDir, docsDir)
 	}
 	return nil
@@ -310,7 +306,7 @@ func ExcludeFromGit(projectPath string, stateDir string) error {
 		return nil
 	}
 	rel, err := filepath.Rel(projectPath, stateDir)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || !filepath.IsLocal(rel) {
 		return nil
 	}
 	pattern := "/" + filepath.ToSlash(rel) + "/"
@@ -319,7 +315,7 @@ func ExcludeFromGit(projectPath string, stateDir string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.TrimSpace(line) == pattern {
 			return nil
 		}

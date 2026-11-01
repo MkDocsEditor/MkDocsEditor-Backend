@@ -163,7 +163,7 @@ func TestAdminSettingsAndAudit(t *testing.T) {
 	expect(t, admin.do(http.MethodGet, "/admin/settings/", nil), http.StatusForbidden, CodeSecondFactorSetupRequired)
 	_ = e.rs.authenticator.SetRequire2FA(false, nil, auth.RequestInfo{})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		e.app().do(http.MethodPost, "/auth/login/", map[string]any{"username": "markus", "password": fmt.Sprintf("wrong password %d", i)})
 	}
 	r = admin.do(http.MethodGet, "/admin/audit/?type=login.failed&limit=2", nil)

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/labstack/echo/v4"
 )
@@ -139,7 +138,7 @@ func (rs *RestService) postMove(c echo.Context) error {
 	if err != nil {
 		return rs.moveFailed(c, req.ID, err)
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // moveFailed answers a failed move
@@ -155,13 +154,13 @@ func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
 		return rs.ReturnNotFound(c, id)
 	}
 	log.Printf("Move of %s failed: %v", id, err)
-	return apiError(c, http.StatusInternalServerError, CodeInternal, "the move failed and was undone: "+err.Error(), nil)
+	return apiError(c, http.StatusInternalServerError, CodeInternal, "the move failed and was undone", nil)
 }
 
 // renameViaMove renames an item in place with reference rewriting and answers the renamed
 // item, like the rename endpoints always did
 func (rs *RestService) renameViaMove(c echo.Context, itemType string, name string) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	lookup := newTreeLookup(rs.treeManager.Root())
 	item := lookup.item(id)
 	if item == nil || item.Type != itemType {
@@ -172,20 +171,17 @@ func (rs *RestService) renameViaMove(c echo.Context, itemType string, name strin
 		currentName = strings.TrimSuffix(currentName, markdownFileExtension)
 	}
 	if name == currentName {
-		return rs.getItemDescription(c, itemType)
+		return rs.describeItem(itemType)(c)
 	}
 	result, err := rs.performMove(c, &MoveRequest{Type: itemType, ID: id, Name: name})
 	if err != nil {
 		return rs.moveFailed(c, id, err)
 	}
-	return c.JSONPretty(http.StatusOK, result.Item, indentationChar)
+	return c.JSONPretty(http.StatusOK, result.Item, jsonIndent)
 }
 
 // performMove validates and runs a move, see docs/references.md section 5
 func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResult, error) {
-	if rs.sync == nil {
-		return nil, errors.New("moving needs the sync server")
-	}
 	s := rs.sync
 	tm := rs.treeManager
 
@@ -213,7 +209,7 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 		DryRun:    op.dryRun,
 		Type:      op.itemType,
 		OldID:     op.oldID,
-		NewID:     tm.GenerateId(op.newAbs),
+		NewID:     tm.GenerateID(op.newAbs),
 		OldPath:   op.oldRel,
 		NewPath:   op.newRel,
 		Moved:     rs.movedItems(lookup, op),
@@ -245,29 +241,19 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 // validateMove checks a move request against the tree
 func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*moveOp, error) {
 	tm := rs.treeManager
-	var oldRel, currentName string
 	switch req.Type {
-	case TypeSection:
-		if req.ID == RootSectionID {
-			return nil, badMove(MoveReasonRoot, "the root section cannot be moved")
-		}
-		if s := tm.GetSection(req.ID); s != nil {
-			oldRel, currentName = s.RelPath, s.Name
-		}
-	case TypeDocument:
-		if d := tm.GetDocument(req.ID); d != nil {
-			oldRel, currentName = d.RelPath, d.Name
-		}
-	case TypeResource:
-		if r := tm.GetResource(req.ID); r != nil {
-			oldRel, currentName = r.RelPath, r.Name
-		}
+	case TypeSection, TypeDocument, TypeResource:
 	default:
 		return nil, badMove(MoveReasonInvalidType, "type must be section, document or resource")
 	}
-	if oldRel == "" {
+	if req.Type == TypeSection && req.ID == RootSectionID {
+		return nil, badMove(MoveReasonRoot, "the root section cannot be moved")
+	}
+	item := lookup.item(req.ID)
+	if item == nil || item.Type != req.Type {
 		return nil, &moveError{status: http.StatusNotFound}
 	}
+	oldRel, currentName := item.Path, item.Name
 
 	currentParent := path.Dir(oldRel)
 	if currentParent == "." {
@@ -298,11 +284,10 @@ func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*move
 	if req.Type == TypeSection && isInside(parentRel, oldRel) {
 		return nil, badMove(MoveReasonIntoItself, "a section cannot be moved into itself or a section below it")
 	}
-	if blocked := blockedPaths(); len(blocked) > 0 {
-		for _, item := range rs.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
-			if slices.Contains(blocked, item.NewPath) {
-				return nil, badMove(MoveReasonBlacklisted, item.NewPath+" is on the blacklist or an extra_css file")
-			}
+	blocked := tm.blockedPaths()
+	for _, moved := range rs.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
+		if slices.Contains(blocked, moved.NewPath) {
+			return nil, badMove(MoveReasonBlacklisted, moved.NewPath+" is on the blacklist or an extra_css file")
 		}
 	}
 	if newRel == oldRel {
@@ -341,15 +326,6 @@ func sameFile(a, b string) bool {
 	return err == nil && os.SameFile(ia, ib)
 }
 
-// blockedPaths are the paths that are no items: the blacklist and the extra_css files
-func blockedPaths() []string {
-	blocked := slices.Clone(configuration.CurrentConfig.MkDocs.Blacklist)
-	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
-		blocked = append(blocked, mkDocsConfig.ExtraCss...)
-	}
-	return blocked
-}
-
 // movedItems lists the item and, for a section, everything inside it, sorted by old path
 func (rs *RestService) movedItems(lookup *treeLookup, op *moveOp) []MovedItem {
 	var out []MovedItem
@@ -357,8 +333,8 @@ func (rs *RestService) movedItems(lookup *treeLookup, op *moveOp) []MovedItem {
 		newRel := op.mapPath(rel)
 		out = append(out, MovedItem{
 			Type:    itemType,
-			OldID:   rs.treeManager.GenerateId(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(rel))),
-			NewID:   rs.treeManager.GenerateId(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(newRel))),
+			OldID:   rs.treeManager.idOfRelPath(rel),
+			NewID:   rs.treeManager.idOfRelPath(newRel),
 			OldPath: rel,
 			NewPath: newRel,
 		})
@@ -399,36 +375,56 @@ type plannedDocument struct {
 	fork      *automerge.Doc
 }
 
+// moveConfig is the change of mkdocs.yml of a move
+type moveConfig struct {
+	file   string
+	before []byte
+	after  string
+	edits  []ConfigEdit
+}
+
+// planMoveConfig computes the change of mkdocs.yml. A missing file means no change.
+func (s *SyncServer) planMoveConfig(op *moveOp) *moveConfig {
+	config := &moveConfig{file: s.treeManager.ConfigFile()}
+	content, err := os.ReadFile(config.file)
+	if err != nil || !op.refs {
+		return config
+	}
+	config.before = content
+	config.after, config.edits = configEdits(string(content), filepath.Base(config.file), op.mapPath)
+	return config
+}
+
+// planReferences finds the documents whose references change, from the live text of loaded
+// documents
+func (s *SyncServer) planReferences(op *moveOp, lookup *treeLookup) []*plannedDocument {
+	if !op.refs {
+		return nil
+	}
+	var planned []*plannedDocument
+	for _, d := range lookup.documentList {
+		pd := &plannedDocument{doc: d, oldRel: d.RelPath, newRel: op.mapPath(d.RelPath), session: s.sessions[d.RelPath]}
+		text, err := s.documentTextLocked(pd)
+		if err != nil {
+			log.Printf("Move: not updating the references of %s: %v", d.RelPath, err)
+			continue
+		}
+		if edits := referenceEdits(text, pd.oldRel, pd.newRel, lookup, op.mapPath); len(edits) > 0 {
+			pd.text, pd.edits = text, edits
+			planned = append(planned, pd)
+		}
+	}
+	return planned
+}
+
 // applyMoveLocked plans the move and, unless it is a dry run, applies it: the rename on disk,
 // the Automerge state, the reference edits, mkdocs.yml and the redirects. Caller holds s.mu and
 // the tree's fsLock. It returns the documents whose text changed.
 func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *MoveResult) ([]*plannedDocument, error) {
-	// the plan: every document's references, from the live text of loaded documents
-	var planned []*plannedDocument
-	if op.refs {
-		for _, d := range lookup.documentList {
-			pd := &plannedDocument{doc: d, oldRel: d.RelPath, newRel: op.mapPath(d.RelPath), session: s.sessions[d.RelPath]}
-			text, err := s.documentTextLocked(pd)
-			if err != nil {
-				log.Printf("Move: not updating the references of %s: %v", d.RelPath, err)
-				continue
-			}
-			if edits := referenceEdits(text, pd.oldRel, pd.newRel, lookup, op.mapPath); len(edits) > 0 {
-				pd.text, pd.edits = text, edits
-				planned = append(planned, pd)
-			}
-		}
-	}
-
-	configFile := configuration.CurrentConfig.MkDocs.ConfigFile
-	configContent, configErr := os.ReadFile(configFile)
-	var newConfig string
-	if configErr == nil && op.refs {
-		var configChanges []ConfigEdit
-		newConfig, configChanges = configEdits(string(configContent), filepath.Base(configFile), op.mapPath)
-		if configChanges != nil {
-			result.Config = configChanges
-		}
+	planned := s.planReferences(op, lookup)
+	config := s.planMoveConfig(op)
+	if config.edits != nil {
+		result.Config = config.edits
 	}
 
 	if op.dryRun {
@@ -439,8 +435,44 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 		return nil, nil
 	}
 
-	// lock every affected session (sorted, so two moves cannot deadlock) and recompute its edits on
-	// the current text: clients may have edited since the plan
+	sessions, err := s.moveSessions(op, planned)
+	if err != nil {
+		return nil, err
+	}
+	// sorted, so two moves cannot deadlock
+	for _, pd := range sessions {
+		pd.session.mu.Lock()
+	}
+	unlockSessions := func() {
+		for _, pd := range sessions {
+			pd.session.mu.Unlock()
+		}
+	}
+
+	changed, err := s.prepareSessionsLocked(sessions, op, lookup)
+	if err == nil {
+		err = s.moveOnDisk(op, config, result.Moved)
+	}
+	if err != nil {
+		unlockSessions()
+		s.releaseLocked(sessions)
+		return nil, err
+	}
+
+	// nothing can fail from here on
+	for _, pd := range sessions {
+		s.finishSessionLocked(pd, op, result)
+	}
+	unlockSessions()
+	s.releaseLocked(sessions)
+	sortDocumentChanges(result.Documents)
+	s.treeManager.CreateItemTree()
+	return changed, nil
+}
+
+// moveSessions returns the sessions of a move, sorted by path: the documents with changing
+// references, loaded if needed, and the loaded documents that move. Caller holds s.mu.
+func (s *SyncServer) moveSessions(op *moveOp, planned []*plannedDocument) ([]*plannedDocument, error) {
 	var sessions []*plannedDocument
 	for _, pd := range planned {
 		if pd.session == nil {
@@ -454,38 +486,30 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 		sessions = append(sessions, pd)
 	}
 	for p, session := range s.sessions {
-		if _, ok := movePath(p, op.oldRel, op.oldRel); ok && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
+		if isInside(p, op.oldRel) && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
 			sessions = append(sessions, &plannedDocument{oldRel: p, newRel: op.mapPath(p), session: session})
 		}
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].oldRel < sessions[j].oldRel })
-	for _, pd := range sessions {
-		pd.session.mu.Lock()
-	}
-	unlockSessions := func() {
-		for _, pd := range sessions {
-			pd.session.mu.Unlock()
-		}
-	}
-	fail := func(err error) ([]*plannedDocument, error) {
-		unlockSessions()
-		s.releaseLocked(sessions)
-		return nil, err
-	}
+	return sessions, nil
+}
 
+// prepareSessionsLocked flushes the sessions, so disk, Automerge state and text agree before
+// anything moves, and prepares the reference edits on the current text: clients may have edited
+// since the plan. It returns the documents with edits. Caller holds the session locks.
+func (s *SyncServer) prepareSessionsLocked(sessions []*plannedDocument, op *moveOp, lookup *treeLookup) ([]*plannedDocument, error) {
 	var changed []*plannedDocument
 	for _, pd := range sessions {
 		if pd.session.closed {
-			return fail(fmt.Errorf("%s was closed during the move", pd.oldRel))
+			return nil, fmt.Errorf("%s was closed during the move", pd.oldRel)
 		}
-		// disk, Automerge state and text agree before anything moves
 		pd.session.flushLocked()
 		if pd.doc == nil {
 			continue
 		}
 		text, err := pd.session.text()
 		if err != nil {
-			return fail(err)
+			return nil, err
 		}
 		pd.text = text
 		pd.edits = referenceEdits(text, pd.oldRel, pd.newRel, lookup, op.mapPath)
@@ -493,90 +517,87 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 			continue
 		}
 		if pd.fork, err = s.prepareRewrite(pd, op); err != nil {
-			return fail(fmt.Errorf("unable to update the references of %s: %w", pd.oldRel, err))
+			return nil, fmt.Errorf("unable to update the references of %s: %w", pd.oldRel, err)
 		}
 		changed = append(changed, pd)
 	}
+	return changed, nil
+}
 
+// moveOnDisk renames the item, moves its Automerge state, writes mkdocs.yml and records the
+// redirects. On failure everything that was done is undone.
+func (s *SyncServer) moveOnDisk(op *moveOp, config *moveConfig, moved []MovedItem) error {
 	// the rename: one rename(2), nothing changed before it
 	if err := os.Rename(op.oldAbs, op.newAbs); err != nil {
-		return fail(err)
-	}
-	undoRename := func() {
-		if err := os.Rename(op.newAbs, op.oldAbs); err != nil {
-			log.Printf("Unable to undo the move of %s: %v", op.oldRel, err)
-		}
-	}
-	if err := s.store.Move(op.oldRel, op.newRel); err != nil {
-		if uerr := s.store.Move(op.newRel, op.oldRel); uerr != nil {
-			log.Printf("Unable to undo the state move of %s: %v", op.oldRel, uerr)
-		}
-		undoRename()
-		return fail(err)
+		return err
 	}
 	undoState := func() {
 		if err := s.store.Move(op.newRel, op.oldRel); err != nil {
 			log.Printf("Unable to undo the state move of %s: %v", op.oldRel, err)
 		}
-		undoRename()
-	}
-	if len(result.Config) > 0 {
-		if err := WriteFile(configFile, []byte(newConfig)); err != nil {
-			undoState()
-			return fail(err)
+		if err := os.Rename(op.newAbs, op.oldAbs); err != nil {
+			log.Printf("Unable to undo the move of %s: %v", op.oldRel, err)
 		}
 	}
-	if err := s.redirects.Append(s.redirectEntries(op, result.Moved)...); err != nil {
-		if len(result.Config) > 0 {
-			if werr := WriteFile(configFile, configContent); werr != nil {
-				log.Printf("Unable to restore %s: %v", configFile, werr)
+	if err := s.store.Move(op.oldRel, op.newRel); err != nil {
+		undoState()
+		return err
+	}
+	configChanges := len(config.edits) > 0
+	if configChanges {
+		if err := WriteFile(config.file, []byte(config.after)); err != nil {
+			undoState()
+			return err
+		}
+	}
+	if err := s.redirects.Append(s.redirectEntries(op, moved)...); err != nil {
+		if configChanges {
+			if werr := WriteFile(config.file, config.before); werr != nil {
+				log.Printf("Unable to restore %s: %v", config.file, werr)
 			}
 		}
 		undoState()
-		return fail(err)
+		return err
 	}
+	return nil
+}
 
-	// nothing can fail from here on: move the sessions and merge the reference edits
-	for _, pd := range sessions {
-		session := pd.session
-		oldDocID := session.docID
-		movedDoc := pd.newRel != pd.oldRel
-		if movedDoc {
-			session.meta.Path = pd.newRel
-			session.absPath = filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(pd.newRel))
-			session.docID = s.treeManager.GenerateId(session.absPath)
-			if !pd.temporary {
-				delete(s.sessions, pd.oldRel)
-				s.sessions[pd.newRel] = session
-			}
-		}
-		if pd.fork != nil {
-			if _, err := session.doc.Merge(pd.fork); err != nil {
-				log.Printf("Unable to merge the reference updates of %s: %v", pd.newRel, err)
-			} else {
-				session.meta.LastChange = time.Now().UTC()
-				if s.changeRecorder != nil && op.user != nil {
-					s.changeRecorder.RecordChanges(pd.newRel, map[string]int{op.user.ID: 1})
-				}
-				session.dirty = true
-				result.Documents = append(result.Documents, s.documentChange(pd, lineEdits(pd.text, pd.edits)))
-			}
-		}
-		// written now, so the commit holds the new text
-		session.flushLocked()
-		session.broadcastSyncLocked()
-		if movedDoc {
-			for c := range session.conns {
-				c.send(&DocumentRenamedMessage{Type: MsgDocumentRenamed, DocumentID: oldDocID, NewDocumentID: session.docID})
-				c.close(CloseRenamed, "document renamed")
-			}
+// finishSessionLocked moves a session to the new path of its document, merges the reference edits
+// and tells the clients. Caller holds s.mu and the session lock.
+func (s *SyncServer) finishSessionLocked(pd *plannedDocument, op *moveOp, result *MoveResult) {
+	session := pd.session
+	oldDocID := session.docID
+	movedDoc := pd.newRel != pd.oldRel
+	if movedDoc {
+		session.meta.Path = pd.newRel
+		session.absPath = filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(pd.newRel))
+		session.docID = s.treeManager.GenerateID(session.absPath)
+		if !pd.temporary {
+			delete(s.sessions, pd.oldRel)
+			s.sessions[pd.newRel] = session
 		}
 	}
-	unlockSessions()
-	s.releaseLocked(sessions)
-	sortDocumentChanges(result.Documents)
-	s.treeManager.CreateItemTree()
-	return changed, nil
+	if pd.fork != nil {
+		if _, err := session.doc.Merge(pd.fork); err != nil {
+			log.Printf("Unable to merge the reference updates of %s: %v", pd.newRel, err)
+		} else {
+			session.meta.LastChange = time.Now().UTC()
+			if s.changeRecorder != nil && op.user != nil {
+				s.changeRecorder.RecordChanges(pd.newRel, map[string]int{op.user.ID: 1})
+			}
+			session.dirty = true
+			result.Documents = append(result.Documents, s.documentChange(pd, lineEdits(pd.text, pd.edits)))
+		}
+	}
+	// written now, so the commit holds the new text
+	session.flushLocked()
+	session.broadcastSyncLocked()
+	if movedDoc {
+		for c := range session.conns {
+			c.send(&DocumentRenamedMessage{Type: MsgDocumentRenamed, DocumentID: oldDocID, NewDocumentID: session.docID})
+			c.close(CloseRenamed, "document renamed")
+		}
+	}
 }
 
 // documentTextLocked returns the live text of a loaded document, otherwise the file content
@@ -595,22 +616,19 @@ func (s *SyncServer) documentTextLocked(pd *plannedDocument) (string, error) {
 // prepareRewrite applies the reference edits to a fork of the document, as a change of a new
 // server actor. The fork is merged only when the whole move succeeds. Caller holds the session lock.
 func (s *SyncServer) prepareRewrite(pd *plannedDocument, op *moveOp) (*automerge.Doc, error) {
-	fork, err := pd.session.doc.Fork()
+	fork, err := pd.session.forkForServerChangeLocked(ActorUserServer)
 	if err != nil {
-		return nil, err
-	}
-	actor, err := s.actors.NewServerActor(ActorUserServer)
-	if err != nil {
-		return nil, err
-	}
-	if err = fork.SetActorID(actor); err != nil {
 		return nil, err
 	}
 	if err = spliceEdits(fork.Path(contentKey).Text(), pd.text, pd.edits); err != nil {
 		return nil, err
 	}
-	if got, err := contentText(fork); err != nil || got != applyEdits(pd.text, pd.edits) {
-		return nil, fmt.Errorf("the reference updates do not apply cleanly: %v", err)
+	got, err := contentText(fork)
+	if err != nil {
+		return nil, err
+	}
+	if got != applyEdits(pd.text, pd.edits) {
+		return nil, errors.New("the reference updates do not apply cleanly")
 	}
 	username := ""
 	if op.user != nil {
@@ -619,7 +637,6 @@ func (s *SyncServer) prepareRewrite(pd *plannedDocument, op *moveOp) (*automerge
 	if _, err = fork.Commit("update references after moving " + op.oldRel + " to " + op.newRel + username); err != nil {
 		return nil, err
 	}
-	pd.session.announceActorLocked(actor, ActorUserServer, nil)
 	return fork, nil
 }
 
@@ -644,8 +661,8 @@ func (s *SyncServer) releaseLocked(sessions []*plannedDocument) {
 func (s *SyncServer) documentChange(pd *plannedDocument, edits []LineEdit) DocumentChange {
 	root := s.treeManager.RootPath()
 	return DocumentChange{
-		DocumentID:    s.treeManager.GenerateId(filepath.Join(root, filepath.FromSlash(pd.oldRel))),
-		NewDocumentID: s.treeManager.GenerateId(filepath.Join(root, filepath.FromSlash(pd.newRel))),
+		DocumentID:    s.treeManager.GenerateID(filepath.Join(root, filepath.FromSlash(pd.oldRel))),
+		NewDocumentID: s.treeManager.GenerateID(filepath.Join(root, filepath.FromSlash(pd.newRel))),
 		Path:          pd.oldRel,
 		NewPath:       pd.newRel,
 		Edits:         edits,
@@ -694,7 +711,7 @@ func (rs *RestService) commitMove(op *moveOp, changed []*plannedDocument, config
 	}
 	sort.Strings(listed)
 	if configChanged {
-		if rel, err := filepath.Rel(rs.treeManager.RootPath(), configuration.CurrentConfig.MkDocs.ConfigFile); err == nil {
+		if rel, err := filepath.Rel(rs.treeManager.RootPath(), rs.treeManager.ConfigFile()); err == nil {
 			paths = append(paths, filepath.ToSlash(rel))
 			listed = append(listed, filepath.Base(rel))
 		}
@@ -712,9 +729,6 @@ func (rs *RestService) commitMove(op *moveOp, changed []*plannedDocument, config
 
 // auditMove writes the audit log entry of a move
 func (rs *RestService) auditMove(c echo.Context, op *moveOp, result *MoveResult) {
-	if rs.authenticator == nil {
-		return
-	}
 	eventType := auth.AuditItemMoved
 	if op.rename {
 		eventType = auth.AuditItemRenamed

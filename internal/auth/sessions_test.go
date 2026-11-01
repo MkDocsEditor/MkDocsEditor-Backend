@@ -165,7 +165,7 @@ func TestSetupAndSessions(t *testing.T) {
 		t.Errorf("idle expiry not extended: %v", sess.IdleExpiresAt)
 	}
 	// absolute lifetime
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		c.advance(DefaultSessionIdleTimeout - time.Hour)
 		if _, _, err = s.AuthenticateSession(r.Token, ""); err != nil {
 			break
@@ -251,7 +251,7 @@ func TestLoginAndRevocation(t *testing.T) {
 
 func TestAccountRateLimit(t *testing.T) {
 	s, c, _ := setupService(t, configuration.AuthConfiguration{})
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := s.LoginPassword("admin", "wrong password", sp("")); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
@@ -279,14 +279,14 @@ func TestAccountRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// unknown usernames are limited the same way
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_, _ = s.LoginPassword("ghost", "x", sp(""))
 	}
 	if _, err = s.LoginPassword("ghost", "x", sp("")); !errors.As(err, &rl) {
 		t.Errorf("unknown user not limited: %v", err)
 	}
 	// the cap
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		c.advance(time.Hour)
 		_, _ = s.LoginPassword("ghost", "x", sp(""))
 	}
@@ -297,7 +297,7 @@ func TestAccountRateLimit(t *testing.T) {
 
 func TestIPRateLimit(t *testing.T) {
 	s, c, _ := setupService(t, configuration.AuthConfiguration{RateLimits: configuration.RateLimitConfiguration{PerIPBurst: 3, PerIPRefill: 10 * time.Second}})
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := s.AllowIP("192.0.2.1"); err != nil {
 			t.Fatal(i, err)
 		}
@@ -316,7 +316,7 @@ func TestIPRateLimit(t *testing.T) {
 	}
 
 	off, _, _ := setupService(t, configuration.AuthConfiguration{RateLimits: configuration.RateLimitConfiguration{Disabled: true, PerIPBurst: 1}})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err = off.AllowIP("192.0.2.1"); err != nil {
 			t.Fatal("disabled limits apply", err)
 		}

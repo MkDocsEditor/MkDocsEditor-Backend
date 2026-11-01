@@ -99,7 +99,7 @@ func (rs *RestService) reauth(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &ReauthResponse{ReauthenticatedUntil: until}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &ReauthResponse{ReauthenticatedUntil: until}, jsonIndent)
 }
 
 // GET /account/
@@ -119,7 +119,7 @@ func (rs *RestService) writeAccount(c echo.Context, u *auth.User) error {
 		until := auth.ReauthenticatedUntil(sess)
 		resp.ReauthenticatedUntil = &until
 	}
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // PATCH /account/
@@ -182,7 +182,7 @@ func (rs *RestService) beginTOTP(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, e, indentationChar)
+	return c.JSONPretty(http.StatusOK, e, jsonIndent)
 }
 
 // POST /account/totp/confirm/
@@ -195,7 +195,7 @@ func (rs *RestService) confirmTOTP(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &RecoveryCodesResponse{RecoveryCodes: codes}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &RecoveryCodesResponse{RecoveryCodes: codes}, jsonIndent)
 }
 
 // DELETE /account/totp/
@@ -218,5 +218,5 @@ func (rs *RestService) regenerateRecoveryCodes(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &RecoveryCodesResponse{RecoveryCodes: codes}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &RecoveryCodesResponse{RecoveryCodes: codes}, jsonIndent)
 }

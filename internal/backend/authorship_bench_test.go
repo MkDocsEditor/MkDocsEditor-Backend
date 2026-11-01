@@ -11,7 +11,7 @@ func benchDoc() *automerge.Doc {
 	doc := automerge.New()
 	_ = doc.Path(contentKey).Set(automerge.NewText(strings.Repeat("lorem ipsum dolor sit amet\n", 700)))
 	_, _ = doc.Commit("import")
-	for i := 0; i < 3000; i++ {
+	for i := range 3000 {
 		_ = doc.Path(contentKey).Text().Insert((i*37)%15000, "x")
 		_, _ = doc.Commit("edit")
 	}
@@ -38,7 +38,7 @@ func BenchmarkAuthorshipIncremental(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < 10; j++ {
+		for j := range 10 {
 			_ = doc.Path(contentKey).Text().Insert(j*100, "y")
 			_, _ = doc.Commit("edit")
 		}

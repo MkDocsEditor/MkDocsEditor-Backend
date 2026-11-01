@@ -198,7 +198,7 @@ func TestSecondFactorLogin(t *testing.T) {
 
 	// five wrong attempts end the challenge
 	r, _ = s.LoginPassword("admin", "boss secret 2026!", sp(SessionCookie))
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		_, _ = s.LoginSecondFactor(r.Challenge, "000000", "", sp(""))
 	}
 	if _, err = s.LoginSecondFactor(r.Challenge, "000000", "", sp("")); !errors.Is(err, ErrChallengeExpired) {
