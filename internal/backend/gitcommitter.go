@@ -218,7 +218,7 @@ func (c *GitCommitter) commitEdits(relPath string) {
 	for _, u := range users[1:] {
 		coAuthors = append(coAuthors, c.signature(u))
 	}
-	if c.commit([]string{relPath}, author, coAuthors, "Update "+relPath) != nil {
+	if _, err := c.commit([]string{relPath}, author, coAuthors, "Update "+relPath, ""); err != nil {
 		c.restorePending(relPath, changes)
 	}
 }
@@ -226,6 +226,12 @@ func (c *GitCommitter) commitEdits(relPath string) {
 // CommitTreeChange commits a create, rename, delete or upload over REST right away, together
 // with the pending edits below the affected paths. The requesting user is the author.
 func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths ...string) {
+	c.CommitTreeChangeWithBody(user, subject, "", paths...)
+}
+
+// CommitTreeChangeWithBody is CommitTreeChange with a message body. It returns the abbreviated
+// hash of the commit, or "" if nothing was committed.
+func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string, body string, paths ...string) string {
 	if c.sync != nil {
 		c.sync.FlushAll()
 	}
@@ -237,7 +243,8 @@ func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths .
 			coAuthors = append(coAuthors, c.signature(u))
 		}
 	}
-	if c.commit(paths, author, coAuthors, subject) != nil {
+	hash, err := c.commit(paths, author, coAuthors, subject, body)
+	if err != nil {
 		for _, p := range paths {
 			// attribute the edits to the first path, the next edit commit takes them along
 			c.restorePending(p, changes)
@@ -245,16 +252,17 @@ func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths .
 		}
 	}
 	c.saveIfDirty()
+	return hash
 }
 
-func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string) error {
-	committed, err := c.repo.Commit(paths, author, coAuthors, subject)
+func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string, body string) (string, error) {
+	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body)
 	if err != nil {
 		log.Printf("Unable to commit %s: %v", strings.Join(paths, ", "), err)
-		return err
+		return "", err
 	}
-	if !committed {
-		return nil
+	if hash == "" {
+		return "", nil
 	}
 	log.Printf("Committed %q by %s", subject, author)
 	if c.opts.Push {
@@ -263,7 +271,7 @@ func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []G
 			log.Printf("Unable to push: %v", err)
 		}
 	}
-	return nil
+	return hash, nil
 }
 
 // rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the

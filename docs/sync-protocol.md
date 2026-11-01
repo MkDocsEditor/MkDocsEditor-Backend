@@ -431,6 +431,9 @@ Every role may connect. The server then sends:
   change on disk). The client fetches the tree (`GET /section/`) again. Events can be lost
   while a client is disconnected, so the client also fetches the tree after every
   (re)connect.
+- `{"type": "items-moved", "moves": [{"type", "oldId", "newId", "oldPath", "newPath"}]}`:
+  items were moved or renamed, sent before `tree-changed`. Clients re-key open editors,
+  tabs and caches; see [references.md](references.md#7-ids-after-a-move-redirects).
 - `{"type": "heartbeat"}`, as on the document websocket.
 
 The client sends `{"type": "heartbeat"}` at least every 5 seconds. Without any
@@ -593,8 +596,9 @@ volume), and without commit signing or hooks.
 - A REST tree operation is authored by the user who made the request.
 - The committer is the backend (`git.committerName`, `git.committerEmail`).
 
-Commit message: `Update guide/setup.md` (or `Create`, `Rename … to …`, `Delete`,
-`Upload`), followed by the trailers.
+Commit message: `Update guide/setup.md` (or `Create`, `Rename … to …`, `Move … to …`,
+`Delete`, `Upload`), followed by the trailers. A move or rename lists the documents whose
+references it updated in the body, see [references.md](references.md#10-git-audit-log-and-permissions).
 
 ### Push
 

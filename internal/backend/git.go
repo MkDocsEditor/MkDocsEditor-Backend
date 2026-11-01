@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	mutexSync "sync"
 )
@@ -22,7 +23,10 @@ func (s GitSignature) String() string {
 
 // GitRepo runs the git CLI in the docs folder. Paths are relative to the docs folder.
 type GitRepo struct {
-	dir       string
+	dir string
+	// top is the root of the work tree, prefix the docs folder relative to it ("docs/" or "")
+	top       string
+	prefix    string
 	committer GitSignature
 	mu        mutexSync.Mutex
 }
@@ -40,6 +44,14 @@ func OpenGitRepo(dir string, committer GitSignature) (*GitRepo, error) {
 	if strings.TrimSpace(out) != "true" {
 		return nil, fmt.Errorf("%s is not inside a git work tree", dir)
 	}
+	if out, err = g.run(nil, "rev-parse", "--show-toplevel"); err != nil {
+		return nil, err
+	}
+	g.top = strings.TrimRight(out, "\r\n")
+	if out, err = g.run(nil, "rev-parse", "--show-prefix"); err != nil {
+		return nil, err
+	}
+	g.prefix = strings.TrimRight(out, "\r\n")
 	return g, nil
 }
 
@@ -48,15 +60,20 @@ func (g *GitRepo) run(env []string, args ...string) (string, error) {
 	return g.runInput(env, "", args...)
 }
 
-// runInput runs git with stdin. User provided values (paths, names, messages) are never passed
+// runInput runs git in the docs folder with stdin
+func (g *GitRepo) runInput(env []string, stdin string, args ...string) (string, error) {
+	return g.runIn(g.dir, env, stdin, args...)
+}
+
+// runIn runs git in dir with stdin. User provided values (paths, names, messages) are never passed
 // as arguments: paths go through stdin (--pathspec-from-file), authors through the environment
 // and messages through a file.
-func (g *GitRepo) runInput(env []string, stdin string, args ...string) (string, error) {
+func (g *GitRepo) runIn(dir string, env []string, stdin string, args ...string) (string, error) {
 	// the repository may belong to another uid (an NFS volume), git would refuse it.
 	// Literal pathspecs: a file named ":(glob)*" is just a file.
 	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off", "--literal-pathspecs"}, args...)
 	cmd := exec.Command("git", full...) // #nosec G204 -- fixed git subcommands, no shell, no user values
-	cmd.Dir = g.dir
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdin = strings.NewReader(stdin)
@@ -85,20 +102,31 @@ func (e *gitError) Unwrap() error {
 }
 
 // Commit commits the given paths (files or folders, existing or deleted, relative to the docs
-// folder) and nothing else. Other staged changes in the repository stay staged and uncommitted.
-// It returns false if the paths have no changes.
-func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string) (bool, error) {
+// folder; "../mkdocs.yml" for a file next to it) and nothing else. Other staged changes in the
+// repository stay staged and uncommitted. body is optional text between the subject and the
+// trailers. It returns the abbreviated hash of the commit, or "" if the paths have no changes.
+func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string, body string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	// paths relative to the root of the work tree, so files next to the docs folder work too
+	full := make([]string, 0, len(paths))
+	for _, p := range paths {
+		f := path.Clean(g.prefix + p)
+		if f == ".." || strings.HasPrefix(f, "../") || path.IsAbs(f) {
+			continue
+		}
+		full = append(full, f)
+	}
+
 	// only paths git can stage: existing files (tracked or not, not ignored) and deleted tracked files
-	out, err := g.run(nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	out, err := g.runIn(g.top, nil, "", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	known := strings.Split(out, "\x00")
 	var pathspecs []string
-	for _, p := range paths {
+	for _, p := range full {
 		for _, k := range known {
 			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
 				pathspecs = append(pathspecs, p)
@@ -107,16 +135,16 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		}
 	}
 	if len(pathspecs) == 0 {
-		return false, nil
+		return "", nil
 	}
 	pathspecInput := strings.Join(pathspecs, "\x00")
 
-	if _, err = g.runInput(nil, pathspecInput, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
-		return false, err
+	if _, err = g.runIn(g.top, nil, pathspecInput, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		return "", err
 	}
-	out, err = g.run(nil, "diff", "--cached", "--relative", "--name-only", "-z")
+	out, err = g.runIn(g.top, nil, "", "diff", "--cached", "--name-only", "-z")
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	changed := false
 	for _, k := range strings.Split(out, "\x00") {
@@ -127,10 +155,13 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		}
 	}
 	if !changed {
-		return false, nil
+		return "", nil
 	}
 
 	message := subject
+	if body != "" {
+		message += "\n\n" + body
+	}
 	if len(coAuthors) > 0 {
 		message += "\n"
 		for _, co := range coAuthors {
@@ -139,7 +170,7 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 	}
 	messageFile, err := os.CreateTemp("", "mkdocseditor-commit-")
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	defer func() { _ = os.Remove(messageFile.Name()) }()
 	_, err = messageFile.WriteString(message + "\n")
@@ -147,18 +178,22 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		err = cerr
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
 
 	env := []string{
 		"GIT_AUTHOR_NAME=" + author.Name, "GIT_AUTHOR_EMAIL=" + author.Email,
 		"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email,
 	}
-	if _, err = g.runInput(env, pathspecInput, "-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify",
+	if _, err = g.runIn(g.top, env, pathspecInput, "-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify",
 		"--only", "--cleanup=whitespace", "--file="+messageFile.Name(), "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
-		return false, err
+		return "", err
 	}
-	return true, nil
+	out, err = g.runIn(g.top, nil, "", "rev-parse", "--short=12", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // Push pushes the current branch

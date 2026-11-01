@@ -11,7 +11,9 @@ info:
 
     All paths also work without the trailing slash. Ids of sections, documents and
     resources are derived from their path, so they change when an item (or a section
-    above it) is renamed. The root section has the id `root`.
+    above it) is renamed or moved. Old ids keep resolving through redirects, see
+    [docs/references.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/references.md)
+    section 7. The root section has the id `root`.
 
     Accounts, sessions and the login flows are specified in
     [docs/auth.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/auth.md).
@@ -1458,7 +1460,9 @@ paths:
       summary: "Rename a section"
       description: |
         Renames the folder. The ids of the section and of everything in it change. Clients
-        connected to a document in it get `document-renamed` on the websocket.
+        connected to a document in it get `document-renamed` on the websocket. References to
+        the section and everything in it are updated, like `POST /move/` with only `name`
+        (docs/references.md section 5); use that endpoint with `dryRun` for a preview.
       operationId: renameSection
       tags: [ Sections ]
       requestBody:
@@ -1559,7 +1563,9 @@ paths:
       summary: "Rename a document"
       description: |
         Renames the file to `<name>.md`. The id changes. Connected clients get
-        `document-renamed` on the websocket and reconnect to the new id.
+        `document-renamed` on the websocket and reconnect to the new id. References to the
+        document are updated, like `POST /move/` with only `name` (docs/references.md
+        section 5); use that endpoint with `dryRun` for a preview.
       operationId: renameDocument
       tags: [ Documents ]
       requestBody:
@@ -1813,6 +1819,9 @@ paths:
           $ref: "#/components/responses/NotFound"
     put:
       summary: "Rename a resource"
+      description: |
+        References to the resource are updated, like `POST /move/` with only `name`
+        (docs/references.md section 5); use that endpoint with `dryRun` for a preview.
       operationId: renameResource
       tags: [ Resources ]
       requestBody:
@@ -2069,6 +2078,81 @@ paths:
                 $ref: "#/components/schemas/LinkResult"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /move/:
+    post:
+      summary: "Move or rename an item and update every reference to it"
+      description: |
+        Moves a section (with everything in it), document or resource into another section,
+        optionally with a new name, or renames it in place. References in all documents and the
+        paths in `mkdocs.yml` (`nav`, `theme.logo`, `theme.favicon`, `extra_javascript`) are
+        updated as Automerge changes, so connected clients receive them live and offline clients
+        merge them later. With `dryRun` nothing changes and the answer lists what would. The move
+        is atomic: it is validated first, and a failure undoes everything. With `git.enabled` it
+        is one commit. Old ids keep working through redirects (`GET /moved/{id}/`, `details.movedTo`
+        of a 404, `document-renamed` on the websocket). See docs/references.md sections 5 to 7.
+      operationId: moveItem
+      tags: [ References ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveRequest"
+      responses:
+        "200":
+          description: "What changed (or would change with `dryRun`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveResult"
+        "400":
+          description: "Invalid move; `details.reason` is `invalid-name`, `blacklisted`, `into-itself`, `root`, `no-change` or `invalid-type`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "The new path exists (`details.reason: exists`, `details.path`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+
+  /moved/{itemId}/:
+    parameters:
+      - name: itemId
+        in: path
+        required: true
+        description: "An old id of a moved item"
+        schema:
+          type: string
+    get:
+      summary: "Where a moved item is now"
+      description: |
+        Resolves an old id through the redirect table (docs/references.md section 7). An id that
+        names an existing item, or an unknown id, answers 404.
+      operationId: getMoved
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The item now"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Moved"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2454,6 +2538,136 @@ components:
           example: "![Strand (2)](../img/Strand%20%282%29.png)"
         target:
           $ref: "#/components/schemas/ItemRef"
+
+    MoveRequest:
+      type: object
+      required: [ type, id ]
+      properties:
+        type:
+          type: string
+          enum: [ section, document, resource ]
+        id:
+          type: string
+        parent:
+          type: string
+          description: "Id of the target section; leave it out to rename in place"
+        name:
+          type: string
+          description: "New name (documents without `.md`); leave it out to keep the name"
+        dryRun:
+          type: boolean
+          default: false
+        updateReferences:
+          type: boolean
+          default: true
+          description: "With false only the item moves; references stay as they are"
+
+    MovedItem:
+      type: object
+      required: [ type, oldId, newId, oldPath, newPath ]
+      properties:
+        type:
+          type: string
+          enum: [ section, document, resource ]
+        oldId:
+          type: string
+        newId:
+          type: string
+        oldPath:
+          type: string
+        newPath:
+          type: string
+
+    LineEdit:
+      type: object
+      required: [ line, before, after ]
+      properties:
+        line:
+          type: integer
+          description: "1-based line number in the text before the move"
+        before:
+          type: string
+        after:
+          type: string
+
+    MoveResult:
+      type: object
+      required: [ dryRun, type, oldId, newId, oldPath, newPath, moved, documents, config ]
+      properties:
+        dryRun:
+          type: boolean
+        type:
+          type: string
+          enum: [ section, document, resource ]
+        oldId:
+          type: string
+        newId:
+          type: string
+        oldPath:
+          type: string
+        newPath:
+          type: string
+        item:
+          type: object
+          description: "The section, document or resource after the move (absent in a dry run)"
+        moved:
+          type: array
+          description: "Every item whose id changes, sorted by old path"
+          items:
+            $ref: "#/components/schemas/MovedItem"
+        documents:
+          type: array
+          description: "Every document whose text changes, sorted by new path"
+          items:
+            type: object
+            required: [ documentId, newDocumentId, path, newPath, edits ]
+            properties:
+              documentId:
+                type: string
+              newDocumentId:
+                type: string
+              path:
+                type: string
+              newPath:
+                type: string
+              edits:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LineEdit"
+        config:
+          type: array
+          description: "Changed lines of mkdocs.yml"
+          items:
+            type: object
+            required: [ file, line, before, after ]
+            properties:
+              file:
+                type: string
+                example: "mkdocs.yml"
+              line:
+                type: integer
+              before:
+                type: string
+              after:
+                type: string
+        commit:
+          type: string
+          description: "Abbreviated git commit hash (with git.enabled, not in a dry run)"
+
+    Moved:
+      type: object
+      required: [ oldId, type, item, movedAt ]
+      properties:
+        oldId:
+          type: string
+        type:
+          type: string
+          enum: [ section, document, resource ]
+        item:
+          $ref: "#/components/schemas/ItemRef"
+        movedAt:
+          type: string
+          format: date-time
 
     NewItemRequest:
       type: object

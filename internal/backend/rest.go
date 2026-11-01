@@ -250,6 +250,8 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.GET("/references/broken/", rs.getBrokenReferences)
 	echoRest.GET("/references/unused-resources/", rs.getUnusedResources)
 	echoRest.GET("/link/", rs.getLink)
+	echoRest.POST("/move/", rs.postMove)
+	echoRest.GET("/moved/:"+urlParamId+"/", rs.getMoved)
 
 	// Authentication
 	// Group level middleware
@@ -436,31 +438,13 @@ func (rs *RestService) createSection(c echo.Context) (err error) {
 	return c.JSONPretty(http.StatusOK, section, indentationChar)
 }
 
-// renames an existing section
+// renames an existing section, with reference rewriting (see docs/references.md)
 func (rs *RestService) renameSection(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
 	r := new(RenameSectionRequest)
 	if err = c.Bind(r); err != nil {
 		return rs.ReturnError(c, err)
 	}
-
-	s := rs.treeManager.GetSection(id)
-	if s == nil {
-		return rs.ReturnNotFound(c, id)
-	}
-
-	var section *Section
-	newPath := filepath.Join(filepath.Dir(s.Path), r.Name)
-	err = rs.moveItem(s.Path, newPath, func() (err error) {
-		section, err = rs.treeManager.RenameSection(s, r.Name)
-		return err
-	})
-	if err != nil {
-		return rs.ReturnError(c, err)
-	}
-	rs.commitTree(c, "Rename %s to %s", s.Path, newPath)
-
-	return c.JSONPretty(http.StatusOK, section, indentationChar)
+	return rs.renameViaMove(c, TypeSection, r.Name)
 }
 
 // creates a new document with the given data
@@ -483,54 +467,22 @@ func (rs *RestService) createDocument(c echo.Context) (err error) {
 	return c.JSONPretty(http.StatusOK, document, indentationChar)
 }
 
+// renames a document, with reference rewriting (see docs/references.md)
 func (rs *RestService) renameDocument(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
 	r := new(RenameDocumentRequest)
 	if err = c.Bind(r); err != nil {
 		return rs.ReturnError(c, err)
 	}
-
-	d := rs.treeManager.GetDocument(id)
-	if d == nil {
-		return rs.ReturnNotFound(c, id)
-	}
-
-	var document *Document
-	newPath := filepath.Join(filepath.Dir(d.Path), r.Name+markdownFileExtension)
-	err = rs.moveItem(d.Path, newPath, func() (err error) {
-		document, err = rs.treeManager.RenameDocument(d, r.Name)
-		return err
-	})
-	if err != nil {
-		return rs.ReturnError(c, err)
-	}
-	rs.commitTree(c, "Rename %s to %s", d.Path, newPath)
-	return c.JSONPretty(http.StatusOK, document, indentationChar)
+	return rs.renameViaMove(c, TypeDocument, r.Name)
 }
 
+// renames a resource, with reference rewriting (see docs/references.md)
 func (rs *RestService) renameResource(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
 	r := new(RenameResourceRequest)
 	if err = c.Bind(r); err != nil {
 		return rs.ReturnError(c, err)
 	}
-
-	d := rs.treeManager.GetResource(id)
-	if d == nil {
-		return rs.ReturnNotFound(c, id)
-	}
-
-	var resource *Resource
-	newPath := filepath.Join(filepath.Dir(d.Path), r.Name)
-	err = rs.moveItem(d.Path, newPath, func() (err error) {
-		resource, err = rs.treeManager.RenameResource(d, r.Name)
-		return err
-	})
-	if err != nil {
-		return rs.ReturnError(c, err)
-	}
-	rs.commitTree(c, "Rename %s to %s", d.Path, newPath)
-	return c.JSONPretty(http.StatusOK, resource, indentationChar)
+	return rs.renameViaMove(c, TypeResource, r.Name)
 }
 
 // deletes an existing section
@@ -546,14 +498,6 @@ func (rs *RestService) deleteDocument(c echo.Context) (err error) {
 // deletes an existing resource
 func (rs *RestService) deleteResource(c echo.Context) (err error) {
 	return rs.deleteItem(c, TypeResource)
-}
-
-// moves the Automerge state of affected documents along with a rename
-func (rs *RestService) moveItem(oldPath string, newPath string, rename func() error) error {
-	if rs.sync == nil {
-		return rename()
-	}
-	return rs.sync.MoveItem(oldPath, newPath, rename)
 }
 
 // deletes an item by id and itemType.
@@ -674,13 +618,35 @@ func (rs *RestService) ReturnError(c echo.Context, e error) (err error) {
 	}, indentationChar)
 }
 
-// return a "not found" message
+// return a "not found" message. For an old id of a moved item, details.movedTo names the item now.
 func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
-	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
+	result := &ErrorResult{
 		Name:    "Not found",
 		Code:    CodeNotFound,
 		Message: "No item with id '" + id + "' found",
-	}, indentationChar)
+	}
+	if rs.sync != nil && newTreeLookup(rs.treeManager.Root()).item(id) == nil {
+		if item, _, ok := rs.sync.resolveRedirect(id, ""); ok {
+			result.Details = map[string]any{"movedTo": item}
+		}
+	}
+	return c.JSONPretty(http.StatusNotFound, result, indentationChar)
+}
+
+// GET /moved/:id/: where the item with an old id is now
+func (rs *RestService) getMoved(c echo.Context) error {
+	id := c.Param(urlParamId)
+	notFound := func() error {
+		return apiError(c, http.StatusNotFound, CodeNotFound, "No moved item with id '"+id+"'", nil)
+	}
+	if rs.sync == nil || newTreeLookup(rs.treeManager.Root()).item(id) != nil {
+		return notFound()
+	}
+	item, entry, ok := rs.sync.resolveRedirect(id, "")
+	if !ok {
+		return notFound()
+	}
+	return c.JSONPretty(http.StatusOK, &MovedResponse{OldID: id, Type: item.Type, Item: item, MovedAt: entry.Time}, indentationChar)
 }
 
 // returns the per-character authorship of a document

@@ -138,6 +138,28 @@ func (s *StateStore) Load(relPath string) (*DocumentMeta, []byte, error) {
 	return copyMeta(meta), data, nil
 }
 
+// Meta returns a copy of the meta of the active document at relPath, or nil
+func (s *StateStore) Meta(relPath string) *DocumentMeta {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if meta, ok := s.index[relPath]; ok {
+		return copyMeta(meta)
+	}
+	return nil
+}
+
+// ByUUID returns a copy of the meta of the active document with the given uuid, or nil
+func (s *StateStore) ByUUID(uuid string) *DocumentMeta {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	for _, meta := range s.index {
+		if meta.UUID == uuid {
+			return copyMeta(meta)
+		}
+	}
+	return nil
+}
+
 // RestoreDeleted moves the state of a deleted document with the given path back.
 // It returns false if there is none.
 func (s *StateStore) RestoreDeleted(relPath string) (bool, error) {

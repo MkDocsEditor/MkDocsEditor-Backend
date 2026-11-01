@@ -31,6 +31,8 @@ type linkEncoding struct {
 	nonASCII bool
 	// rawSpaces keeps spaces as they are
 	rawSpaces bool
+	// spelling maps decoded path segments to how an existing destination wrote them
+	spelling map[string]string
 }
 
 func linkPath(fromPath string, target LinkTarget, anchor string, enc linkEncoding) string {
@@ -67,7 +69,7 @@ func relativeLink(fromDir string, targetPath string, folder bool, enc linkEncodi
 		segments = append(segments, "..")
 	}
 	for _, s := range to[common:] {
-		segments = append(segments, enc.encode(s))
+		segments = append(segments, enc.segment(s))
 	}
 	result := strings.Join(segments, "/")
 	if folder {
@@ -88,6 +90,14 @@ func splitPath(p string) []string {
 		return nil
 	}
 	return strings.Split(p, "/")
+}
+
+// segment encodes a path segment, in the spelling of an existing destination if it had the segment
+func (e linkEncoding) segment(s string) string {
+	if raw, ok := e.spelling[s]; ok {
+		return raw
+	}
+	return e.encode(s)
 }
 
 // encode percent-encodes a path segment or an anchor
@@ -231,10 +241,17 @@ func escapesRoot(p string) bool {
 
 // encodingOf returns the encoding variant that keeps the style of an existing destination
 func encodingOf(raw string) linkEncoding {
-	return linkEncoding{
+	enc := linkEncoding{
 		nonASCII:  encodedNonASCIIRe.MatchString(raw),
 		rawSpaces: strings.Contains(raw, " "),
+		spelling:  map[string]string{},
 	}
+	for _, segment := range strings.Split(raw, "/") {
+		if segment != "" && segment != "." && segment != ".." {
+			enc.spelling[percentDecode(segment)] = segment
+		}
+	}
+	return enc
 }
 
 // rewriteDestination returns the destination that points from the document at newFromPath to
@@ -247,7 +264,7 @@ func rewriteDestination(d destination, newFromPath string, newTargetPath string)
 	case d.absolute:
 		segments := splitPath(newTargetPath)
 		for i, s := range segments {
-			segments[i] = enc.encode(s)
+			segments[i] = enc.segment(s)
 		}
 		target = "/" + strings.Join(segments, "/")
 		if d.folder && newTargetPath != "" {
@@ -257,7 +274,7 @@ func rewriteDestination(d destination, newFromPath string, newTargetPath string)
 		target = relativeLink(path.Dir(newFromPath), newTargetPath, d.folder, enc)
 		if !d.folder && target == "" {
 			// a link to the document itself by file name
-			target = enc.encode(path.Base(newTargetPath))
+			target = enc.segment(path.Base(newTargetPath))
 		}
 		if d.dotSlash && !strings.HasPrefix(target, "./") && !strings.HasPrefix(target, "../") {
 			target = "./" + target
