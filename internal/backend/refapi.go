@@ -26,6 +26,9 @@ type (
 		Target      *ItemRef `json:"target"`
 		Reason      string   `json:"reason,omitempty"`
 		Path        string   `json:"path,omitempty"`
+		// MovedTo and SuggestedDestination are set for broken references to old paths of moved items
+		MovedTo              *ItemRef `json:"movedTo,omitempty"`
+		SuggestedDestination string   `json:"suggestedDestination,omitempty"`
 	}
 
 	// DocumentReferences is the answer of GET /document/{id}/references/
@@ -76,7 +79,7 @@ type (
 	}
 )
 
-func toReference(r resolvedRef) *Reference {
+func (rs *RestService) toReference(r resolvedRef) *Reference {
 	ref := &Reference{
 		Kind:        r.Kind,
 		Line:        r.Line,
@@ -90,6 +93,11 @@ func toReference(r resolvedRef) *Reference {
 		ref.Status = RefStatusBroken
 		ref.Reason = r.Reason
 		ref.Path = r.Dest.path
+		if rs.sync != nil {
+			if moved, ok := rs.sync.movedTarget(r.Source.RelPath, r.Dest); ok {
+				ref.MovedTo, ref.SuggestedDestination = moved.item, moved.destination
+			}
+		}
 	}
 	return ref
 }
@@ -104,7 +112,7 @@ func (rs *RestService) getDocumentReferences(c echo.Context) error {
 	snap := rs.refs.Snapshot()
 	result := &DocumentReferences{Document: documentRef(d), References: []*Reference{}}
 	for _, r := range snap.refs[d.RelPath] {
-		result.References = append(result.References, toReference(r))
+		result.References = append(result.References, rs.toReference(r))
 	}
 	return c.JSONPretty(http.StatusOK, result, indentationChar)
 }
@@ -174,7 +182,7 @@ func (rs *RestService) getBrokenReferences(c echo.Context) error {
 	result := &BrokenReferences{Broken: []*BrokenReference{}}
 	for _, r := range snap.all() {
 		if r.Target == nil {
-			result.Broken = append(result.Broken, &BrokenReference{Source: documentRef(r.Source), Reference: toReference(r)})
+			result.Broken = append(result.Broken, &BrokenReference{Source: documentRef(r.Source), Reference: rs.toReference(r)})
 		}
 	}
 	return c.JSONPretty(http.StatusOK, result, indentationChar)

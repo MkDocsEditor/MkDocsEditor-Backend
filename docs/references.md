@@ -5,12 +5,7 @@ links between pages, the use of resources, and moving or renaming pages, folders
 resources. It extends [`sync-protocol.md`](sync-protocol.md); the websocket protocol stays
 version 1, the additions are backwards compatible.
 
-Status: **design, partly implemented**. Implemented: parsing, resolving, the reference
-index and its endpoints (section 4), moving and renaming with reference rewriting
-(sections 5 and 6, without the late fixes), redirects (section 7), `GET /link/`
-(section 8), the `path`, `index`, `mimeType` and `kind` tree fields (section 9), git and
-the audit log (section 10). Not yet: late fixes, `movedTo` in broken references, the
-`thumbnail` field and endpoint. Where this
+Status: **implemented**. Where this
 document and `openapi-description.yaml` disagree on a REST endpoint, the OpenAPI file wins
 once the endpoint is implemented.
 
@@ -163,8 +158,9 @@ current text of every document while it holds the locks (see [Moving](#5-moving-
 - `reason` (`broken` only): `not-found` or `outside-docs`.
 - `path` (`broken` only): the resolved path that does not exist, for display.
 - `movedTo` (`broken` only, optional): when the path is the old path of an item that was
-  moved (see [Redirects](#7-ids-after-a-move-redirects)), the ItemRef of that item now and
-  `suggestedDestination`, the destination that would fix the reference. The backend fixes
+  moved (see [Redirects](#7-ids-after-a-move-redirects)), the ItemRef of that item now.
+- `suggestedDestination` (only with `movedTo`): the destination that would fix the
+  reference, written in the style of the old one. The backend fixes
   such references itself (see [Late fixes](#late-fixes)); the field shows those it has not
   fixed yet.
 
@@ -429,6 +425,11 @@ reference whose path is the old path of a moved item (from the [redirects](#7-id
 and whose item still exists is rewritten to the current path, as a `:server` change like
 above. Such fixes are committed with the next edit commit of the document. A path that
 exists again (a new item was created there) is not broken and never rewritten.
+
+Only documents that have changed through the sync protocol are checked, because only those
+are written by the backend. A file changed on disk by something else (a `git pull`, an
+editor on the server) keeps its broken references until someone edits it; the broken
+references endpoint lists them with `movedTo`.
 
 ## 7. Ids after a move: redirects
 

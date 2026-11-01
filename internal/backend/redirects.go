@@ -82,6 +82,13 @@ func (rs *RedirectStore) Append(entries ...RedirectEntry) error {
 	return nil
 }
 
+// hasEntries reports whether anything was ever moved
+func (rs *RedirectStore) hasEntries() bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return len(rs.entries) > 0
+}
+
 // redirectResolver answers where an item is now
 type redirectResolver struct {
 	// stateByUUID returns the current path and epoch of a document's Automerge state, ok is
