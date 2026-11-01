@@ -381,9 +381,9 @@ func TestPasskeyReauthBinding(t *testing.T) {
 		t.Errorf("no user verification: %v", err)
 	}
 	// a challenge that belongs to another ceremony
-	id, options = begin()
-	_, options2 := begin()
-	if _, err = s.FinishReauthPasskey(admin, sess, id, mustGet(t, phone, options2), ri()); !errors.Is(err, ErrPasskeyVerificationFailed) {
+	id, _ = begin()
+	_, options = begin()
+	if _, err = s.FinishReauthPasskey(admin, sess, id, mustGet(t, phone, options), ri()); !errors.Is(err, ErrPasskeyVerificationFailed) {
 		t.Errorf("challenge of another ceremony: %v", err)
 	}
 	// finished by another session of the account, or by another account
