@@ -154,7 +154,9 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 `invite.created`, `invite.revoked`, `invite.redeemed`, `reset.created`,
 `reset.revoked`, `reset.redeemed`, `account.created`, `account.imported`,
 `account.updated`, `account.role-changed`, `account.disabled`, `account.enabled`,
-`account.deleted`, `settings.changed`, `rate-limit.triggered`.
+`account.deleted`, `settings.changed`, `rate-limit.triggered`, `item.moved`,
+`item.renamed` (moves and renames of wiki items, see
+[references.md](references.md#10-git-audit-log-and-permissions)).
 
 `login.failed` events for unknown usernames are recorded with the attempted username in
 `details` (truncated to 64 characters) and no `targetId`. Events are kept for

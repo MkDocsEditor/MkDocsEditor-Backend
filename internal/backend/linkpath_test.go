@@ -112,6 +112,8 @@ func TestRewriteDestination(t *testing.T) {
 		{"raw spaces kept", "x.md", "my file.pdf", "x.md", "files/my file.pdf", "files/my file.pdf"},
 		{"spaces encoded", "x.md", "my%20file.pdf", "x.md", "files/my file.pdf", "files/my%20file.pdf"},
 		{"self link", "a/x.md", "x.md", "b/y.md", "b/y.md", "y.md"},
+		{"spelling of kept segments", "a/x.md", "../img/Strand%20(2).png", "a/b/x.md", "img/Strand (2).png", "../../img/Strand%20(2).png"},
+		{"new segments use the algorithm", "x.md", "img/Strand%20(2).png", "x.md", "Bilder (alt)/Strand (2).png", "Bilder%20%28alt%29/Strand%20(2).png"},
 	}
 	for _, tt := range tests {
 		d, ok := parseDestination(tt.from, tt.raw)

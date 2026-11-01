@@ -149,9 +149,9 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET | `/mkdocs/config/` | The MkDocs configuration (`mkdocs.yml`) as JSON |
 | GET | `/section/` | The whole tree |
 | POST | `/section/` | Create a section (`{"parent","name"}`) |
-| GET, PUT, DELETE | `/section/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while documents in it are open) |
+| GET, PUT, DELETE | `/section/{id}/` | Get, rename (`{"name"}`, updates references), delete (`?force=true` while documents in it are open) |
 | POST | `/document/` | Create a document (`{"parent","name"}`) |
-| GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while it is open) |
+| GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`, updates references), delete (`?force=true` while it is open) |
 | GET | `/document/{id}/content/` | The markdown text (live while open) |
 | GET | `/document/{id}/authorship/` | Who wrote which part of the text |
 | GET | `/document/{id}/references/` | Outgoing links, images and other references, resolved or broken |
@@ -166,7 +166,9 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET | `/events/ws/` | Events websocket: tree changes and who has which document open |
 | GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
 | POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
-| GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`), delete |
+| GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`, updates references), delete |
+| POST | `/move/` | Move or rename a section, document or resource and update every reference to it (`dryRun` for a preview) |
+| GET | `/moved/{id}/` | Where the item with an old id is now |
 | GET | `/resource/{id}/content/` | The file |
 
 # Contributing

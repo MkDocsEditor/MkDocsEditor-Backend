@@ -48,6 +48,8 @@ const (
 	AuditAccountDeleted          = "account.deleted"
 	AuditSettingsChanged         = "settings.changed"
 	AuditRateLimitTriggered      = "rate-limit.triggered"
+	AuditItemMoved               = "item.moved"
+	AuditItemRenamed             = "item.renamed"
 )
 
 // AuditEvent is one entry of the audit log

@@ -6,8 +6,11 @@ resources. It extends [`sync-protocol.md`](sync-protocol.md); the websocket prot
 version 1, the additions are backwards compatible.
 
 Status: **design, partly implemented**. Implemented: parsing, resolving, the reference
-index and its endpoints (section 4), `GET /link/` (section 8), and the `path`, `index`,
-`mimeType` and `kind` tree fields (section 9). The rest lands in further pull requests. Where this
+index and its endpoints (section 4), moving and renaming with reference rewriting
+(sections 5 and 6, without the late fixes), redirects (section 7), `GET /link/`
+(section 8), the `path`, `index`, `mimeType` and `kind` tree fields (section 9), git and
+the audit log (section 10). Not yet: late fixes, `movedTo` in broken references, the
+`thumbnail` field and endpoint. Where this
 document and `openapi-description.yaml` disagree on a REST endpoint, the OpenAPI file wins
 once the endpoint is implemented.
 
@@ -391,10 +394,13 @@ text, title, angle brackets, HTML quotes and attributes, `{ width=300 }` attribu
   was there.
 - An absolute destination (`/…`) stays absolute: `/` plus the new path.
 - A folder destination keeps its trailing slash (or its absence).
-- Encoding follows the algorithm. Two exceptions keep the author's style: if the old
-  destination percent-encoded a non-ASCII character (`%C3%A4`), non-ASCII characters are
-  encoded too; if the old destination contained a raw space (allowed inside `<…>` and in
-  HTML attributes), spaces stay raw.
+- Path segments that the old destination already had keep their spelling: `Strand%20(2).png`
+  stays like that and does not become `Strand%20%282%29.png`.
+- New segments are encoded with the algorithm. Two exceptions keep the author's style: if
+  the old destination percent-encoded a non-ASCII character (`%C3%A4`), non-ASCII
+  characters are encoded too; if the old destination contained a raw space (allowed inside
+  `<…>` and in HTML attributes), spaces stay raw.
+- In an HTML attribute that wrote `&` as `&amp;`, the new value does so too.
 
 ### Through Automerge
 
@@ -658,11 +664,13 @@ Move guide to Handbuch/guide
 Update references in 2 documents:
 - Handbuch/guide/setup.md
 - index.md
+- mkdocs.yml
 
 Co-authored-by: Anna <anna@example.org>
 ```
 
-A rename in place says `Rename … to …` as today. The rewritten documents are written to
+`mkdocs.yml` is listed when it changed, but not counted. A rename in place (same parent
+section) says `Rename … to …` as today. The rewritten documents are written to
 disk before the commit, so the commit holds the rewritten text. A reference change keeps
 far more than half of a file the same, so git's rename detection (50 % similarity) keeps
 pairing the old and the new path.

@@ -34,6 +34,7 @@ const (
 type SyncServer struct {
 	treeManager   *TreeManager
 	store         *StateStore
+	redirects     *RedirectStore
 	actors        *ActorRegistry
 	authenticator *auth.Service
 	upgrader      websocket.Upgrader
@@ -82,9 +83,16 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 	if err != nil {
 		return nil, err
 	}
+	redirects, err := NewRedirectStore(stateDir, func(rel string) string {
+		return treeManager.GenerateId(filepath.Join(treeManager.RootPath(), filepath.FromSlash(rel)))
+	})
+	if err != nil {
+		return nil, err
+	}
 	s := &SyncServer{
 		treeManager:   treeManager,
 		store:         store,
+		redirects:     redirects,
 		actors:        actors,
 		authenticator: authenticator,
 		upgrader: websocket.Upgrader{
@@ -350,56 +358,6 @@ func (s *SyncServer) IsItemBeingEditedRecursive(section *Section) error {
 	return nil
 }
 
-// MoveItem runs a rename of the file or folder at oldAbs to newAbs and moves the Automerge state
-// of the affected documents. Connected clients get "document-renamed".
-func (s *SyncServer) MoveItem(oldAbs string, newAbs string, rename func() error) error {
-	oldRel, err := s.relPath(oldAbs)
-	if err != nil {
-		return err
-	}
-	newRel, err := s.relPath(newAbs)
-	if err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	affected := map[string]*docSession{}
-	for p, session := range s.sessions {
-		if _, ok := movePath(p, oldRel, newRel); ok {
-			affected[p] = session
-			session.mu.Lock()
-			session.flushLocked()
-			session.mu.Unlock()
-		}
-	}
-
-	if err = rename(); err != nil {
-		return err
-	}
-	if err = s.store.Move(oldRel, newRel); err != nil {
-		log.Printf("Unable to move the state of %s to %s: %v", oldRel, newRel, err)
-	}
-
-	for p, session := range affected {
-		moved, _ := movePath(p, oldRel, newRel)
-		session.mu.Lock()
-		oldID := session.docID
-		session.meta.Path = moved
-		session.absPath = filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(moved))
-		session.docID = s.treeManager.GenerateId(session.absPath)
-		for c := range session.conns {
-			c.send(&DocumentRenamedMessage{Type: MsgDocumentRenamed, DocumentID: oldID, NewDocumentID: session.docID})
-			c.close(CloseRenamed, "document renamed")
-		}
-		session.mu.Unlock()
-		delete(s.sessions, p)
-		s.sessions[moved] = session
-	}
-	return nil
-}
-
 // DeleteItem runs the deletion of the file or folder at absPath. Without force it refuses with
 // ErrDocumentInUse while clients are connected to an affected document.
 func (s *SyncServer) DeleteItem(absPath string, force bool, remove func() error) error {
@@ -514,9 +472,11 @@ func (s *SyncServer) Close() {
 
 // HandleWebsocket serves GET /document/{id}/ws/
 func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
-	d := s.treeManager.GetDocument(documentID)
-	if d == nil {
-		return echo.ErrNotFound
+	if s.treeManager.GetDocument(documentID) == nil {
+		// an old id is upgraded, so the client learns the new id after hello
+		if item, _, ok := s.resolveRedirect(documentID, ""); !ok || item.Type != TypeDocument {
+			return echo.ErrNotFound
+		}
 	}
 	ws, err := s.upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -806,6 +766,13 @@ func (c *wsConn) run(documentID string) {
 		return
 	}
 	c.actorID = hello.ActorID
+
+	if newID := c.server.documentRedirect(documentID, hello.Epoch); newID != "" {
+		log.Printf("%s: %s connected to the old id %s, redirecting to %s", c.clientID, c.user.Username, documentID, newID)
+		c.send(&DocumentRenamedMessage{Type: MsgDocumentRenamed, DocumentID: documentID, NewDocumentID: newID})
+		c.close(CloseRenamed, "document renamed")
+		return
+	}
 
 	d := c.server.treeManager.GetDocument(documentID)
 	if d == nil {
