@@ -309,3 +309,109 @@ func TestPasskeySecondFactorAndReset(t *testing.T) {
 	}
 	c.advance(time.Minute)
 }
+
+// A step-up ceremony counts only for the account and the session that began it, with a passkey
+// of that account, with user verification, and only once.
+func TestPasskeyReauthBinding(t *testing.T) {
+	s, c, admin := setupService(t, passkeyConf())
+	phone := webAuthenticator()
+	id, options, err := s.BeginAddPasskey(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.FinishAddPasskey(admin, id, mustCreate(t, phone, options), "", ri()); err != nil {
+		t.Fatal(err)
+	}
+	// with a passkey, a password login needs a second factor
+	login := func() *Session {
+		t.Helper()
+		r, err := s.LoginPassword("admin", "boss secret 2026!", sp(SessionBearer))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, options, err := s.BeginPasskeyLogin(r.Challenge)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done, err := s.FinishPasskeyLogin(id, mustGet(t, phone, options), sp(SessionBearer))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return done.Session
+	}
+	sess, otherSess := login(), login()
+
+	_, invite, _ := s.CreateInvite(admin, RoleEditor, "", 0, ri())
+	other := &passkeytest.Authenticator{RPID: "wiki.example.com", Origin: "https://edit.wiki.example.com"}
+	id, options, _ = s.BeginLinkPasskey(invite, NewAccount{Username: "anna"})
+	anna, err := s.FinishLinkPasskey(id, mustCreate(t, other, options), "", sp(SessionBearer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.advance(11 * time.Minute)
+	recent := func() bool { return s.RecentlyAuthenticated(sess) }
+
+	begin := func() (string, any) {
+		t.Helper()
+		id, options, err := s.BeginReauthPasskey(admin, sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id, options
+	}
+	id, options = begin()
+	opts, _ := json.Marshal(options)
+	for _, want := range []string{`"allowCredentials"`, `"userVerification":"required"`} {
+		if !strings.Contains(string(opts), want) {
+			t.Errorf("step-up options miss %s: %s", want, opts)
+		}
+	}
+
+	// a passkey of another account, signed by a working authenticator
+	foreign, _ := other.Sign(other.Keys[0], passkeytest.Challenge(options))
+	if _, err = s.FinishReauthPasskey(admin, sess, id, foreign, ri()); !errors.Is(err, ErrPasskeyVerificationFailed) {
+		t.Errorf("foreign passkey: %v", err)
+	}
+	// without user verification
+	id, options = begin()
+	phone.SkipUV = true
+	unverified := mustGet(t, phone, options)
+	phone.SkipUV = false
+	if _, err = s.FinishReauthPasskey(admin, sess, id, unverified, ri()); !errors.Is(err, ErrPasskeyVerificationFailed) {
+		t.Errorf("no user verification: %v", err)
+	}
+	// a challenge that belongs to another ceremony
+	id, options = begin()
+	_, options2 := begin()
+	if _, err = s.FinishReauthPasskey(admin, sess, id, mustGet(t, phone, options2), ri()); !errors.Is(err, ErrPasskeyVerificationFailed) {
+		t.Errorf("challenge of another ceremony: %v", err)
+	}
+	// finished by another session of the account, or by another account
+	id, options = begin()
+	if _, err = s.FinishReauthPasskey(admin, otherSess, id, mustGet(t, phone, options), ri()); !errors.Is(err, ErrChallengeExpired) {
+		t.Errorf("another session: %v", err)
+	}
+	id, options = begin()
+	if _, err = s.FinishReauthPasskey(anna.User, anna.Session, id, mustGet(t, phone, options), ri()); !errors.Is(err, ErrChallengeExpired) {
+		t.Errorf("another account: %v", err)
+	}
+	if recent() || s.RecentlyAuthenticated(otherSess) || s.RecentlyAuthenticated(anna.Session) {
+		t.Error("a failed step-up counts as recent authentication")
+	}
+
+	// the real one works, once, and only for this session
+	id, options = begin()
+	cred := mustGet(t, phone, options)
+	if _, err = s.FinishReauthPasskey(admin, sess, id, cred, ri()); err != nil {
+		t.Fatal(err)
+	}
+	if !recent() {
+		t.Error("the step-up did not count")
+	}
+	if s.RecentlyAuthenticated(otherSess) {
+		t.Error("the step-up counted for another session")
+	}
+	if _, err = s.FinishReauthPasskey(admin, sess, id, cred, ri()); !errors.Is(err, ErrChallengeExpired) {
+		t.Errorf("ceremony used twice: %v", err)
+	}
+}
