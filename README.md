@@ -156,6 +156,7 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET | `/document/{id}/authorship/` | Who wrote which part of the text |
 | GET | `/document/{id}/references/` | Outgoing links, images and other references, resolved or broken |
 | GET | `/document/{id}/backlinks/`, `/section/{id}/backlinks/`, `/resource/{id}/backlinks/` | References to the item ("used by") |
+| GET | `/resource/{id}/thumbnail/?size=256` | Thumbnail of an image resource (JPEG or PNG) |
 | GET | `/references/broken/` | All broken references |
 | GET | `/references/unused-resources/` | Resources that nothing uses |
 | GET | `/link/?from=&to=&anchor=` | The link destination from a document to an item, see [docs/references.md](docs/references.md#8-the-link-path-algorithm) |

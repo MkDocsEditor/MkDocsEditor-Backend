@@ -72,6 +72,8 @@ type (
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 		MimeType string    `json:"mimeType" xml:"mimeType" form:"mimeType" query:"mimeType"`
 		Kind     string    `json:"kind" xml:"kind" form:"kind" query:"kind"`
+		// Thumbnail is true when GET /resource/{id}/thumbnail/ works for the resource
+		Thumbnail bool `json:"thumbnail" xml:"thumbnail" form:"thumbnail" query:"thumbnail"`
 	}
 )
 
@@ -292,15 +294,16 @@ func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileI
 	resourcePath := filepath.Join(parentFolderPath, f.Name())
 	mimeType := mimeTypeOf(f.Name())
 	return &Resource{
-		Type:     TypeResource,
-		ID:       tm.GenerateId(resourcePath),
-		Name:     f.Name(),
-		Path:     resourcePath,
-		RelPath:  tm.relPath(resourcePath),
-		Filesize: f.Size(),
-		ModTime:  f.ModTime(),
-		MimeType: mimeType,
-		Kind:     resourceKind(mimeType),
+		Type:      TypeResource,
+		ID:        tm.GenerateId(resourcePath),
+		Name:      f.Name(),
+		Path:      resourcePath,
+		RelPath:   tm.relPath(resourcePath),
+		Filesize:  f.Size(),
+		ModTime:   f.ModTime(),
+		MimeType:  mimeType,
+		Kind:      resourceKind(mimeType),
+		Thumbnail: hasThumbnail(mimeType),
 	}
 }
 

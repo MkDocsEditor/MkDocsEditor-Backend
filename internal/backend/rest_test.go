@@ -71,6 +71,17 @@ func (e *restTestEnv) do(method, path string, body io.Reader, contentType string
 	return rec
 }
 
+// doRequest serves a prepared request with the env's credentials
+func (e *restTestEnv) doRequest(req *http.Request) *httptest.ResponseRecorder {
+	e.t.Helper()
+	if e.user != "" {
+		req.Header.Set("Authorization", authHeader(e.t, e.rs.authenticator, e.user, e.pass))
+	}
+	rec := httptest.NewRecorder()
+	e.rs.echoRest.ServeHTTP(rec, req)
+	return rec
+}
+
 func (e *restTestEnv) doJSON(method, path string, body any) *httptest.ResponseRecorder {
 	e.t.Helper()
 	b, err := json.Marshal(body)

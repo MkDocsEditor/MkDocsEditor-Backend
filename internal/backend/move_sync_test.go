@@ -225,3 +225,21 @@ func TestMoveGitCommit(t *testing.T) {
 		t.Errorf("history: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// An offline client that adds a reference to the old path of a moved item gets it fixed by the
+// server when the document is written
+func TestMoveLateFix(t *testing.T) {
+	e := newSyncEnv(t)
+	e.withLinks()
+	b := newTestClient(t, e, "bob")
+	b.connect(e.docID("index.md"))
+	b.disconnect()
+
+	e.postMove("alice", MoveRequest{Type: TypeSection, ID: e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")), Parent: RootSectionID, Name: "Handbuch"})
+	b.appendText("Offline: ![Bild](guide/image.png) and [again](<guide/setup.md#top>).\n")
+
+	b.connect(e.docID("index.md"))
+	want := "# Home\n\nSee [setup](Handbuch/setup.md).\nOffline: ![Bild](Handbuch/image.png) and [again](<Handbuch/setup.md#top>).\n"
+	b.waitFor("the late fix", func() bool { return b.textLocked() == want })
+	eventually(t, "file", func() bool { return e.readFile("index.md") == want })
+}

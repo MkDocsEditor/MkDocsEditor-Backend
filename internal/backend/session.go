@@ -265,6 +265,7 @@ func (ds *docSession) flushLocked() {
 	if !ds.dirty {
 		return
 	}
+	ds.fixMovedReferencesLocked()
 	if err := ds.writeToDiskLocked(); err != nil {
 		log.Printf("Unable to write %s: %v", ds.meta.Path, err)
 	}

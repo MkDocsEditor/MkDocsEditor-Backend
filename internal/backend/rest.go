@@ -70,6 +70,8 @@ type RestService struct {
 	sync           *SyncServer
 	git            *GitCommitter
 	refs           *ReferenceIndex
+	// thumbnailSlots limits concurrent image decoding
+	thumbnailSlots chan struct{}
 }
 
 func NewRestService(
@@ -89,6 +91,7 @@ func NewRestService(
 		trustedProxies: trusted,
 	}
 	rs.refs = NewReferenceIndex(treeManager, syncServer)
+	rs.thumbnailSlots = make(chan struct{}, 2)
 	rs.echoRest = rs.createRestService()
 	return rs
 }
@@ -286,6 +289,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupResources.GET("/:"+urlParamId+"/", rs.getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", rs.getResourceContent)
 	groupResources.GET("/:"+urlParamId+"/backlinks/", rs.getResourceBacklinks)
+	groupResources.GET("/:"+urlParamId+"/thumbnail/", rs.getResourceThumbnail)
 	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", rs.uploadNewResource)
 	groupResources.PUT("/:"+urlParamId+"/", rs.renameResource)
 	groupResources.DELETE("/:"+urlParamId+"/", rs.deleteResource)

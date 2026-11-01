@@ -302,3 +302,24 @@ func TestRenameRewritesReferences(t *testing.T) {
 		t.Errorf("audit: %v %+v", err, events)
 	}
 }
+
+func TestBrokenReferenceMovedTo(t *testing.T) {
+	e := newRestTestEnv(t, withReferenceWiki(t))
+	e.move(MoveRequest{Type: TypeResource, ID: findResourceByName(e.tm.Root(), "logo.png").ID, Name: "Logo.png"}, http.StatusOK)
+	// a link to the old path that arrives on disk (git pull) is reported with the item now
+	if err := os.WriteFile(filepath.Join(e.tm.RootPath(), "reference", "api.md"), []byte("# API\n![alt](../img/logo.png)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.tm.CreateItemTree()
+	var broken BrokenReferences
+	e.getJSON("/references/broken/", &broken)
+	var found *BrokenReference
+	for _, b := range broken.Broken {
+		if b.Source.Path == "reference/api.md" {
+			found = b
+		}
+	}
+	if found == nil || found.MovedTo == nil || found.MovedTo.Path != "img/Logo.png" || found.SuggestedDestination != "../img/Logo.png" {
+		t.Fatalf("broken: %+v", found)
+	}
+}

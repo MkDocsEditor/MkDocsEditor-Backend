@@ -2008,6 +2008,62 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /resource/{resourceId}/thumbnail/:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      summary: "A thumbnail of an image resource"
+      description: |
+        JPEG, or PNG for images with transparency, whose longer side is at most `size` pixels.
+        Works for PNG, JPEG, GIF (first frame) and WebP images up to 50 megapixels; the tree
+        field `thumbnail` says which. Smaller images are not upscaled. JPEG orientation from
+        EXIF is applied. Thumbnails are cached on the server.
+      operationId: getResourceThumbnail
+      tags: [ References ]
+      parameters:
+        - name: size
+          in: query
+          required: false
+          description: "64 to 1024, rounded up to 64, 128, 256, 512 or 1024"
+          schema:
+            type: integer
+            minimum: 64
+            maximum: 1024
+            default: 256
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "The thumbnail"
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: "private, max-age=86400"
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: "The ETag matches"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /references/broken/:
     get:
       summary: "All broken references of the wiki"
@@ -2401,6 +2457,9 @@ components:
         kind:
           type: string
           enum: [ image, video, audio, pdf, text, archive, other ]
+        thumbnail:
+          type: boolean
+          description: "True when `GET /resource/{resourceId}/thumbnail/` works for the resource (PNG, JPEG, GIF and WebP)"
 
     ItemRef:
       type: object
@@ -2453,6 +2512,12 @@ components:
         path:
           type: string
           description: "Only for broken references: the resolved path that does not exist"
+        movedTo:
+          $ref: "#/components/schemas/ItemRef"
+        suggestedDestination:
+          type: string
+          description: "Only with `movedTo`: the destination that points to the moved item, in the style of the old one"
+          example: "../Handbuch/setup.md#install"
 
     DocumentReferences:
       type: object
