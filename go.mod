@@ -11,7 +11,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v4 v4.16.3
-	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pterm/pterm v0.12.80
 	github.com/sergi/go-diff v1.3.1
 	github.com/spf13/cobra v1.9.1

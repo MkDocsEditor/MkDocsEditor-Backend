@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	automerge "github.com/automerge/automerge-go"
 )
 
 // newTestWiki creates a small MkDocs project in a temporary folder, points the global
@@ -93,4 +94,13 @@ func findResourceByName(s *Section, name string) *Resource {
 		}
 	}
 	return nil
+}
+
+// computeAuthorship replays the whole history of a document
+func computeAuthorship(doc *automerge.Doc, owner func(actorID string) (string, string)) (*Authorship, error) {
+	state, err := fullAuthorshipState(doc)
+	if err != nil {
+		return nil, err
+	}
+	return state.result(owner), nil
 }

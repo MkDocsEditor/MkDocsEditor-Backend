@@ -2,7 +2,6 @@ package backend
 
 import (
 	"errors"
-	"html"
 	"io/fs"
 	"log"
 	"os"
@@ -140,11 +139,7 @@ type resolvedRef struct {
 func resolveReferences(l *treeLookup, source *Document, refs []parsedRef) []resolvedRef {
 	out := make([]resolvedRef, 0, len(refs))
 	for _, r := range refs {
-		raw := r.Raw
-		if r.HTML {
-			raw = html.UnescapeString(raw)
-		}
-		d, ok := parseDestination(source.RelPath, raw)
+		d, ok := parseDestination(source.RelPath, r.destinationText())
 		if !ok {
 			continue
 		}

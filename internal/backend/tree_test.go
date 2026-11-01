@@ -86,7 +86,7 @@ func TestValidateName(t *testing.T) {
 	}
 }
 
-func TestCreateRenameDelete(t *testing.T) {
+func TestCreateDelete(t *testing.T) {
 	project := newTestWiki(t)
 	docs := filepath.Join(project, "docs")
 	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
@@ -127,35 +127,11 @@ func TestCreateRenameDelete(t *testing.T) {
 		t.Errorf("resource content %q", b)
 	}
 
-	renamedDoc, err := tm.RenameDocument(doc, "renamed")
-	if err != nil || renamedDoc == nil || renamedDoc.Name != "renamed" {
-		t.Fatalf("RenameDocument: %+v %v", renamedDoc, err)
-	}
-	if tm.GetDocument(doc.ID) != nil {
-		t.Error("old document id still resolves")
-	}
-
-	renamedRes, err := tm.RenameResource(res, "other.bin")
-	if err != nil || renamedRes == nil || renamedRes.Name != "other.bin" {
-		t.Fatalf("RenameResource: %+v %v", renamedRes, err)
-	}
-
-	renamedSection, err := tm.RenameSection(section, "moved")
-	if err != nil || renamedSection == nil || renamedSection.Name != "moved" {
-		t.Fatalf("RenameSection: %+v %v", renamedSection, err)
-	}
-	if findDocumentByName(renamedSection, "renamed") == nil {
-		t.Error("document did not move with its section")
-	}
-	if _, err = tm.RenameSection(tm.Root(), "x"); err == nil {
-		t.Error("root section was renamed")
-	}
-
-	ok, err := tm.DeleteItem(renamedSection.ID, TypeSection)
+	ok, err := tm.DeleteItem(section.ID, TypeSection)
 	if !ok || err != nil {
 		t.Fatalf("DeleteItem: %v %v", ok, err)
 	}
-	if _, err = os.Stat(filepath.Join(docs, "moved")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(docs, "new")); !os.IsNotExist(err) {
 		t.Error("section folder still exists")
 	}
 	if ok, _ = tm.DeleteItem("unknown", TypeDocument); ok {

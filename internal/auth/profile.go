@@ -68,51 +68,15 @@ func (s *Service) UpdateProfile(accountID string, upd ProfileUpdate, by *User, r
 	if cur.Status == StatusDeleted {
 		return nil, ErrNotFound
 	}
-	next := cur
-	changed := map[string]any{}
-	if upd.DisplayName != nil {
-		name, err := cleanDisplayName(*upd.DisplayName, "")
-		if err != nil || name == "" {
-			return nil, ErrInvalidDisplayName
-		}
-		next.DisplayName = name
-	}
-	if upd.Color != nil {
-		if !colorPattern.MatchString(*upd.Color) {
-			return nil, ErrInvalidColor
-		}
-		next.Color = strings.ToLower(*upd.Color)
-	}
-	if upd.Email != nil {
-		email := strings.TrimSpace(*upd.Email)
-		if err = validateEmail(email); err != nil {
-			return nil, err
-		}
-		next.Email = email
+	next, err := applyProfileFields(cur, upd)
+	if err != nil {
+		return nil, err
 	}
 	now := s.now().UTC()
+	changed := map[string]any{}
 	if upd.Username != nil && *upd.Username != cur.Username {
-		if err = ValidateUsername(*upd.Username); err != nil {
+		if err = changeUsername(tx, cur.Username, *upd.Username, accountID, now); err != nil {
 			return nil, err
-		}
-		taken, err := usernameTaken(tx, *upd.Username, accountID)
-		if err != nil {
-			return nil, err
-		}
-		if taken {
-			return nil, ErrUsernameTaken
-		}
-		oldKey, newKey := usernameKey(cur.Username), usernameKey(*upd.Username)
-		if oldKey != newKey {
-			// the old name stays reserved for this account; taking back a former name
-			// turns its alias into the current name again
-			if _, err = tx.Exec("INSERT OR IGNORE INTO username_aliases (username_key, account_id, created_at) VALUES (?, ?, ?)",
-				oldKey, accountID, toMillis(now)); err != nil {
-				return nil, err
-			}
-			if _, err = tx.Exec("DELETE FROM username_aliases WHERE username_key = ? AND account_id = ?", newKey, accountID); err != nil {
-				return nil, err
-			}
 		}
 		changed["username"] = map[string]string{"from": cur.Username, "to": *upd.Username}
 		next.Username = *upd.Username
@@ -142,6 +106,58 @@ func (s *Service) UpdateProfile(accountID string, upd ProfileUpdate, by *User, r
 	}
 	s.invalidateCache()
 	return s.UserByID(accountID), nil
+}
+
+// applyProfileFields returns the user with the new display name, colour and email
+func applyProfileFields(cur User, upd ProfileUpdate) (User, error) {
+	next := cur
+	if upd.DisplayName != nil {
+		name, err := cleanDisplayName(*upd.DisplayName, "")
+		if err != nil || name == "" {
+			return User{}, ErrInvalidDisplayName
+		}
+		next.DisplayName = name
+	}
+	if upd.Color != nil {
+		if !colorPattern.MatchString(*upd.Color) {
+			return User{}, ErrInvalidColor
+		}
+		next.Color = strings.ToLower(*upd.Color)
+	}
+	if upd.Email != nil {
+		email := strings.TrimSpace(*upd.Email)
+		if err := validateEmail(email); err != nil {
+			return User{}, err
+		}
+		next.Email = email
+	}
+	return next, nil
+}
+
+// changeUsername validates a new username and updates the former usernames of the account
+func changeUsername(tx *sql.Tx, oldName string, newName string, accountID string, now time.Time) error {
+	if err := ValidateUsername(newName); err != nil {
+		return err
+	}
+	taken, err := usernameTaken(tx, newName, accountID)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return ErrUsernameTaken
+	}
+	oldKey, newKey := usernameKey(oldName), usernameKey(newName)
+	if oldKey == newKey {
+		return nil
+	}
+	// the old name stays reserved for this account; taking back a former name turns its alias
+	// into the current name again
+	if _, err = tx.Exec("INSERT OR IGNORE INTO username_aliases (username_key, account_id, created_at) VALUES (?, ?, ?)",
+		oldKey, accountID, toMillis(now)); err != nil {
+		return err
+	}
+	_, err = tx.Exec("DELETE FROM username_aliases WHERE username_key = ? AND account_id = ?", newKey, accountID)
+	return err
 }
 
 // ChangePassword sets a new password. With currentPassword, it must match (otherwise the

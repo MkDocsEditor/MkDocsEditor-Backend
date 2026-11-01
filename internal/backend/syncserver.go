@@ -88,7 +88,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 		return nil, err
 	}
 	redirects, err := NewRedirectStore(stateDir, func(rel string) string {
-		return treeManager.GenerateID(filepath.Join(treeManager.RootPath(), filepath.FromSlash(rel)))
+		return treeManager.idOfRelPath(rel)
 	})
 	if err != nil {
 		return nil, err

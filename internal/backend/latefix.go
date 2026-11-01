@@ -1,11 +1,8 @@
 package backend
 
 import (
-	"html"
 	"log"
-	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // movedReference describes where a broken reference's old path went
@@ -20,7 +17,7 @@ func (s *SyncServer) movedTarget(sourcePath string, d destination) (movedReferen
 	if d.outside || !s.redirects.hasEntries() {
 		return movedReference{}, false
 	}
-	id := s.treeManager.GenerateID(filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(d.path)))
+	id := s.treeManager.idOfRelPath(d.path)
 	item, _, ok := s.resolveRedirect(id, "")
 	if !ok {
 		return movedReference{}, false
@@ -36,11 +33,7 @@ func (s *SyncServer) lateFixEdits(text string, sourcePath string) []textEdit {
 	var lookup *treeLookup
 	var edits []textEdit
 	for _, r := range parseReferences(text) {
-		raw := r.Raw
-		if r.HTML {
-			raw = html.UnescapeString(raw)
-		}
-		d, ok := parseDestination(sourcePath, raw)
+		d, ok := parseDestination(sourcePath, r.destinationText())
 		if !ok || d.outside {
 			continue
 		}
@@ -54,11 +47,7 @@ func (s *SyncServer) lateFixEdits(text string, sourcePath string) []textEdit {
 		if !ok {
 			continue
 		}
-		replacement := moved.destination
-		if r.HTML && strings.Contains(r.Raw, "&amp;") {
-			replacement = strings.ReplaceAll(replacement, "&", "&amp;")
-		}
-		edits = append(edits, textEdit{start: r.Start, end: r.End, replacement: replacement, line: r.Line})
+		edits = append(edits, textEdit{start: r.Start, end: r.End, replacement: r.escapeReplacement(moved.destination), line: r.Line})
 	}
 	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
 	return edits

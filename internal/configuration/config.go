@@ -1,10 +1,10 @@
 package configuration
 
 import (
-	"log"
+	"fmt"
+	"os"
 	"path/filepath"
 
-	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 )
 
@@ -22,38 +22,36 @@ type Configuration struct {
 
 var CurrentConfig Configuration
 
-// InitConfig does a one time setup for the configuration file
-func InitConfig(cfgFile string) {
+// InitConfig reads the configuration file into CurrentConfig
+func InitConfig(cfgFile string) error {
 	viper.SetConfigName("mkdocsrest")
 
 	if cfgFile != "" {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
+		home, err := os.UserHomeDir()
 		if err != nil {
-			//ui.ErrorAndNotify("Path Error", "Couldn't detect home directory: %v", err)
-			log.Fatalf("Couldn't detect home directory: %v", err)
+			return fmt.Errorf("unable to detect the home directory: %w", err)
 		}
 
 		viper.AddConfigPath(".")
 		viper.AddConfigPath(home)
-		viper.AddConfigPath(home + "/.mkdocsrest")
+		viper.AddConfigPath(filepath.Join(home, ".mkdocsrest"))
 		viper.AddConfigPath("/etc/mkdocsrest/")
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
 
 	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading configuration file, %s", err)
+		return fmt.Errorf("unable to read the configuration file: %w", err)
 	}
-	err := viper.Unmarshal(&CurrentConfig)
-	if err != nil {
-		log.Fatalf("unable to decode into struct, %v", err)
+	if err := viper.Unmarshal(&CurrentConfig); err != nil {
+		return fmt.Errorf("unable to decode the configuration file: %w", err)
 	}
 
 	setDefaultValues()
+	return nil
 }
 
 func setDefaultValues() {

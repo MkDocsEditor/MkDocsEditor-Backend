@@ -82,15 +82,6 @@ func (a *authorshipState) result(owner func(actorID string) (string, string)) *A
 	return result
 }
 
-// computeAuthorship replays the whole history of a document
-func computeAuthorship(doc *automerge.Doc, owner func(actorID string) (string, string)) (*Authorship, error) {
-	state, err := fullAuthorshipState(doc)
-	if err != nil {
-		return nil, err
-	}
-	return state.result(owner), nil
-}
-
 func fullAuthorshipState(doc *automerge.Doc) (*authorshipState, error) {
 	changes, err := doc.Changes()
 	if err != nil {

@@ -229,21 +229,31 @@ func (s *Service) loadCache() {
 	if s.cacheValid {
 		return
 	}
+	byID, byUsername, active, err := s.readAccounts()
+	if err != nil {
+		// the cache stays invalid, the next call tries again
+		log.Printf("Unable to read the accounts: %v", err)
+		return
+	}
+	s.byID, s.byUsername, s.active, s.cacheValid = byID, byUsername, active, true
+}
+
+// readAccounts reads all accounts by id, the account ids by current and former username keys, and
+// the number of accounts that are not deleted
+func (s *Service) readAccounts() (map[string]*User, map[string]string, int, error) {
 	byID := map[string]*User{}
 	byUsername := map[string]string{}
 	active := 0
 	rows, err := s.db.Query("SELECT id, username, username_key, display_name, email, color, role, status FROM accounts")
 	if err != nil {
-		log.Printf("Unable to read the accounts: %v", err)
-		return
+		return nil, nil, 0, err
 	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var u User
 		var key string
 		if err = rows.Scan(&u.ID, &u.Username, &key, &u.DisplayName, &u.Email, &u.Color, &u.Role, &u.Status); err != nil {
-			log.Printf("Unable to read the accounts: %v", err)
-			_ = rows.Close()
-			return
+			return nil, nil, 0, err
 		}
 		byID[u.ID] = &u
 		byUsername[key] = u.ID
@@ -251,22 +261,25 @@ func (s *Service) loadCache() {
 			active++
 		}
 	}
-	_ = rows.Close()
-	rows, err = s.db.Query("SELECT username_key, account_id FROM username_aliases")
-	if err != nil {
-		log.Printf("Unable to read the former usernames: %v", err)
-		return
+	if err = rows.Err(); err != nil {
+		return nil, nil, 0, err
 	}
-	for rows.Next() {
+
+	aliases, err := s.db.Query("SELECT username_key, account_id FROM username_aliases")
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer func() { _ = aliases.Close() }()
+	for aliases.Next() {
 		var key, id string
-		if err = rows.Scan(&key, &id); err == nil {
-			if _, taken := byUsername[key]; !taken {
-				byUsername[key] = id
-			}
+		if err = aliases.Scan(&key, &id); err != nil {
+			return nil, nil, 0, err
+		}
+		if _, taken := byUsername[key]; !taken {
+			byUsername[key] = id
 		}
 	}
-	_ = rows.Close()
-	s.byID, s.byUsername, s.active, s.cacheValid = byID, byUsername, active, true
+	return byID, byUsername, active, aliases.Err()
 }
 
 // UserByID returns the account with the given id in any state (deleted accounts are
@@ -316,10 +329,6 @@ var ErrNotFound = errors.New("not found")
 
 // ValidateRole checks that a role is admin, editor or reader
 func ValidateRole(role string) error {
-	return validateRole(role)
-}
-
-func validateRole(role string) error {
 	switch role {
 	case RoleAdmin, RoleEditor, RoleReader:
 		return nil

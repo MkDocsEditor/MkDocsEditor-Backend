@@ -274,6 +274,11 @@ func (tm *TreeManager) GenerateID(path string) string {
 	return createHash(path)
 }
 
+// idOfRelPath returns the item id of a path relative to the docs folder
+func (tm *TreeManager) idOfRelPath(rel string) string {
+	return tm.GenerateID(filepath.Join(tm.rootPath, filepath.FromSlash(rel)))
+}
+
 // creates a section object for storing in the tree
 func (tm *TreeManager) createSectionForTree(path string, name string, id string) *Section {
 	sectionPath := filepath.Join(path, name)
@@ -475,68 +480,6 @@ func (tm *TreeManager) CreateResource(parentSectionID string, resourceName strin
 	}
 	tm.CreateItemTree()
 	return tm.GetResource(tm.GenerateID(resourcePath)), nil
-}
-
-// renames the item at oldPath to the new file name in the same folder
-func (tm *TreeManager) renamePath(oldPath string, newFileName string) (string, error) {
-	if err := ValidateName(newFileName); err != nil {
-		return "", err
-	}
-	newPath := filepath.Join(filepath.Dir(oldPath), newFileName)
-	if newPath == oldPath {
-		return newPath, nil
-	}
-	exists, err := fileExists(newPath)
-	if err != nil {
-		return "", err
-	}
-	if exists {
-		return "", fmt.Errorf("%w: %s", ErrAlreadyExists, newFileName)
-	}
-	if err = os.Rename(oldPath, newPath); err != nil {
-		return "", err
-	}
-	tm.CreateItemTree()
-	return newPath, nil
-}
-
-// RenameSection renames the folder of the given section
-func (tm *TreeManager) RenameSection(section *Section, name string) (*Section, error) {
-	tm.fsLock.Lock()
-	defer tm.fsLock.Unlock()
-	if section.ID == RootSectionID {
-		return nil, fmt.Errorf("%w: the root section cannot be renamed", ErrInvalidName)
-	}
-	newPath, err := tm.renamePath(section.Path, name)
-	if err != nil {
-		return nil, err
-	}
-	return tm.GetSection(tm.GenerateID(newPath)), nil
-}
-
-// RenameDocument renames the file of the given document (name without the .md extension)
-func (tm *TreeManager) RenameDocument(document *Document, name string) (*Document, error) {
-	tm.fsLock.Lock()
-	defer tm.fsLock.Unlock()
-	if err := ValidateName(name); err != nil {
-		return nil, err
-	}
-	newPath, err := tm.renamePath(document.Path, name+markdownFileExtension)
-	if err != nil {
-		return nil, err
-	}
-	return tm.GetDocument(tm.GenerateID(newPath)), nil
-}
-
-// RenameResource renames the file of the given resource
-func (tm *TreeManager) RenameResource(resource *Resource, name string) (*Resource, error) {
-	tm.fsLock.Lock()
-	defer tm.fsLock.Unlock()
-	newPath, err := tm.renamePath(resource.Path, name)
-	if err != nil {
-		return nil, err
-	}
-	return tm.GetResource(tm.GenerateID(newPath)), nil
 }
 
 // itemPath returns the path of the item with the given id and type, or "" if there is none

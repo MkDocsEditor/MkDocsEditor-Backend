@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -109,55 +110,75 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	// paths relative to the root of the work tree, so files next to the docs folder work too
-	full := make([]string, 0, len(paths))
-	for _, p := range paths {
-		f := path.Clean(g.prefix + p)
-		if f == ".." || strings.HasPrefix(f, "../") || path.IsAbs(f) {
-			continue
-		}
-		full = append(full, f)
-	}
-
-	// only paths git can stage: existing files (tracked or not, not ignored) and deleted tracked files
-	out, err := g.runIn(g.top, nil, "", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-	if err != nil {
+	pathspecs, err := g.stageablePaths(paths)
+	if err != nil || len(pathspecs) == 0 {
 		return "", err
-	}
-	known := strings.Split(out, "\x00")
-	var pathspecs []string
-	for _, p := range full {
-		for _, k := range known {
-			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
-				pathspecs = append(pathspecs, p)
-				break
-			}
-		}
-	}
-	if len(pathspecs) == 0 {
-		return "", nil
 	}
 	pathspecInput := strings.Join(pathspecs, "\x00")
 
 	if _, err = g.runIn(g.top, nil, pathspecInput, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return "", err
 	}
-	out, err = g.runIn(g.top, nil, "", "diff", "--cached", "--name-only", "-z")
+	out, err := g.runIn(g.top, nil, "", "diff", "--cached", "--name-only", "-z")
 	if err != nil {
 		return "", err
 	}
-	changed := false
-	for k := range strings.SplitSeq(out, "\x00") {
-		for _, p := range pathspecs {
-			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
-				changed = true
-			}
-		}
-	}
-	if !changed {
+	if !slices.ContainsFunc(strings.Split(out, "\x00"), func(k string) bool { return k != "" && coveredBy(k, pathspecs) }) {
 		return "", nil
 	}
 
+	messageFile, err := writeCommitMessage(subject, body, coAuthors)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.Remove(messageFile) }()
+
+	env := []string{
+		"GIT_AUTHOR_NAME=" + author.Name, "GIT_AUTHOR_EMAIL=" + author.Email,
+		"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email,
+	}
+	if _, err = g.runIn(g.top, env, pathspecInput, "-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify",
+		"--only", "--cleanup=whitespace", "--file="+messageFile, "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		return "", err
+	}
+	out, err = g.runIn(g.top, nil, "", "rev-parse", "--short=12", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// stageablePaths maps paths to paths relative to the root of the work tree, so files next to the
+// docs folder work too. It keeps the paths git can stage: existing files (tracked or not, not
+// ignored) and deleted tracked files.
+func (g *GitRepo) stageablePaths(paths []string) ([]string, error) {
+	out, err := g.runIn(g.top, nil, "", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	known := strings.Split(out, "\x00")
+	var pathspecs []string
+	for _, p := range paths {
+		f := path.Clean(g.prefix + p)
+		if f == ".." || strings.HasPrefix(f, "../") || path.IsAbs(f) {
+			continue
+		}
+		if slices.ContainsFunc(known, func(k string) bool { return k != "" && coveredBy(k, []string{f}) }) {
+			pathspecs = append(pathspecs, f)
+		}
+	}
+	return pathspecs, nil
+}
+
+// coveredBy reports whether a file is one of the paths or below one of them
+func coveredBy(file string, paths []string) bool {
+	return slices.ContainsFunc(paths, func(p string) bool {
+		return file == p || strings.HasPrefix(file, p+"/")
+	})
+}
+
+// writeCommitMessage writes the message to a temporary file and returns its name
+func writeCommitMessage(subject string, body string, coAuthors []GitSignature) (string, error) {
 	var message strings.Builder
 	message.WriteString(subject)
 	if body != "" {
@@ -169,32 +190,21 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 			message.WriteString("\nCo-authored-by: " + co.String())
 		}
 	}
-	messageFile, err := os.CreateTemp("", "mkdocseditor-commit-")
+	message.WriteString("\n")
+
+	file, err := os.CreateTemp("", "mkdocseditor-commit-")
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = os.Remove(messageFile.Name()) }()
-	_, err = messageFile.WriteString(message.String() + "\n")
-	if cerr := messageFile.Close(); err == nil {
+	_, err = file.WriteString(message.String())
+	if cerr := file.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
+		_ = os.Remove(file.Name())
 		return "", err
 	}
-
-	env := []string{
-		"GIT_AUTHOR_NAME=" + author.Name, "GIT_AUTHOR_EMAIL=" + author.Email,
-		"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email,
-	}
-	if _, err = g.runIn(g.top, env, pathspecInput, "-c", "commit.gpgsign=false", "commit", "--quiet", "--no-verify",
-		"--only", "--cleanup=whitespace", "--file="+messageFile.Name(), "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
-		return "", err
-	}
-	out, err = g.runIn(g.top, nil, "", "rev-parse", "--short=12", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
+	return file.Name(), nil
 }
 
 // Push pushes the current branch

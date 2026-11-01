@@ -22,7 +22,9 @@ Output:
   setup token: mdl_…`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		configuration.InitConfig(global.CfgFile)
+		if err := configuration.InitConfig(global.CfgFile); err != nil {
+			return err
+		}
 		conf := configuration.CurrentConfig
 		if conf.Server.Auth.Disabled {
 			return errors.New("server.auth.disabled is set, there are no accounts")

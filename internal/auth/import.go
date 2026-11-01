@@ -48,7 +48,7 @@ func (s *Service) validateConfiguredUsers() ([]importedUser, error) {
 		if role == "" {
 			role = RoleEditor
 		}
-		if err := validateRole(role); err != nil {
+		if err := ValidateRole(role); err != nil {
 			return nil, fmt.Errorf("server.auth.users[%d] (%s): %w", i, uc.Username, err)
 		}
 		if uc.Color != "" && !colorPattern.MatchString(uc.Color) {

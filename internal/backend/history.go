@@ -44,14 +44,13 @@ type GitCommit struct {
 func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	format := "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
 	commits := []GitCommit{}
 	current, start := path, "HEAD"
 	seen := map[string]bool{}
 	for len(commits) < limit && !seen[current] {
 		seen[current] = true
 		out, err := g.run(nil, "-c", "diff.renames=false", "log", "--relative", "--name-status",
-			"--max-count="+strconv.Itoa(limit-len(commits)), "--format="+format, start, "--", current)
+			"--max-count="+strconv.Itoa(limit-len(commits)), "--format="+gitLogFormat, start, "--", current)
 		if err != nil {
 			if strings.Contains(err.Error(), "does not have any commits") {
 				return commits, nil
@@ -63,47 +62,22 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 			if strings.TrimSpace(record) == "" {
 				continue
 			}
-			fields := strings.Split(record, "\x00")
-			if len(fields) < 7 {
-				return nil, fmt.Errorf("unexpected git log output %q", record)
-			}
-			t, _ := time.Parse(time.RFC3339, fields[1])
-			c := GitCommit{
-				Revision:  fields[0],
-				Time:      t,
-				Author:    GitSignature{Name: fields[2], Email: fields[3]},
-				CoAuthors: []GitSignature{},
-				Subject:   fields[4],
-				Path:      current,
-			}
-			for co := range strings.SplitSeq(fields[5], "\x01") {
-				if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
-					c.CoAuthors = append(c.CoAuthors, sig)
-				}
+			c, addsFile, err := parseLogRecord(record, current)
+			if err != nil {
+				return nil, err
 			}
 			added = ""
-			for line := range strings.SplitSeq(fields[6], "\n") {
-				if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
-					added = c.Revision
-				}
+			if addsFile {
+				added = c.Revision
 			}
 			commits = append(commits, c)
 		}
 		if added == "" || len(commits) >= limit {
 			break
 		}
-		// was the file renamed in the commit that added it?
-		out, err = g.run(nil, "-c", "diff.renames=true", "show", "--relative", "-M",
-			"--name-status", "--format=", added)
+		renamedFrom, err := g.renameSource(added, current)
 		if err != nil {
 			return nil, err
-		}
-		renamedFrom := ""
-		for line := range strings.SplitSeq(out, "\n") {
-			parts := strings.Split(strings.TrimSpace(line), "\t")
-			if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == current {
-				renamedFrom = parts[1]
-			}
 		}
 		if renamedFrom == "" {
 			break
@@ -111,6 +85,54 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 		current, start = renamedFrom, added+"^"
 	}
 	return commits, nil
+}
+
+// gitLogFormat separates records with 0x1e and fields with 0x00. parseLogRecord reads it.
+const gitLogFormat = "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
+
+// parseLogRecord parses a record of "git log --name-status --format=gitLogFormat" for the file at
+// path. addsFile is true if the commit added the file.
+func parseLogRecord(record string, path string) (commit GitCommit, addsFile bool, err error) {
+	fields := strings.Split(record, "\x00")
+	if len(fields) < 7 {
+		return GitCommit{}, false, fmt.Errorf("unexpected git log output %q", record)
+	}
+	t, _ := time.Parse(time.RFC3339, fields[1])
+	commit = GitCommit{
+		Revision:  fields[0],
+		Time:      t,
+		Author:    GitSignature{Name: fields[2], Email: fields[3]},
+		CoAuthors: []GitSignature{},
+		Subject:   fields[4],
+		Path:      path,
+	}
+	for co := range strings.SplitSeq(fields[5], "\x01") {
+		if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
+			commit.CoAuthors = append(commit.CoAuthors, sig)
+		}
+	}
+	for line := range strings.SplitSeq(fields[6], "\n") {
+		if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
+			addsFile = true
+		}
+	}
+	return commit, addsFile, nil
+}
+
+// renameSource returns the old path if a commit renamed a file to path, else ""
+func (g *GitRepo) renameSource(revision string, path string) (string, error) {
+	out, err := g.run(nil, "-c", "diff.renames=true", "show", "--relative", "-M", "--name-status", "--format=", revision)
+	if err != nil {
+		return "", err
+	}
+	source := ""
+	for line := range strings.SplitSeq(out, "\n") {
+		parts := strings.Split(strings.TrimSpace(line), "\t")
+		if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == path {
+			source = parts[1]
+		}
+	}
+	return source, nil
 }
 
 // parseSignature parses "Name <email>"

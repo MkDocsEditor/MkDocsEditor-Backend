@@ -127,7 +127,7 @@ func (s *Service) UpdateUser(by *User, id string, upd AdminUpdate, ri RequestInf
 		return nil, ErrNotFound
 	}
 	if upd.Role != nil {
-		if err = validateRole(*upd.Role); err != nil {
+		if err = ValidateRole(*upd.Role); err != nil {
 			return nil, err
 		}
 	}
@@ -136,68 +136,82 @@ func (s *Service) UpdateUser(by *User, id string, upd AdminUpdate, ri RequestInf
 	}
 	roleChange := upd.Role != nil && *upd.Role != target.Role
 	statusChange := upd.Status != nil && *upd.Status != target.Status
-	if (roleChange && target.Role == RoleAdmin) || (statusChange && *upd.Status == StatusDisabled && target.Role == RoleAdmin) {
-		if id == by.ID {
-			return nil, &ErrAdminGuard{Reason: "admins cannot demote or disable themselves"}
-		}
-		n, err := activeAdmins(s.db, id)
-		if err != nil {
+	disabling := statusChange && *upd.Status == StatusDisabled
+	if target.Role == RoleAdmin && (roleChange || disabling) {
+		if err = s.guardAdmin(by, id); err != nil {
 			return nil, err
 		}
-		if n == 0 {
-			return nil, &ErrAdminGuard{Reason: "the last active admin cannot be demoted or disabled"}
-		}
 	}
-	profile := upd.ProfileUpdate
-	if profile != (ProfileUpdate{}) {
-		if _, err = s.UpdateProfile(id, profile, by, ri); err != nil {
+	if upd.ProfileUpdate != (ProfileUpdate{}) {
+		if _, err = s.UpdateProfile(id, upd.ProfileUpdate, by, ri); err != nil {
 			return nil, err
 		}
 	}
 	if roleChange || statusChange {
-		tx, err := s.db.Begin()
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = tx.Rollback() }()
-		now := s.now().UTC()
-		if roleChange {
-			if _, err = tx.Exec("UPDATE accounts SET role = ?, updated_at = ? WHERE id = ?", *upd.Role, toMillis(now), id); err != nil {
-				return nil, err
-			}
-			if err = insertAudit(tx, now, AuditEvent{Type: AuditAccountRoleChanged, ActorID: by.ID, TargetID: id, IP: ri.IP, UserAgent: ri.UserAgent,
-				Details: map[string]any{"from": target.Role, "to": *upd.Role}}); err != nil {
-				return nil, err
-			}
-		}
-		if statusChange {
-			if _, err = tx.Exec("UPDATE accounts SET status = ?, updated_at = ? WHERE id = ?", *upd.Status, toMillis(now), id); err != nil {
-				return nil, err
-			}
-			t := AuditAccountEnabled
-			if *upd.Status == StatusDisabled {
-				t = AuditAccountDisabled
-				if err = revokeAccess(tx, id, now); err != nil {
-					return nil, err
-				}
-			}
-			if err = insertAudit(tx, now, AuditEvent{Type: t, ActorID: by.ID, TargetID: id, IP: ri.IP, UserAgent: ri.UserAgent}); err != nil {
-				return nil, err
-			}
-		}
-		if err = tx.Commit(); err != nil {
+		if err = s.applyRoleAndStatus(by, target, upd, roleChange, statusChange, ri); err != nil {
 			return nil, err
 		}
 		s.invalidateCache()
 		s.invalidateBasicCache(id)
 		switch {
-		case statusChange && *upd.Status == StatusDisabled:
+		case disabling:
 			s.notifyRevoked(RevokeEvent{AccountID: id, Reason: RevokeDisabled})
 		case roleChange:
 			s.notifyRevoked(RevokeEvent{AccountID: id, Reason: RevokeRole})
 		}
 	}
 	return s.AdminUser(id)
+}
+
+// guardAdmin refuses to demote or disable oneself and the last active admin
+func (s *Service) guardAdmin(by *User, id string) error {
+	if id == by.ID {
+		return &ErrAdminGuard{Reason: "admins cannot demote or disable themselves"}
+	}
+	n, err := activeAdmins(s.db, id)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return &ErrAdminGuard{Reason: "the last active admin cannot be demoted or disabled"}
+	}
+	return nil
+}
+
+// applyRoleAndStatus writes a change of role and status with its audit events in one transaction
+func (s *Service) applyRoleAndStatus(by *User, target *AdminUser, upd AdminUpdate, roleChange, statusChange bool, ri RequestInfo) error {
+	id := target.ID
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().UTC()
+	if roleChange {
+		if _, err = tx.Exec("UPDATE accounts SET role = ?, updated_at = ? WHERE id = ?", *upd.Role, toMillis(now), id); err != nil {
+			return err
+		}
+		if err = insertAudit(tx, now, AuditEvent{Type: AuditAccountRoleChanged, ActorID: by.ID, TargetID: id, IP: ri.IP, UserAgent: ri.UserAgent,
+			Details: map[string]any{"from": target.Role, "to": *upd.Role}}); err != nil {
+			return err
+		}
+	}
+	if statusChange {
+		if _, err = tx.Exec("UPDATE accounts SET status = ?, updated_at = ? WHERE id = ?", *upd.Status, toMillis(now), id); err != nil {
+			return err
+		}
+		t := AuditAccountEnabled
+		if *upd.Status == StatusDisabled {
+			t = AuditAccountDisabled
+			if err = revokeAccess(tx, id, now); err != nil {
+				return err
+			}
+		}
+		if err = insertAudit(tx, now, AuditEvent{Type: t, ActorID: by.ID, TargetID: id, IP: ri.IP, UserAgent: ri.UserAgent}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // revokeAccess ends the sessions and app tokens of an account and revokes its reset links

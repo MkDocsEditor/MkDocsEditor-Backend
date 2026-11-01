@@ -329,13 +329,14 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 	return c
 }
 
-// Start the REST service. It returns after Shutdown.
-func (rs *RestService) Start() {
+// Start the REST service. It returns after Shutdown, or with the error if serving fails.
+func (rs *RestService) Start() error {
 	rs.refs.Warm()
 	err := rs.echoRest.Start(net.JoinHostPort(rs.server.Host, strconv.Itoa(rs.server.Port)))
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		rs.echoRest.Logger.Fatal(err)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
 	}
+	return err
 }
 
 // Shutdown stops the REST service gracefully
