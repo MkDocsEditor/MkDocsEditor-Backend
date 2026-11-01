@@ -293,7 +293,9 @@ broadcast to all connections of the document when a new actor id is bound.
 The document (or a section above it) was renamed or moved, so its id changed. The server
 moves the Automerge state to the new id, sends this message and closes the socket with
 `4009`. The client reconnects to the new id with the same `epoch` and keeps its
-document.
+document. A client that connects later with the old id (it was offline during the move)
+gets this message right after `hello`; the backend keeps a durable table of old ids for
+that, see [references.md](references.md#7-ids-after-a-move-redirects).
 
 **`document-deleted`**: `{"type":"document-deleted","documentId":"…"}`. The file was
 deleted on disk or over REST. The socket is closed with `4004`. The client must keep its
