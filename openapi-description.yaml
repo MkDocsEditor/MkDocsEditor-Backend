@@ -50,6 +50,8 @@ tags:
     description: "Other files (images, attachments)"
   - name: History
     description: "Revision history of documents from git (requires git.enabled)"
+  - name: References
+    description: "Links between items, backlinks and link paths, see docs/references.md"
 
 paths:
   /alive/:
@@ -1913,6 +1915,165 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /document/{documentId}/references/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "Outgoing references of a document"
+      description: |
+        The links, images, reference definitions and HTML references of the document that
+        point to items of the wiki, in text order, resolved like MkDocs resolves them, or
+        `broken`. External links and same-page anchors are left out. Open documents are read
+        from their live text. See docs/references.md, sections 2 to 4.
+      operationId: getDocumentReferences
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The references"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentReferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /document/{documentId}/backlinks/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "References to a document (used by)"
+      operationId: getDocumentBacklinks
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The references to the document, sorted by source path, line and column"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Backlinks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /section/{sectionId}/backlinks/:
+    parameters:
+      - $ref: "#/components/parameters/sectionId"
+    get:
+      summary: "References to a section and everything inside it"
+      description: |
+        References to the section (folder links), its index document and every item inside it,
+        recursively. `internal` marks references from documents inside the section.
+      operationId: getSectionBacklinks
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The references, sorted by source path, line and column"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Backlinks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /resource/{resourceId}/backlinks/:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      summary: "References to a resource (used by)"
+      operationId: getResourceBacklinks
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The references to the resource, sorted by source path, line and column"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Backlinks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /references/broken/:
+    get:
+      summary: "All broken references of the wiki"
+      operationId: getBrokenReferences
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The broken references, sorted by source path, line and column"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrokenReferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /references/unused-resources/:
+    get:
+      summary: "Resources that nothing uses"
+      description: |
+        Resources that no reference points to and whose path is no string value of `mkdocs.yml`
+        (for example `theme.logo`). A hint for cleanup: templates, snippets and links from outside
+        the wiki are not seen.
+      operationId: getUnusedResources
+      tags: [ References ]
+      responses:
+        "200":
+          description: "The unused resources, sorted by path"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnusedResources"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /link/:
+    get:
+      summary: "The link destination from a document to an item"
+      description: |
+        The reference implementation of the link path algorithm (docs/references.md section 8),
+        which the clients implement themselves for their pickers.
+      operationId: getLink
+      tags: [ References ]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: "Id of the document that will contain the link"
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          description: "Id of the target document, section or resource"
+          schema:
+            type: string
+        - name: anchor
+          in: query
+          required: false
+          description: "Heading anchor, without `#`"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "The destination and a markdown snippet"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2080,6 +2241,13 @@ components:
         name:
           type: string
           description: "Folder name"
+        path:
+          type: string
+          description: "Path relative to the docs folder, `\"\"` for the root section"
+          example: "guide"
+        index:
+          type: string
+          description: "Id of the index document (`index.md`, else `README.md`), or `\"\"`"
         subsections:
           type: array
           items:
@@ -2106,6 +2274,10 @@ components:
         name:
           type: string
           description: "File name without the .md extension"
+        path:
+          type: string
+          description: "Path relative to the docs folder"
+          example: "guide/setup.md"
         filesize:
           type: integer
           format: int64
@@ -2128,12 +2300,160 @@ components:
         name:
           type: string
           description: "File name"
+        path:
+          type: string
+          description: "Path relative to the docs folder"
+          example: "guide/img/logo.png"
         filesize:
           type: integer
           format: int64
         modtime:
           type: string
           format: date-time
+        mimeType:
+          type: string
+          description: "From the file extension, `application/octet-stream` when unknown"
+          example: "image/png"
+        kind:
+          type: string
+          enum: [ image, video, audio, pdf, text, archive, other ]
+
+    ItemRef:
+      type: object
+      required: [ type, id, path, name ]
+      properties:
+        type:
+          type: string
+          enum: [ section, document, resource ]
+        id:
+          type: string
+        path:
+          type: string
+          example: "guide/setup.md"
+        name:
+          type: string
+
+    Reference:
+      type: object
+      required: [ kind, line, column, destination, anchor, status, target ]
+      properties:
+        kind:
+          type: string
+          enum: [ link, image, definition, html ]
+        line:
+          type: integer
+          description: "1-based"
+        column:
+          type: integer
+          description: "1-based, in Unicode code points, of the first character of the destination"
+        destination:
+          type: string
+          description: "As written, including `?query` and `#anchor`"
+          example: "../img/Strand%20(2).png"
+        anchor:
+          type: string
+          description: "The part after `#`, or `\"\"`"
+        status:
+          type: string
+          enum: [ ok, broken ]
+        target:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/ItemRef"
+          nullable: true
+          description: "The resolved item; null when broken"
+        reason:
+          type: string
+          enum: [ not-found, outside-docs ]
+          description: "Only for broken references"
+        path:
+          type: string
+          description: "Only for broken references: the resolved path that does not exist"
+
+    DocumentReferences:
+      type: object
+      required: [ document, references ]
+      properties:
+        document:
+          $ref: "#/components/schemas/ItemRef"
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reference"
+
+    Backlink:
+      type: object
+      required: [ source, kind, line, column, destination, anchor, target, internal ]
+      properties:
+        source:
+          $ref: "#/components/schemas/ItemRef"
+        kind:
+          type: string
+          enum: [ link, image, definition, html ]
+        line:
+          type: integer
+        column:
+          type: integer
+        destination:
+          type: string
+        anchor:
+          type: string
+        target:
+          $ref: "#/components/schemas/ItemRef"
+        internal:
+          type: boolean
+          description: "Section backlinks only: the source document is inside the section"
+
+    Backlinks:
+      type: object
+      required: [ item, backlinks ]
+      properties:
+        item:
+          $ref: "#/components/schemas/ItemRef"
+        backlinks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Backlink"
+
+    BrokenReference:
+      allOf:
+        - $ref: "#/components/schemas/Reference"
+        - type: object
+          required: [ source ]
+          properties:
+            source:
+              $ref: "#/components/schemas/ItemRef"
+
+    BrokenReferences:
+      type: object
+      required: [ broken ]
+      properties:
+        broken:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrokenReference"
+
+    UnusedResources:
+      type: object
+      required: [ resources ]
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/Resource"
+
+    LinkResult:
+      type: object
+      required: [ destination, markdown, target ]
+      properties:
+        destination:
+          type: string
+          example: "../img/Strand%20%282%29.png"
+        markdown:
+          type: string
+          example: "![Strand (2)](../img/Strand%20%282%29.png)"
+        target:
+          $ref: "#/components/schemas/ItemRef"
 
     NewItemRequest:
       type: object

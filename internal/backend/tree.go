@@ -44,6 +44,8 @@ type (
 		ID          string       `json:"id" xml:"id" form:"id" query:"id"`
 		Name        string       `json:"name" xml:"name" form:"name" query:"name"`
 		Path        string       `json:"-" xml:"-" form:"-" query:"-"`
+		RelPath     string       `json:"path" xml:"path" form:"path" query:"path"`
+		Index       string       `json:"index" xml:"index" form:"index" query:"index"`
 		Subsections *[]*Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
 		Documents   *[]*Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
 		Resources   *[]*Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
@@ -54,6 +56,7 @@ type (
 		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
 		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
 		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
+		RelPath  string    `json:"path" xml:"path" form:"path" query:"path"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
 		SubUrl   string    `json:"url" xml:"url" form:"url" query:"url"`
@@ -64,8 +67,11 @@ type (
 		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
 		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
 		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
+		RelPath  string    `json:"path" xml:"path" form:"path" query:"path"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
+		MimeType string    `json:"mimeType" xml:"mimeType" form:"mimeType" query:"mimeType"`
+		Kind     string    `json:"kind" xml:"kind" form:"kind" query:"kind"`
 	}
 )
 
@@ -132,6 +138,7 @@ func (tm *TreeManager) CreateItemTree() {
 	parent, name := filepath.Split(tm.rootPath)
 	root := tm.createSectionForTree(parent, name, RootSectionID)
 	tm.populateItemTree(root, root.Path, ignore)
+	setSectionIndexes(root)
 
 	tm.lock.Lock()
 	oldTree := tm.tree
@@ -183,6 +190,25 @@ func (tm *TreeManager) populateItemTree(section *Section, path string, ignore fu
 	}
 }
 
+// setSectionIndexes sets the index document id of every section
+func setSectionIndexes(s *Section) {
+	if d := sectionIndexDocument(s); d != nil {
+		s.Index = d.ID
+	}
+	for _, sub := range *s.Subsections {
+		setSectionIndexes(sub)
+	}
+}
+
+// relPath returns the path of an item relative to the docs folder, slash separated
+func (tm *TreeManager) relPath(absPath string) string {
+	rel, err := filepath.Rel(tm.rootPath, absPath)
+	if err != nil || rel == "." {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
 // newIgnoreMatcher returns a function that reports whether a path should be left out of the tree.
 // Hidden files and folders, the extra_css files of mkdocs.yml and the configured blacklist are ignored.
 func newIgnoreMatcher(rootPath string) func(path string) bool {
@@ -229,6 +255,7 @@ func (tm *TreeManager) createSectionForTree(path string, name string, id string)
 		ID:          id,
 		Name:        name,
 		Path:        sectionPath,
+		RelPath:     tm.relPath(sectionPath),
 		Documents:   &[]*Document{},
 		Subsections: &[]*Section{},
 		Resources:   &[]*Resource{},
@@ -253,6 +280,7 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 		ID:       tm.GenerateId(documentPath),
 		Name:     strings.TrimSuffix(fileName, markdownFileExtension),
 		Path:     documentPath,
+		RelPath:  tm.relPath(documentPath),
 		Filesize: f.Size(),
 		ModTime:  f.ModTime(),
 		SubUrl:   subUrl,
@@ -262,13 +290,17 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 // creates a resource object for storing in the tree
 func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileInfo) *Resource {
 	resourcePath := filepath.Join(parentFolderPath, f.Name())
+	mimeType := mimeTypeOf(f.Name())
 	return &Resource{
 		Type:     TypeResource,
 		ID:       tm.GenerateId(resourcePath),
 		Name:     f.Name(),
 		Path:     resourcePath,
+		RelPath:  tm.relPath(resourcePath),
 		Filesize: f.Size(),
 		ModTime:  f.ModTime(),
+		MimeType: mimeType,
+		Kind:     resourceKind(mimeType),
 	}
 }
 

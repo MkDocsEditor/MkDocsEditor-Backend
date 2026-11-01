@@ -5,7 +5,9 @@ links between pages, the use of resources, and moving or renaming pages, folders
 resources. It extends [`sync-protocol.md`](sync-protocol.md); the websocket protocol stays
 version 1, the additions are backwards compatible.
 
-Status: **design**. The implementation lands in several pull requests. Where this
+Status: **design, partly implemented**. Implemented: parsing, resolving, the reference
+index and its endpoints (section 4), `GET /link/` (section 8), and the `path`, `index`,
+`mimeType` and `kind` tree fields (section 9). The rest lands in further pull requests. Where this
 document and `openapi-description.yaml` disagree on a REST endpoint, the OpenAPI file wins
 once the endpoint is implemented.
 
@@ -146,8 +148,7 @@ current text of every document while it holds the locks (see [Moving](#5-moving-
   "destination": "../img/Strand%20(2).png",
   "anchor": "",
   "status": "ok",
-  "target": { "type": "resource", "id": "811…", "path": "img/Strand (2).png", "name": "Strand (2).png" },
-  "reason": ""
+  "target": { "type": "resource", "id": "811…", "path": "img/Strand (2).png", "name": "Strand (2).png" }
 }
 ```
 
@@ -622,8 +623,8 @@ The tree objects (`GET /section/`, `GET /section/{id}/`, `GET /document/{id}/`,
 Existing fields (`filesize`, `modtime`, `url` of documents) stay.
 
 `kind` by MIME type: `image/*` is `image`, `video/*` `video`, `audio/*` `audio`,
-`application/pdf` `pdf`, `text/*`, `application/json`, `application/xml` and
-`application/yaml` `text`, `application/zip`, `application/gzip`, `application/x-tar`,
+`application/pdf` `pdf`, `text/*`, `application/json`, `application/xml`,
+`application/yaml` and `application/toml` `text`, `application/zip`, `application/gzip`, `application/x-tar`,
 `application/x-7z-compressed` and `application/vnd.rar` `archive`, everything else
 `other`.
 
