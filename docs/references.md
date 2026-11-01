@@ -56,8 +56,8 @@ The backend parses every document for these references:
 
 | Kind | Syntax | Destination |
 |---|---|---|
-| `link` | `[text](dest)`, `[text](dest "title")`, `[text](<dest with spaces>)` | `dest` |
-| `image` | `![alt](dest)`, also with a title or angle brackets | `dest` |
+| `link` | `[text](dest)`, `[text](dest "title")`, `[text](<dest with spaces>)`, `[text](dest with spaces)` | `dest` |
+| `image` | `![alt](dest)`, also with a title, angle brackets or raw spaces | `dest` |
 | `definition` | `[id]: dest "title"` at the start of a line (up to 3 spaces), used by `[text][id]` and `![alt][id]` | `dest` |
 | `html` | `<a href="…">`, `<img src="…">`, `<source src="…">`, `<video src="…">`, `<audio src="…">`; quotes `"`, `'` or none | the attribute value |
 
@@ -65,6 +65,9 @@ Rules:
 
 - Nested constructs are found separately: `[![logo](img/logo.png)](index.md)` has an
   image and a link.
+- Raw spaces in an inline destination are not valid CommonMark, but Python-Markdown and so
+  MkDocs accept them: the destination runs up to the balancing `)`, without a quoted title
+  at its end.
 - Fenced code blocks (```` ``` ```` or `~~~`, also inside lists and admonitions), inline
   code spans, HTML comments and a YAML front matter block at the start of the file are
   skipped. Indented text is **not** treated as a code block: MkDocs content inside
@@ -394,8 +397,7 @@ text, title, angle brackets, HTML quotes and attributes, `{ width=300 }` attribu
   stays like that and does not become `Strand%20%282%29.png`.
 - New segments are encoded with the algorithm. Two exceptions keep the author's style: if
   the old destination percent-encoded a non-ASCII character (`%C3%A4`), non-ASCII
-  characters are encoded too; if the old destination contained a raw space (allowed inside
-  `<…>` and in HTML attributes), spaces stay raw.
+  characters are encoded too; if the old destination contained a raw space, spaces stay raw.
 - In an HTML attribute that wrote `&` as `&amp;`, the new value does so too.
 
 ### Through Automerge
