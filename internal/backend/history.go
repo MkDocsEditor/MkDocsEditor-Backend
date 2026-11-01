@@ -379,18 +379,10 @@ func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, mess
 		if current == text {
 			return nil
 		}
-		fork, err := ds.doc.Fork()
+		fork, err := ds.forkForServerChangeLocked(ActorUserServer)
 		if err != nil {
 			return err
 		}
-		actor, err := s.actors.NewServerActor(ActorUserServer)
-		if err != nil {
-			return err
-		}
-		if err = fork.SetActorID(actor); err != nil {
-			return err
-		}
-		ds.announceActorLocked(actor, ActorUserServer, nil)
 		if err = spliceDiff(fork.Path(contentKey).Text(), current, text); err != nil {
 			return err
 		}

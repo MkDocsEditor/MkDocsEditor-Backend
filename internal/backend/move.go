@@ -441,7 +441,7 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 		sessions = append(sessions, pd)
 	}
 	for p, session := range s.sessions {
-		if _, ok := movePath(p, op.oldRel, op.oldRel); ok && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
+		if isInside(p, op.oldRel) && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
 			sessions = append(sessions, &plannedDocument{oldRel: p, newRel: op.mapPath(p), session: session})
 		}
 	}
@@ -582,22 +582,19 @@ func (s *SyncServer) documentTextLocked(pd *plannedDocument) (string, error) {
 // prepareRewrite applies the reference edits to a fork of the document, as a change of a new
 // server actor. The fork is merged only when the whole move succeeds. Caller holds the session lock.
 func (s *SyncServer) prepareRewrite(pd *plannedDocument, op *moveOp) (*automerge.Doc, error) {
-	fork, err := pd.session.doc.Fork()
+	fork, err := pd.session.forkForServerChangeLocked(ActorUserServer)
 	if err != nil {
-		return nil, err
-	}
-	actor, err := s.actors.NewServerActor(ActorUserServer)
-	if err != nil {
-		return nil, err
-	}
-	if err = fork.SetActorID(actor); err != nil {
 		return nil, err
 	}
 	if err = spliceEdits(fork.Path(contentKey).Text(), pd.text, pd.edits); err != nil {
 		return nil, err
 	}
-	if got, err := contentText(fork); err != nil || got != applyEdits(pd.text, pd.edits) {
-		return nil, fmt.Errorf("the reference updates do not apply cleanly: %v", err)
+	got, err := contentText(fork)
+	if err != nil {
+		return nil, err
+	}
+	if got != applyEdits(pd.text, pd.edits) {
+		return nil, errors.New("the reference updates do not apply cleanly")
 	}
 	username := ""
 	if op.user != nil {
@@ -606,7 +603,6 @@ func (s *SyncServer) prepareRewrite(pd *plannedDocument, op *moveOp) (*automerge
 	if _, err = fork.Commit("update references after moving " + op.oldRel + " to " + op.newRel + username); err != nil {
 		return nil, err
 	}
-	pd.session.announceActorLocked(actor, ActorUserServer, nil)
 	return fork, nil
 }
 

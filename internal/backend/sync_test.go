@@ -609,3 +609,40 @@ func TestAuthorship(t *testing.T) {
 		t.Errorf("incremental %+v, full %+v", au, *full)
 	}
 }
+
+// A failed write of the file is tried again, and the document is unloaded afterwards when nobody
+// is connected any more
+func TestSyncFailedWriteIsRetried(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to read-only folders")
+	}
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	folder := filepath.Join(e.project, "docs", "guide")
+	before := e.readFile("guide/setup.md")
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	if err := os.Chmod(folder, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+	a.appendText("more")
+	a.flush()
+	a.waitFor("the change", func() bool { return e.serverText("guide/setup.md") == before+"more" })
+	time.Sleep(3 * e.ss.FlushDelay)
+	if got := e.readFile("guide/setup.md"); got != before {
+		t.Fatalf("the file changed in a read-only folder: %q", got)
+	}
+	a.disconnect()
+
+	if err := os.Chmod(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the change on disk", func() bool { return e.readFile("guide/setup.md") == before+"more" })
+	eventually(t, "the document to be unloaded", func() bool {
+		e.ss.mu.Lock()
+		defer e.ss.mu.Unlock()
+		return len(e.ss.sessions) == 0
+	})
+}

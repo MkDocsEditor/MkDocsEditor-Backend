@@ -64,6 +64,23 @@ func (s *SyncServer) lateFixEdits(text string, sourcePath string) []textEdit {
 	return edits
 }
 
+// applyReferenceFixesLocked merges the edits into the document as a change of a server actor.
+// Caller holds mu.
+func (ds *docSession) applyReferenceFixesLocked(text string, edits []textEdit) error {
+	fork, err := ds.forkForServerChangeLocked(ActorUserServer)
+	if err != nil {
+		return err
+	}
+	if err = spliceEdits(fork.Path(contentKey).Text(), text, edits); err != nil {
+		return err
+	}
+	if _, err = fork.Commit("update references to moved items"); err != nil {
+		return err
+	}
+	_, err = ds.doc.Merge(fork)
+	return err
+}
+
 // fixMovedReferencesLocked rewrites references to old paths of moved items, as a change of a
 // server actor, before the document is written to disk. Offline clients can bring such
 // references after a move. Caller holds mu.
@@ -76,26 +93,7 @@ func (ds *docSession) fixMovedReferencesLocked() {
 	if len(edits) == 0 {
 		return
 	}
-	fork, err := ds.doc.Fork()
-	if err == nil {
-		var actor string
-		if actor, err = ds.server.actors.NewServerActor(ActorUserServer); err == nil {
-			err = fork.SetActorID(actor)
-			if err == nil {
-				ds.announceActorLocked(actor, ActorUserServer, nil)
-			}
-		}
-	}
-	if err == nil {
-		err = spliceEdits(fork.Path(contentKey).Text(), text, edits)
-	}
-	if err == nil {
-		_, err = fork.Commit("update references to moved items")
-	}
-	if err == nil {
-		_, err = ds.doc.Merge(fork)
-	}
-	if err != nil {
+	if err = ds.applyReferenceFixesLocked(text, edits); err != nil {
 		log.Printf("Unable to update the references to moved items in %s: %v", ds.meta.Path, err)
 		return
 	}

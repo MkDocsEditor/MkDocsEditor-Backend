@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path"
@@ -230,11 +231,11 @@ func (s *StateStore) Archive(relPath string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for p, meta := range s.index {
-		if _, ok := movePath(p, relPath, relPath); !ok {
+		if !isInside(p, relPath) {
 			continue
 		}
 		for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
-			if err := os.Rename(f(s.activeDir(), meta.UUID), f(s.deletedDir(), meta.UUID)); err != nil && !os.IsNotExist(err) {
+			if err := os.Rename(f(s.activeDir(), meta.UUID), f(s.deletedDir(), meta.UUID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 		}
@@ -251,7 +252,7 @@ func (s *StateStore) MarkCorrupt(meta *DocumentMeta) error {
 	suffix := ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
 	for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
 		name := f(s.activeDir(), meta.UUID)
-		if err := os.Rename(name, name+suffix); err != nil && !os.IsNotExist(err) {
+		if err := os.Rename(name, name+suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
@@ -285,18 +286,13 @@ func newRandomID() string {
 	return hex.EncodeToString(b)
 }
 
-// checkStateDir makes sure the state directory is not inside the docs folder
 // CheckStateDir checks that the state directory is not inside the docs folder
 func CheckStateDir(stateDir string, docsDir string) error {
-	return checkStateDir(stateDir, docsDir)
-}
-
-func checkStateDir(stateDir string, docsDir string) error {
 	rel, err := filepath.Rel(docsDir, stateDir)
 	if err != nil {
 		return err
 	}
-	if rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)) {
+	if filepath.IsLocal(rel) {
 		return fmt.Errorf("the state directory %s must not be inside the docs folder %s", stateDir, docsDir)
 	}
 	return nil
@@ -310,7 +306,7 @@ func ExcludeFromGit(projectPath string, stateDir string) error {
 		return nil
 	}
 	rel, err := filepath.Rel(projectPath, stateDir)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || !filepath.IsLocal(rel) {
 		return nil
 	}
 	pattern := "/" + filepath.ToSlash(rel) + "/"

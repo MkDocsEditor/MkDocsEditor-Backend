@@ -182,7 +182,7 @@ func (c *GitCommitter) takePending(paths ...string) map[string]int {
 	total := map[string]int{}
 	for p, e := range c.pending {
 		for _, q := range paths {
-			if _, ok := movePath(p, q, q); ok {
+			if isInside(p, q) {
 				for user, n := range e.Changes {
 					total[user] += n
 				}

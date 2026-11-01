@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"sync"
@@ -126,6 +127,10 @@ func (s *SyncServer) loadSession(relPath string, absPath string, docID string) (
 		}
 		session.dirty = true
 	}
+	// or the last write of the file failed
+	if text, err := session.text(); err == nil && text != session.diskBaseText {
+		session.scheduleFlushLocked()
+	}
 	return session, nil
 }
 
@@ -184,18 +189,10 @@ func (ds *docSession) ingestExternalLocked(fileText string) error {
 	if !utf8.ValidString(fileText) {
 		return ErrNotUTF8
 	}
-	fork, err := ds.doc.Fork(ds.diskBaseHeads...)
+	fork, err := ds.forkForServerChangeLocked(ActorUserDisk, ds.diskBaseHeads...)
 	if err != nil {
 		return err
 	}
-	actor, err := ds.server.actors.NewServerActor(ActorUserDisk)
-	if err != nil {
-		return err
-	}
-	if err = fork.SetActorID(actor); err != nil {
-		return err
-	}
-	ds.announceActorLocked(actor, ActorUserDisk, nil)
 	if err = spliceDiff(fork.Path(contentKey).Text(), ds.diskBaseText, fileText); err != nil {
 		return err
 	}
@@ -214,11 +211,30 @@ func (ds *docSession) ingestExternalLocked(fileText string) error {
 	return nil
 }
 
+// forkForServerChangeLocked forks the document, at the given heads if any, for a change made by
+// the server: the fork has a new actor of the pseudo user, which is announced to the clients.
+// Caller holds mu.
+func (ds *docSession) forkForServerChangeLocked(pseudoUser string, heads ...automerge.ChangeHash) (*automerge.Doc, error) {
+	fork, err := ds.doc.Fork(heads...)
+	if err != nil {
+		return nil, err
+	}
+	actor, err := ds.server.actors.NewServerActor(pseudoUser)
+	if err != nil {
+		return nil, err
+	}
+	if err = fork.SetActorID(actor); err != nil {
+		return nil, err
+	}
+	ds.announceActorLocked(actor, pseudoUser, nil)
+	return fork, nil
+}
+
 // checkDiskLocked merges the file content if it changed on disk. It returns false if the file is gone.
 func (ds *docSession) checkDiskLocked() (bool, error) {
 	data, err := os.ReadFile(ds.absPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
 		return true, err
@@ -257,7 +273,8 @@ func (ds *docSession) writeToDiskLocked() error {
 	return nil
 }
 
-// flushLocked writes the file and saves the Automerge state
+// flushLocked writes the file and saves the Automerge state. The session stays dirty when one of
+// them fails, and the flush is tried again after the flush delay.
 func (ds *docSession) flushLocked() {
 	if ds.flushTimer != nil {
 		ds.flushTimer.Stop()
@@ -267,11 +284,17 @@ func (ds *docSession) flushLocked() {
 		return
 	}
 	ds.fixMovedReferencesLocked()
+	failed := false
 	if err := ds.writeToDiskLocked(); err != nil {
 		log.Printf("Unable to write %s: %v", ds.meta.Path, err)
+		failed = true
 	}
 	if err := ds.server.store.Save(ds.meta, ds.doc.Save()); err != nil {
 		log.Printf("Unable to save the state of %s: %v", ds.meta.Path, err)
+		failed = true
+	}
+	if failed {
+		ds.scheduleFlushLocked()
 		return
 	}
 	ds.dirty = false
@@ -283,14 +306,28 @@ func (ds *docSession) scheduleFlushLocked() {
 	if ds.flushTimer != nil || ds.closed {
 		return
 	}
-	ds.flushTimer = time.AfterFunc(ds.server.FlushDelay, func() {
-		ds.mu.Lock()
-		defer ds.mu.Unlock()
-		ds.flushTimer = nil
-		if !ds.closed {
-			ds.flushLocked()
+	ds.flushTimer = time.AfterFunc(ds.server.FlushDelay, ds.flushAfterDelay)
+}
+
+// flushAfterDelay runs a scheduled flush and unloads a document that nobody is connected to
+// any more
+func (ds *docSession) flushAfterDelay() {
+	s := ds.server
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.flushTimer = nil
+	if ds.closed {
+		return
+	}
+	ds.flushLocked()
+	if !ds.dirty && len(ds.conns) == 0 {
+		ds.closed = true
+		if s.sessions[ds.meta.Path] == ds {
+			delete(s.sessions, ds.meta.Path)
 		}
-	})
+	}
 }
 
 // broadcastSyncLocked sends pending sync messages to every connection
@@ -315,16 +352,6 @@ func (ds *docSession) announceActorLocked(actorID string, subject string, except
 	info.Type = MsgActor
 	info.DocumentID = ds.docID
 	ds.broadcastLocked(&info, except)
-}
-
-// actorInfos returns the actor map for the initial content
-func (ds *docSession) actorInfos() []ActorInfo {
-	all := ds.server.actors.All()
-	out := make([]ActorInfo, 0, len(all))
-	for _, id := range SortedActorIDs(all) {
-		out = append(out, ds.server.actorInfo(id, all[id].Subject))
-	}
-	return out
 }
 
 // countChangesLocked records the changes per user for the git commits

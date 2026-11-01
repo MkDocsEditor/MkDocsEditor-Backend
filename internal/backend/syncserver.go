@@ -25,6 +25,12 @@ var ErrDocumentInUse = errors.New("there are still clients connected to the docu
 const (
 	maxMessageSize = 64 << 20
 	sendQueueSize  = 256
+
+	// wsWriteTimeout limits a single websocket write
+	wsWriteTimeout = 10 * time.Second
+	// wsCloseTimeout is how long a closing connection may send its queued messages and how long
+	// the client may take to answer the close frame
+	wsCloseTimeout = 2 * time.Second
 )
 
 // SyncServer serves the document websocket: Automerge sync, presence and the persistence of
@@ -70,7 +76,7 @@ type SyncServer struct {
 
 // NewSyncServer creates the sync server. stateDir holds the Automerge state.
 func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateDir string, allowedOrigins []string) (*SyncServer, error) {
-	if err := checkStateDir(stateDir, treeManager.RootPath()); err != nil {
+	if err := CheckStateDir(stateDir, treeManager.RootPath()); err != nil {
 		return nil, err
 	}
 	store, err := NewStateStore(stateDir)
@@ -189,7 +195,7 @@ func checkOrigin(allowedOrigins []string) func(r *http.Request) bool {
 			return true
 		}
 		for _, allowed := range allowedOrigins {
-			if allowed == "*" || strings.EqualFold(allowed, origin) {
+			if allowed == "*" || strings.EqualFold(strings.TrimRight(allowed, "/"), origin) {
 				return true
 			}
 		}
@@ -202,7 +208,7 @@ func (s *SyncServer) relPath(absPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.HasPrefix(rel, "..") {
+	if !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("%s is outside the docs folder", absPath)
 	}
 	return filepath.ToSlash(rel), nil
@@ -336,7 +342,7 @@ func (s *SyncServer) IsClientConnected(absPath string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for p, session := range s.sessions {
-		if _, ok := movePath(p, rel, rel); ok || rel == "." {
+		if rel == "." || isInside(p, rel) {
 			session.mu.Lock()
 			n := len(session.conns)
 			session.mu.Unlock()
@@ -346,14 +352,6 @@ func (s *SyncServer) IsClientConnected(absPath string) bool {
 		}
 	}
 	return false
-}
-
-// IsItemBeingEditedRecursive returns an error if a document in the section has connected clients
-func (s *SyncServer) IsItemBeingEditedRecursive(section *Section) error {
-	if s.IsClientConnected(section.Path) {
-		return errors.New("a document within this section is currently being edited by another user")
-	}
-	return nil
 }
 
 // DeleteItem runs the deletion of the file or folder at absPath. Without force it refuses with
@@ -371,7 +369,7 @@ func (s *SyncServer) DeleteItem(absPath string, force bool, remove func() error)
 	defer s.mu.Unlock()
 	affected := map[string]*docSession{}
 	for p, session := range s.sessions {
-		if _, ok := movePath(p, rel, rel); ok {
+		if isInside(p, rel) {
 			affected[p] = session
 			session.mu.Lock()
 			session.flushLocked()
@@ -679,11 +677,11 @@ func (c *wsConn) writeLoop() {
 		case <-c.done:
 			return
 		case m := <-c.outgoing:
-			_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.ws.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 			if m.closeCode != 0 {
 				_ = c.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(m.closeCode, m.reason))
 				// give the client a moment to answer the close frame, then drop the connection
-				time.AfterFunc(2*time.Second, c.terminate)
+				time.AfterFunc(wsCloseTimeout, c.terminate)
 				return
 			}
 			if err := c.ws.WriteMessage(websocket.TextMessage, m.data); err != nil {
@@ -693,7 +691,7 @@ func (c *wsConn) writeLoop() {
 			lastWrite = time.Now()
 		case <-ticker.C:
 			if time.Since(lastWrite) >= c.server.HeartbeatPeriod-10*time.Millisecond {
-				_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = c.ws.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 				if err := c.ws.WriteMessage(websocket.TextMessage, heartbeat); err != nil {
 					c.terminate()
 					return
@@ -713,119 +711,171 @@ func (c *wsConn) fail(closeCode int, errCode string, message string) {
 	c.close(closeCode, message)
 }
 
-// run handles the connection until it closes
-func (c *wsConn) run(documentID string) {
-	defer func() {
-		c.server.leave(c)
-		// let the writer send the queued messages and the close frame
-		c.close(CloseNormal, "")
-		select {
-		case <-c.writerDone:
-		case <-time.After(2 * time.Second):
-		}
-		c.terminate()
-	}()
+// shutdown lets the writer send the queued messages and a close frame, then drops the connection
+func (c *wsConn) shutdown() {
+	c.close(CloseNormal, "")
+	select {
+	case <-c.writerDone:
+	case <-time.After(wsCloseTimeout):
+	}
+	c.terminate()
+}
 
+// readHello reads the first message of a connection. On failure it answers the client and
+// returns nil.
+func (c *wsConn) readHello() *HelloMessage {
 	_ = c.ws.SetReadDeadline(time.Now().Add(c.server.HelloTimeout))
 	_, data, err := c.ws.ReadMessage()
 	if err != nil {
 		if c.user == nil {
 			c.close(CloseUnauthorized, "no hello received")
 		}
-		return
+		return nil
 	}
 	var hello HelloMessage
 	if err = json.Unmarshal(data, &hello); err != nil || hello.Type != MsgHello {
 		c.fail(CloseProtocolError, ErrCodeBadRequest, "the first message must be hello")
+		return nil
+	}
+	return &hello
+}
+
+// authenticate redeems the ticket of a hello message, unless the upgrade request was
+// authenticated already. It returns false after answering the client.
+func (c *wsConn) authenticate(hello *HelloMessage) bool {
+	if c.user != nil {
+		return true
+	}
+	if hello.Ticket == "" {
+		c.fail(CloseUnauthorized, ErrCodeUnauthorized, "authentication required")
+		return false
+	}
+	user, sessionID, err := c.server.authenticator.RedeemTicket(hello.Ticket)
+	if err != nil {
+		c.fail(CloseUnauthorized, ErrCodeUnauthorized, err.Error())
+		return false
+	}
+	c.user, c.sessionID = user, sessionID
+	return true
+}
+
+// readMessage reads the next message within the heartbeat timeout. It returns false when the
+// connection ended.
+func (c *wsConn) readMessage() ([]byte, bool) {
+	_ = c.ws.SetReadDeadline(time.Now().Add(c.server.HeartbeatTimeout))
+	_, data, err := c.ws.ReadMessage()
+	if err != nil {
+		var netErr interface{ Timeout() bool }
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			c.close(CloseHeartbeatTimout, "heartbeat timeout")
+		}
+		return nil, false
+	}
+	return data, true
+}
+
+// failActor answers an actor id that was refused by the actor registry
+func (c *wsConn) failActor(err error, foreignMessage string) {
+	if errors.Is(err, ErrForeignActor) {
+		c.fail(CloseForbidden, ErrCodeForeignActor, foreignMessage)
+	} else {
+		c.fail(CloseProtocolError, ErrCodeBadRequest, err.Error())
+	}
+}
+
+// run handles the connection until it closes
+func (c *wsConn) run(documentID string) {
+	defer func() {
+		c.server.leave(c)
+		c.shutdown()
+	}()
+
+	hello := c.readHello()
+	if hello == nil {
 		return
 	}
 	if hello.DocumentID != "" && hello.DocumentID != documentID {
 		c.fail(CloseProtocolError, ErrCodeBadRequest, "documentId does not match the URL")
 		return
 	}
-	if c.user == nil {
-		if hello.Ticket == "" {
-			c.fail(CloseUnauthorized, ErrCodeUnauthorized, "authentication required")
-			return
-		}
-		user, sessionID, err := c.server.authenticator.RedeemTicket(hello.Ticket)
-		if err != nil {
-			c.fail(CloseUnauthorized, ErrCodeUnauthorized, err.Error())
-			return
-		}
-		c.user, c.sessionID = user, sessionID
+	if !c.authenticate(hello) {
+		return
 	}
-	if _, err = c.server.actors.Bind(hello.ActorID, c.user.ID); err != nil {
-		if errors.Is(err, ErrForeignActor) {
-			c.fail(CloseForbidden, ErrCodeForeignActor, err.Error())
-		} else {
-			c.fail(CloseProtocolError, ErrCodeBadRequest, err.Error())
-		}
+	if _, err := c.server.actors.Bind(hello.ActorID, c.user.ID); err != nil {
+		c.failActor(err, err.Error())
 		return
 	}
 	c.actorID = hello.ActorID
 
+	if c.openDocument(documentID, hello) {
+		c.readLoop()
+	}
+}
+
+// openDocument joins the session of the document, or tells the client where the document went.
+// It returns false if the connection must close.
+func (c *wsConn) openDocument(documentID string, hello *HelloMessage) bool {
 	if newID := c.server.documentRedirect(documentID, hello.Epoch); newID != "" {
 		log.Printf("%s: %s connected to the old id %s, redirecting to %s", c.clientID, c.user.Username, documentID, newID)
 		c.send(&DocumentRenamedMessage{Type: MsgDocumentRenamed, DocumentID: documentID, NewDocumentID: newID})
 		c.close(CloseRenamed, "document renamed")
-		return
+		return false
 	}
 
 	d := c.server.treeManager.GetDocument(documentID)
 	if d == nil {
 		c.send(&MessageBase{Type: MsgDocumentDeleted, DocumentID: documentID})
 		c.close(CloseNotFound, "document not found")
-		return
+		return false
 	}
-	if _, err = c.server.join(c, d); err != nil {
+	if _, err := c.server.join(c, d); err != nil {
 		log.Printf("%s: unable to open %s: %v", c.clientID, d.Path, err)
 		if errors.Is(err, ErrNotUTF8) {
 			c.fail(CloseNotFound, ErrCodeBadRequest, err.Error())
 		} else {
 			c.fail(CloseInternalError, ErrCodeInternal, "unable to open the document")
 		}
-		return
+		return false
 	}
 	log.Printf("%s: %s (%s) opened %s", c.clientID, c.user.Username, hello.Client, d.Path)
+	return true
+}
 
+// readLoop handles the messages of a joined connection
+func (c *wsConn) readLoop() {
 	for {
-		_ = c.ws.SetReadDeadline(time.Now().Add(c.server.HeartbeatTimeout))
-		_, data, err := c.ws.ReadMessage()
-		if err != nil {
-			var netErr interface{ Timeout() bool }
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				c.close(CloseHeartbeatTimout, "heartbeat timeout")
-			}
+		data, ok := c.readMessage()
+		if !ok || !c.handleMessage(data) {
 			return
-		}
-		var base MessageBase
-		if err = json.Unmarshal(data, &base); err != nil {
-			c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid JSON")
-			return
-		}
-		switch base.Type {
-		case MsgSyncRequest:
-			var m SyncMessage
-			if err = json.Unmarshal(data, &m); err != nil {
-				c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid sync-request")
-				return
-			}
-			if !c.handleSync(m) {
-				return
-			}
-		case MsgPresence:
-			var m PresenceMessage
-			if err = json.Unmarshal(data, &m); err != nil || !validSelections(m.Selections) {
-				c.sendError(ErrCodeBadRequest, "invalid presence")
-				continue
-			}
-			c.handlePresence(m.Selections)
-		case MsgHeartbeat:
-		default:
-			// unknown message types are ignored for forward compatibility
 		}
 	}
+}
+
+// handleMessage handles one message. It returns false if the connection must close.
+func (c *wsConn) handleMessage(data []byte) bool {
+	var base MessageBase
+	if err := json.Unmarshal(data, &base); err != nil {
+		c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid JSON")
+		return false
+	}
+	switch base.Type {
+	case MsgSyncRequest:
+		var m SyncMessage
+		if err := json.Unmarshal(data, &m); err != nil {
+			c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid sync-request")
+			return false
+		}
+		return c.handleSync(m)
+	case MsgPresence:
+		var m PresenceMessage
+		if err := json.Unmarshal(data, &m); err != nil || !validSelections(m.Selections) {
+			c.sendError(ErrCodeBadRequest, "invalid presence")
+			return true
+		}
+		c.handlePresence(m.Selections)
+	}
+	// heartbeats only keep the connection alive, unknown types are ignored for forward compatibility
+	return true
 }
 
 // attachLocked registers the connection with the session and sends the initial messages.
@@ -856,7 +906,7 @@ func (c *wsConn) attachLocked(session *docSession) error {
 		Content:       text,
 		ReadOnly:      readOnly,
 		You:           c.userInfo(),
-		Actors:        session.actorInfos(),
+		Actors:        c.server.Actors(),
 	})
 	peers := make([]PresenceMessage, 0, len(session.conns))
 	for other := range session.conns {
@@ -926,35 +976,12 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 	}
 
 	if c.shadow != nil {
-		// readers: changes only ever reach their private shadow
-		if len(changes) > 0 && !c.warnedRO {
-			c.warnedRO = true
-			c.sendError(ErrCodeReadOnly, "you have read-only access, your changes are not saved")
-		}
-		if _, err = c.syncState.ReceiveMessage(raw); err != nil {
-			c.fail(CloseProtocolError, ErrCodeBadRequest, "unable to apply the sync message")
-			return false
-		}
-		c.syncLocked()
-		return true
+		return c.handleReaderSyncLocked(raw, len(changes) > 0)
 	}
 
-	// every change must come from an actor of this user
-	var newActors []string
-	for _, ch := range changes {
-		actor := ch.ActorID()
-		bound, err := c.server.actors.Bind(actor, c.user.ID)
-		if err != nil {
-			if errors.Is(err, ErrForeignActor) {
-				c.fail(CloseForbidden, ErrCodeForeignActor, "the message contains changes of another user's actor "+actor)
-			} else {
-				c.fail(CloseProtocolError, ErrCodeBadRequest, err.Error())
-			}
-			return false
-		}
-		if bound {
-			newActors = append(newActors, actor)
-		}
+	newActors, ok := c.bindChangeActors(changes)
+	if !ok {
+		return false
 	}
 
 	before := session.doc.Heads()
@@ -966,17 +993,50 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 	for _, actor := range newActors {
 		session.announceActorLocked(actor, c.user.ID, nil)
 	}
-	if !sameHeads(before, session.doc.Heads()) {
-		if _, err := session.text(); err != nil {
-			log.Printf("%s: the document %s has no text content any more: %v", c.clientID, session.meta.Path, err)
-		}
-		session.countChangesLocked(changes)
-		session.scheduleFlushLocked()
-		session.broadcastSyncLocked()
-	} else {
+	if sameHeads(before, session.doc.Heads()) {
 		c.syncLocked()
+		return true
 	}
+	if _, err := session.text(); err != nil {
+		log.Printf("%s: the document %s has no text content any more: %v", c.clientID, session.meta.Path, err)
+	}
+	session.countChangesLocked(changes)
+	session.scheduleFlushLocked()
+	session.broadcastSyncLocked()
 	return true
+}
+
+// handleReaderSyncLocked applies a sync message of a reader: changes only ever reach the private
+// shadow. It returns false if the connection must close. Caller holds session.mu.
+func (c *wsConn) handleReaderSyncLocked(raw []byte, hasChanges bool) bool {
+	if hasChanges && !c.warnedRO {
+		c.warnedRO = true
+		c.sendError(ErrCodeReadOnly, "you have read-only access, your changes are not saved")
+	}
+	if _, err := c.syncState.ReceiveMessage(raw); err != nil {
+		c.fail(CloseProtocolError, ErrCodeBadRequest, "unable to apply the sync message")
+		return false
+	}
+	c.syncLocked()
+	return true
+}
+
+// bindChangeActors checks that every change comes from an actor of this user and returns the
+// actors that were not bound before. It returns false after answering the client.
+func (c *wsConn) bindChangeActors(changes []*automerge.Change) ([]string, bool) {
+	var newActors []string
+	for _, ch := range changes {
+		actor := ch.ActorID()
+		bound, err := c.server.actors.Bind(actor, c.user.ID)
+		if err != nil {
+			c.failActor(err, "the message contains changes of another user's actor "+actor)
+			return nil, false
+		}
+		if bound {
+			newActors = append(newActors, actor)
+		}
+	}
+	return newActors, true
 }
 
 func sameHeads(a, b []automerge.ChangeHash) bool {
