@@ -478,7 +478,7 @@ credentials in `allowCredentials`).
 ```
 POST /auth/passkey/login/begin/
 {}
-→ {"ceremonyId": "…", "publicKey": { "challenge": "…", "rpId": "wiki.markusressel.de", "timeout": 300000, "userVerification": "required" }}
+→ {"ceremonyId": "…", "publicKey": { "challenge": "…", "rpId": "markusressel.de", "timeout": 300000, "userVerification": "required" }}
 ```
 
 The client passes `publicKey` to `navigator.credentials.get({publicKey, mediation})`
@@ -713,7 +713,7 @@ provider (from the AAGUID) and absent for unknown authenticators.
 {"name": "wiki.markusressel.de", "version": "1.4.0", "protocolVersion": 1,
  "backendUrl": "https://backend.wiki.markusressel.de", "wikiUrl": "https://wiki.markusressel.de",
  "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
- "passkeys": {"enabled": true, "rpId": "wiki.markusressel.de"},
+ "passkeys": {"enabled": true, "rpId": "markusressel.de"},
  "loginMethods": ["password", "passkey", "device-link"], "require2FA": false}
 ```
 
@@ -743,7 +743,7 @@ creation.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/auth/status/` | | `{"setupRequired": false, "authDisabled": false, "passkeys": {"enabled": true, "rpId": "wiki.markusressel.de"}, "passwordPolicy": {"minLength": 10, "maxLength": 256}, "legacyBasicAuth": false}` |
+| GET | `/auth/status/` | | `{"setupRequired": false, "authDisabled": false, "passkeys": {"enabled": true, "rpId": "markusressel.de"}, "passwordPolicy": {"minLength": 10, "maxLength": 256}, "legacyBasicAuth": false}` |
 | POST | `/auth/login/` | `{username, password, sessionType?, deviceName?}` | session response, or `second-factor-required` |
 | POST | `/auth/login/second-factor/` | `{challenge, code}` or `{challenge, recoveryCode}`, plus `sessionType?, deviceName?` | session response |
 | POST | `/auth/passkey/login/begin/` | `{}` or `{challenge}` | `{ceremonyId, publicKey}` |
@@ -917,18 +917,29 @@ responses add `Cache-Control: no-store`.
 **RP ID.** A passkey is bound to a domain, the relying party id. It must be the host of
 the page that creates or uses the passkey, or a parent domain of it. The web client runs
 on `edit.wiki.markusressel.de`, so `backend.wiki.markusressel.de` is not possible (not a
-parent), but `wiki.markusressel.de` is. Choose the RP ID once: changing it later makes
-all existing passkeys useless.
+parent), but `wiki.markusressel.de` and `markusressel.de` are. Choose the RP ID once:
+changing it later makes all existing passkeys useless.
 
-For Markus' deployment: `rpId: wiki.markusressel.de`. It covers `edit.wiki.…` and any
-future client under `wiki.markusressel.de`, without extending to all of
-`markusressel.de`. The Android builds in use are the debug variant from CI, package
+**The RP ID domain must be reachable from the internet** when the Android app should use
+the passkeys. Password managers on Android (Bitwarden, Google Password Manager) do not
+read `assetlinks.json` from the phone: Google's Digital Asset Links service fetches it
+from `https://<rpId>/.well-known/assetlinks.json`. If that fails, Bitwarden answers the
+app with "Passkey not supported for this app", while passkeys in the browser keep working
+(the browser checks the origin itself). Check with
+`curl "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://<rpId>&relation=delegate_permission/common.get_login_creds"`.
+A server that is only reachable from a home network therefore needs an RP ID on a public
+parent domain that can serve the file.
+
+For Markus' deployment: `rpId: markusressel.de`. The wiki hosts are only reachable at
+home, so `wiki.markusressel.de` (the first choice) failed this check. `markusressel.de` is
+his blog on Netlify; the file is `public/.well-known/assetlinks.json` in the repository
+`markusressel/blog`. The Android builds in use are the debug variant from CI, package
 `de.markusressel.mkdocseditor.debug` with the certificate fingerprint
 `74:A7:45:FA:C2:4A:BF:BD:F0:A7:30:83:18:71:FE:A6:DE:24:6C:6B:D2:E3:F8:62:49:24:27:1F:C4:D3:70:48`,
-so that package goes into `server.auth.webauthn.android` (the release package has no
-published build yet). Default when not configured: the host of `server.auth.clientUrl`.
-Without either, passkeys are disabled (`passkeys-disabled`). For local development
-`rpId: localhost` works over plain HTTP.
+so that package goes into `server.auth.webauthn.android` and into the blog's file (the
+release package has no published build yet). Default when not configured: the host of
+`server.auth.clientUrl`. Without either, passkeys are disabled (`passkeys-disabled`). For
+local development `rpId: localhost` works over plain HTTP.
 
 **Origins.** The backend checks the `origin` in `clientDataJSON` against
 `server.auth.webauthn.origins` (default: the origin of `clientUrl` plus
@@ -944,8 +955,7 @@ domain vouches for the app. It must serve
 https://<rpId>/.well-known/assetlinks.json
 ```
 
-(so `https://wiki.markusressel.de/.well-known/assetlinks.json`, the published wiki's
-host), with status 200, `Content-Type: application/json`, no redirect:
+(so `https://markusressel.de/.well-known/assetlinks.json` in Markus' deployment), with status 200, `Content-Type: application/json`, no redirect:
 
 ```json
 [{
@@ -964,21 +974,18 @@ fingerprint of Google's app signing key from the Play Console.
 
 The backend can generate this file from `server.auth.webauthn.android` and serve it at
 `GET /.well-known/assetlinks.json` (`serveAssetLinks: true`). That only helps when
-requests for the RP ID host reach the backend. Two ways:
-
-1. **Route the path to the backend** (Markus' cluster): add an ingress rule for host
-   `wiki.markusressel.de`, path `/.well-known/assetlinks.json` (exact), to the backend
-   service. The rest of the wiki host keeps going to the static site.
-2. **Static file**: put the JSON into the published site at
-   `.well-known/assetlinks.json`. MkDocs skips dot-folders under `docs/` by default, so
-   it needs `exclude_docs` adjusted or the file added by the web server / ingress.
+public requests for the RP ID host reach the backend, for example through an ingress rule
+for the path `/.well-known/assetlinks.json` (exact). Otherwise publish the JSON as a
+static file on the RP ID host, as Markus' deployment does.
 
 Android **App Links** for the invite, setup, reset and connect links (`https://edit.wiki.…/invite`)
 are separate: they need the same file on the **client** host,
 `https://edit.wiki.markusressel.de/.well-known/assetlinks.json`, with both relations:
 `handle_all_urls` for the App Links and `get_login_creds`, so password managers and
 Credential Manager offer the passwords saved for the web client in the app as well
-(and the other way round). The same ingress route works for that host. Without App Links, the user opens the link in the browser
+(and the other way round). The web client serves it (`MKDOCSEDITOR_ASSETLINKS_JSON`).
+Android verifies App Links through the same Google service, so they also need the
+client host to be reachable from the internet. Without App Links, the user opens the link in the browser
 (web client) or pastes it into the app; the app reads the token from the fragment.
 
 ## 13. Configuration
@@ -1030,7 +1037,7 @@ server:
       maxBackoff: "15m"
     webauthn:
       # Relying party id, see docs/auth.md section 12. Default: host of clientUrl.
-      rpId: "wiki.markusressel.de"
+      rpId: "markusressel.de"
       # Name shown by authenticators. Default: MkDocsEditor
       rpName: "MkDocsEditor"
       # Allowed web origins. Default: origin of clientUrl + server.cors.allowedOrigins
