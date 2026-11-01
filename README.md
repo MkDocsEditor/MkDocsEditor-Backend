@@ -154,6 +154,11 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`), delete (`?force=true` while it is open) |
 | GET | `/document/{id}/content/` | The markdown text (live while open) |
 | GET | `/document/{id}/authorship/` | Who wrote which part of the text |
+| GET | `/document/{id}/references/` | Outgoing links, images and other references, resolved or broken |
+| GET | `/document/{id}/backlinks/`, `/section/{id}/backlinks/`, `/resource/{id}/backlinks/` | References to the item ("used by") |
+| GET | `/references/broken/` | All broken references |
+| GET | `/references/unused-resources/` | Resources that nothing uses |
+| GET | `/link/?from=&to=&anchor=` | The link destination from a document to an item, see [docs/references.md](docs/references.md#8-the-link-path-algorithm) |
 | GET | `/document/{id}/history/` | Git commits of the document (requires `git.enabled`) |
 | GET | `/document/{id}/history/{revision}/content/` | The text at a revision |
 | GET | `/document/{id}/history/diff/?from=&to=` | Unified diff between revisions (`current` is the live text) |

@@ -69,6 +69,7 @@ type RestService struct {
 	treeManager    *TreeManager
 	sync           *SyncServer
 	git            *GitCommitter
+	refs           *ReferenceIndex
 }
 
 func NewRestService(
@@ -87,6 +88,7 @@ func NewRestService(
 		allowedOrigins: configuration.CurrentConfig.Server.CORS.AllowedOrigins,
 		trustedProxies: trusted,
 	}
+	rs.refs = NewReferenceIndex(treeManager, syncServer)
 	rs.echoRest = rs.createRestService()
 	return rs
 }
@@ -245,6 +247,9 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.GET("/actors/", rs.getActors)
 	echoRest.GET("/events/ws/", rs.handleEventsWebsocket)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
+	echoRest.GET("/references/broken/", rs.getBrokenReferences)
+	echoRest.GET("/references/unused-resources/", rs.getUnusedResources)
+	echoRest.GET("/link/", rs.getLink)
 
 	// Authentication
 	// Group level middleware
@@ -257,6 +262,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	groupSections.GET("/", rs.getTree)
 	groupSections.GET("/:"+urlParamId+"/", rs.getSectionDescription)
+	groupSections.GET("/:"+urlParamId+"/backlinks/", rs.getSectionBacklinks)
 	groupSections.POST("/", rs.createSection)
 	groupSections.PUT("/:"+urlParamId+"/", rs.renameSection)
 	groupSections.DELETE("/:"+urlParamId+"/", rs.deleteSection)
@@ -264,6 +270,8 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupDocuments.GET("/:"+urlParamId+"/", rs.getDocumentDescription)
 	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamId+"/content/", rs.getDocumentContent)
+	groupDocuments.GET("/:"+urlParamId+"/references/", rs.getDocumentReferences)
+	groupDocuments.GET("/:"+urlParamId+"/backlinks/", rs.getDocumentBacklinks)
 	groupDocuments.GET("/:"+urlParamId+"/authorship/", rs.getDocumentAuthorship)
 	groupDocuments.GET("/:"+urlParamId+"/history/", rs.getDocumentHistory)
 	groupDocuments.GET("/:"+urlParamId+"/history/diff/", rs.getDocumentRevisionDiff)
@@ -275,6 +283,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 
 	groupResources.GET("/:"+urlParamId+"/", rs.getResourceDescription)
 	groupResources.GET("/:"+urlParamId+"/content/", rs.getResourceContent)
+	groupResources.GET("/:"+urlParamId+"/backlinks/", rs.getResourceBacklinks)
 	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", rs.uploadNewResource)
 	groupResources.PUT("/:"+urlParamId+"/", rs.renameResource)
 	groupResources.DELETE("/:"+urlParamId+"/", rs.deleteResource)
@@ -307,6 +316,7 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 // Start the REST service. It returns after Shutdown.
 func (rs *RestService) Start() {
 	var serverConf = configuration.CurrentConfig.Server
+	rs.refs.Warm()
 	err := rs.echoRest.Start(fmt.Sprintf("%s:%d", serverConf.Host, serverConf.Port))
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		rs.echoRest.Logger.Fatal(err)
