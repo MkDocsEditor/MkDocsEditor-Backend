@@ -3,6 +3,7 @@ package backend
 import (
 	"html"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -114,8 +115,8 @@ func lineEdits(text string, edits []textEdit) []LineEdit {
 // splices: only the part of each destination that differs is replaced, so concurrent offline
 // edits next to it merge cleanly.
 func spliceEdits(t *automerge.Text, text string, edits []textEdit) error {
-	for k := len(edits) - 1; k >= 0; k-- {
-		e := edits[k]
+	for _, e := range slices.Backward(edits) {
+
 		old := text[e.start:e.end]
 		prefix := commonPrefix(old, e.replacement)
 		suffix := commonSuffix(old[prefix:], e.replacement[prefix:])

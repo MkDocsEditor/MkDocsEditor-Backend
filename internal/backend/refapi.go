@@ -104,7 +104,7 @@ func (rs *RestService) toReference(r resolvedRef) *Reference {
 
 // GET /document/:id/references/
 func (rs *RestService) getDocumentReferences(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
@@ -119,7 +119,7 @@ func (rs *RestService) getDocumentReferences(c echo.Context) error {
 
 // GET /document/:id/backlinks/
 func (rs *RestService) getDocumentBacklinks(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
@@ -129,7 +129,7 @@ func (rs *RestService) getDocumentBacklinks(c echo.Context) error {
 
 // GET /resource/:id/backlinks/
 func (rs *RestService) getResourceBacklinks(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	r := rs.treeManager.GetResource(id)
 	if r == nil {
 		return rs.ReturnNotFound(c, id)
@@ -139,7 +139,7 @@ func (rs *RestService) getResourceBacklinks(c echo.Context) error {
 
 // GET /section/:id/backlinks/: references to the section and everything inside it
 func (rs *RestService) getSectionBacklinks(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	s := rs.treeManager.GetSection(id)
 	if s == nil {
 		return rs.ReturnNotFound(c, id)

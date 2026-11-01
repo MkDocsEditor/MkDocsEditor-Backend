@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -108,10 +107,6 @@ type (
 		Revoked int `json:"revoked"`
 	}
 )
-
-func itoa(i int) string {
-	return strconv.Itoa(i)
-}
 
 // decodeJSON reads a JSON request body of at most 64 KiB. An empty body is an empty object.
 func decodeJSON(c echo.Context, v any) error {
@@ -295,7 +290,7 @@ func (rs *RestService) writeSessions(c echo.Context, accountID string) error {
 // DELETE /account/sessions/{id}/
 func (rs *RestService) revokeAccountSession(c echo.Context) error {
 	user := UserFromContext(c)
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	if err := rs.authenticator.RevokeSession(user.ID, id, user, requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
@@ -350,7 +345,7 @@ func (rs *RestService) createInvite(c echo.Context) error {
 
 // DELETE /admin/invites/{id}/
 func (rs *RestService) revokeInvite(c echo.Context) error {
-	if err := rs.authenticator.RevokeLink(auth.LinkInvite, c.Param(urlParamId), UserFromContext(c), requestInfo(c)); err != nil {
+	if err := rs.authenticator.RevokeLink(auth.LinkInvite, c.Param(urlParamID), UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

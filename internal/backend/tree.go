@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
@@ -59,7 +59,7 @@ type (
 		RelPath  string    `json:"path" xml:"path" form:"path" query:"path"`
 		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
 		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
-		SubUrl   string    `json:"url" xml:"url" form:"url" query:"url"`
+		SubURL   string    `json:"url" xml:"url" form:"url" query:"url"`
 	}
 
 	Resource struct {
@@ -84,16 +84,16 @@ type (
 // getters never change after they have been returned and can be used without locking.
 type TreeManager struct {
 	// lock guards the tree pointer
-	lock mutexSync.RWMutex
+	lock sync.RWMutex
 	// fsLock serializes modifications of the docs folder made through the TreeManager
-	fsLock mutexSync.Mutex
+	fsLock sync.Mutex
 	// buildLock serializes tree rebuilds so listeners see them in order
-	buildLock mutexSync.Mutex
+	buildLock sync.Mutex
 
 	rootPath string
 	tree     *Section
 
-	listenerLock mutexSync.Mutex
+	listenerLock sync.Mutex
 	listeners    []func(oldTree *Section, newTree *Section)
 }
 
@@ -214,9 +214,9 @@ func (tm *TreeManager) relPath(absPath string) string {
 // newIgnoreMatcher returns a function that reports whether a path should be left out of the tree.
 // Hidden files and folders, the extra_css files of mkdocs.yml and the configured blacklist are ignored.
 func newIgnoreMatcher(rootPath string) func(path string) bool {
-	var extraCss []string
+	var extraCSS []string
 	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
-		extraCss = mkDocsConfig.ExtraCss
+		extraCSS = mkDocsConfig.ExtraCSS
 	}
 	blacklist := configuration.CurrentConfig.MkDocs.Blacklist
 
@@ -229,7 +229,7 @@ func newIgnoreMatcher(rootPath string) func(path string) bool {
 			return false
 		}
 		rel = filepath.ToSlash(rel)
-		return slices.Contains(extraCss, rel) || slices.Contains(blacklist, rel)
+		return slices.Contains(extraCSS, rel) || slices.Contains(blacklist, rel)
 	}
 }
 
@@ -238,8 +238,8 @@ func createHash(s string) string {
 	return strconv.FormatUint(xxhash.ChecksumString64(s), 10)
 }
 
-// GenerateId generates the item id for the given path
-func (tm *TreeManager) GenerateId(path string) string {
+// GenerateID generates the item id for the given path
+func (tm *TreeManager) GenerateID(path string) string {
 	if filepath.Clean(path) == tm.rootPath {
 		return RootSectionID
 	}
@@ -250,7 +250,7 @@ func (tm *TreeManager) GenerateId(path string) string {
 func (tm *TreeManager) createSectionForTree(path string, name string, id string) *Section {
 	sectionPath := filepath.Join(path, name)
 	if id == "" {
-		id = tm.GenerateId(sectionPath)
+		id = tm.GenerateID(sectionPath)
 	}
 	return &Section{
 		Type:        TypeSection,
@@ -269,23 +269,23 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 	fileName := f.Name()
 	documentPath := filepath.Join(parentFolderPath, fileName)
 
-	subUrl := ""
-	for _, element := range strings.Split(strings.TrimPrefix(documentPath, tm.rootPath), string(filepath.Separator)) {
+	var subURL strings.Builder
+	for element := range strings.SplitSeq(strings.TrimPrefix(documentPath, tm.rootPath), string(filepath.Separator)) {
 		element = strings.TrimSuffix(element, markdownFileExtension)
 		if len(element) > 0 {
-			subUrl += url.PathEscape(element) + "/"
+			subURL.WriteString(url.PathEscape(element) + "/")
 		}
 	}
 
 	return &Document{
 		Type:     TypeDocument,
-		ID:       tm.GenerateId(documentPath),
+		ID:       tm.GenerateID(documentPath),
 		Name:     strings.TrimSuffix(fileName, markdownFileExtension),
 		Path:     documentPath,
 		RelPath:  tm.relPath(documentPath),
 		Filesize: f.Size(),
 		ModTime:  f.ModTime(),
-		SubUrl:   subUrl,
+		SubURL:   subURL.String(),
 	}
 }
 
@@ -295,7 +295,7 @@ func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileI
 	mimeType := mimeTypeOf(f.Name())
 	return &Resource{
 		Type:      TypeResource,
-		ID:        tm.GenerateId(resourcePath),
+		ID:        tm.GenerateID(resourcePath),
 		Name:      f.Name(),
 		Path:      resourcePath,
 		RelPath:   tm.relPath(resourcePath),
@@ -404,13 +404,13 @@ func fileExists(filePath string) (bool, error) {
 }
 
 // prepares the path of a new child item of the given parent section
-func (tm *TreeManager) newChildPath(parentSectionId string, fileName string) (string, error) {
+func (tm *TreeManager) newChildPath(parentSectionID string, fileName string) (string, error) {
 	if err := ValidateName(fileName); err != nil {
 		return "", err
 	}
-	parent := tm.GetSection(parentSectionId)
+	parent := tm.GetSection(parentSectionID)
 	if parent == nil {
-		return "", fmt.Errorf("%w: parent section %s", ErrNotFound, parentSectionId)
+		return "", fmt.Errorf("%w: parent section %s", ErrNotFound, parentSectionID)
 	}
 	filePath := filepath.Join(parent.Path, fileName)
 	exists, err := fileExists(filePath)
@@ -424,11 +424,11 @@ func (tm *TreeManager) newChildPath(parentSectionId string, fileName string) (st
 }
 
 // CreateSection creates a new section with the given name as a child of the given parent section
-func (tm *TreeManager) CreateSection(parentSectionId string, sectionName string) (*Section, error) {
+func (tm *TreeManager) CreateSection(parentSectionID string, sectionName string) (*Section, error) {
 	tm.fsLock.Lock()
 	defer tm.fsLock.Unlock()
 
-	sectionPath, err := tm.newChildPath(parentSectionId, sectionName)
+	sectionPath, err := tm.newChildPath(parentSectionID, sectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -436,18 +436,18 @@ func (tm *TreeManager) CreateSection(parentSectionId string, sectionName string)
 		return nil, err
 	}
 	tm.CreateItemTree()
-	return tm.GetSection(tm.GenerateId(sectionPath)), nil
+	return tm.GetSection(tm.GenerateID(sectionPath)), nil
 }
 
 // CreateDocument creates a new, empty document as a child of the given parent section
-func (tm *TreeManager) CreateDocument(parentSectionId string, documentName string) (*Document, error) {
+func (tm *TreeManager) CreateDocument(parentSectionID string, documentName string) (*Document, error) {
 	tm.fsLock.Lock()
 	defer tm.fsLock.Unlock()
 
 	if err := ValidateName(documentName); err != nil {
 		return nil, err
 	}
-	documentPath, err := tm.newChildPath(parentSectionId, documentName+markdownFileExtension)
+	documentPath, err := tm.newChildPath(parentSectionID, documentName+markdownFileExtension)
 	if err != nil {
 		return nil, err
 	}
@@ -459,15 +459,15 @@ func (tm *TreeManager) CreateDocument(parentSectionId string, documentName strin
 		return nil, err
 	}
 	tm.CreateItemTree()
-	return tm.GetDocument(tm.GenerateId(documentPath)), nil
+	return tm.GetDocument(tm.GenerateID(documentPath)), nil
 }
 
 // CreateResource creates a new resource file with the given content as a child of the given parent section
-func (tm *TreeManager) CreateResource(parentSectionId string, resourceName string, content io.Reader) (*Resource, error) {
+func (tm *TreeManager) CreateResource(parentSectionID string, resourceName string, content io.Reader) (*Resource, error) {
 	tm.fsLock.Lock()
 	defer tm.fsLock.Unlock()
 
-	resourcePath, err := tm.newChildPath(parentSectionId, resourceName)
+	resourcePath, err := tm.newChildPath(parentSectionID, resourceName)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +485,7 @@ func (tm *TreeManager) CreateResource(parentSectionId string, resourceName strin
 		return nil, err
 	}
 	tm.CreateItemTree()
-	return tm.GetResource(tm.GenerateId(resourcePath)), nil
+	return tm.GetResource(tm.GenerateID(resourcePath)), nil
 }
 
 // renames the item at oldPath to the new file name in the same folder
@@ -522,7 +522,7 @@ func (tm *TreeManager) RenameSection(section *Section, name string) (*Section, e
 	if err != nil {
 		return nil, err
 	}
-	return tm.GetSection(tm.GenerateId(newPath)), nil
+	return tm.GetSection(tm.GenerateID(newPath)), nil
 }
 
 // RenameDocument renames the file of the given document (name without the .md extension)
@@ -536,7 +536,7 @@ func (tm *TreeManager) RenameDocument(document *Document, name string) (*Documen
 	if err != nil {
 		return nil, err
 	}
-	return tm.GetDocument(tm.GenerateId(newPath)), nil
+	return tm.GetDocument(tm.GenerateID(newPath)), nil
 }
 
 // RenameResource renames the file of the given resource
@@ -547,7 +547,7 @@ func (tm *TreeManager) RenameResource(resource *Resource, name string) (*Resourc
 	if err != nil {
 		return nil, err
 	}
-	return tm.GetResource(tm.GenerateId(newPath)), nil
+	return tm.GetResource(tm.GenerateID(newPath)), nil
 }
 
 // DeleteItem deletes a file/folder with the given ID and type from disk.

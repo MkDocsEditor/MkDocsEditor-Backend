@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -460,7 +461,7 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 	var guard *auth.ErrAdminGuard
 	switch {
 	case errors.As(err, &rl):
-		c.Response().Header().Set("Retry-After", itoa(rl.Seconds()))
+		c.Response().Header().Set("Retry-After", strconv.Itoa(rl.Seconds()))
 		return apiError(c, http.StatusTooManyRequests, CodeRateLimited, err.Error(), map[string]any{"retryAfter": rl.Seconds()})
 	case errors.As(err, &weak):
 		return apiError(c, http.StatusBadRequest, CodeWeakPassword, err.Error(), map[string]any{

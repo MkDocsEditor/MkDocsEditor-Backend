@@ -47,8 +47,8 @@ func withImages(t *testing.T) func(c *configuration.Configuration) {
 		}
 		// 400x200, opaque, rotated by 90° clockwise through EXIF orientation 6
 		photo := image.NewRGBA(image.Rect(0, 0, 400, 200))
-		for y := 0; y < 200; y++ {
-			for x := 0; x < 400; x++ {
+		for y := range 200 {
+			for x := range 400 {
 				photo.Set(x, y, color.RGBA{R: uint8(x % 256), G: 100, B: 50, A: 255})
 			}
 		}

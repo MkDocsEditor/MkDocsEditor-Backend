@@ -4,8 +4,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
-	mutexSync "sync"
+	"sync"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -34,7 +35,7 @@ type ActorStore interface {
 type ActorRegistry struct {
 	store ActorStore
 
-	lock   mutexSync.Mutex
+	lock   sync.Mutex
 	actors map[string]auth.ActorBinding
 }
 
@@ -99,9 +100,7 @@ func (r *ActorRegistry) All() map[string]auth.ActorBinding {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	c := make(map[string]auth.ActorBinding, len(r.actors))
-	for k, v := range r.actors {
-		c[k] = v
-	}
+	maps.Copy(c, r.actors)
 	return c
 }
 

@@ -1,9 +1,10 @@
 package backend
 
 import (
+	"os"
+
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"gopkg.in/yaml.v3"
-	"os"
 )
 
 type MkDocsConfigThemePalette struct {
@@ -18,20 +19,20 @@ type MkDocsConfigTheme struct {
 }
 
 type MkDocsConfig struct {
-	Copyright          string                 `yaml:"copyright"`
-	EditUri            string                 `yaml:"edit_uri"`
-	Extra              map[string]interface{} `yaml:",inline"`
-	ExtraCss           []string               `yaml:"extra_css"`
-	MarkdownExtensions []interface{}          `yaml:"markdown_extensions"`
+	Copyright          string         `yaml:"copyright"`
+	EditURI            string         `yaml:"edit_uri"`
+	Extra              map[string]any `yaml:",inline"`
+	ExtraCSS           []string       `yaml:"extra_css"`
+	MarkdownExtensions []any          `yaml:"markdown_extensions"`
 
 	RepoName string `yaml:"repo_name"`
-	RepoUrl  string `yaml:"repo_url"`
+	RepoURL  string `yaml:"repo_url"`
 
 	SiteAuthor      string `yaml:"site_author"`
 	SiteDescription string `yaml:"site_description"`
 	SiteDir         string `yaml:"site_dir"`
 	SiteName        string `yaml:"site_name"`
-	SiteUrl         string `yaml:"site_url"`
+	SiteURL         string `yaml:"site_url"`
 
 	Theme MkDocsConfigTheme `yaml:"theme"`
 }

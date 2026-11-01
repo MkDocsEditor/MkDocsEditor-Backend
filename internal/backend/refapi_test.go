@@ -66,7 +66,7 @@ func (e *restTestEnv) getJSON(path string, into any) {
 
 func (e *restTestEnv) docID(rel string) string {
 	e.t.Helper()
-	return e.tm.GenerateId(filepath.Join(e.tm.RootPath(), filepath.FromSlash(rel)))
+	return e.tm.GenerateID(filepath.Join(e.tm.RootPath(), filepath.FromSlash(rel)))
 }
 
 func TestDocumentReferences(t *testing.T) {

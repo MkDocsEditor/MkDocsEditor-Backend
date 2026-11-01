@@ -161,7 +161,7 @@ func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
 // renameViaMove renames an item in place with reference rewriting and answers the renamed
 // item, like the rename endpoints always did
 func (rs *RestService) renameViaMove(c echo.Context, itemType string, name string) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	lookup := newTreeLookup(rs.treeManager.Root())
 	item := lookup.item(id)
 	if item == nil || item.Type != itemType {
@@ -213,7 +213,7 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 		DryRun:    op.dryRun,
 		Type:      op.itemType,
 		OldID:     op.oldID,
-		NewID:     tm.GenerateId(op.newAbs),
+		NewID:     tm.GenerateID(op.newAbs),
 		OldPath:   op.oldRel,
 		NewPath:   op.newRel,
 		Moved:     rs.movedItems(lookup, op),
@@ -345,7 +345,7 @@ func sameFile(a, b string) bool {
 func blockedPaths() []string {
 	blocked := slices.Clone(configuration.CurrentConfig.MkDocs.Blacklist)
 	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
-		blocked = append(blocked, mkDocsConfig.ExtraCss...)
+		blocked = append(blocked, mkDocsConfig.ExtraCSS...)
 	}
 	return blocked
 }
@@ -357,8 +357,8 @@ func (rs *RestService) movedItems(lookup *treeLookup, op *moveOp) []MovedItem {
 		newRel := op.mapPath(rel)
 		out = append(out, MovedItem{
 			Type:    itemType,
-			OldID:   rs.treeManager.GenerateId(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(rel))),
-			NewID:   rs.treeManager.GenerateId(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(newRel))),
+			OldID:   rs.treeManager.GenerateID(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(rel))),
+			NewID:   rs.treeManager.GenerateID(filepath.Join(rs.treeManager.RootPath(), filepath.FromSlash(newRel))),
 			OldPath: rel,
 			NewPath: newRel,
 		})
@@ -544,7 +544,7 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 		if movedDoc {
 			session.meta.Path = pd.newRel
 			session.absPath = filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(pd.newRel))
-			session.docID = s.treeManager.GenerateId(session.absPath)
+			session.docID = s.treeManager.GenerateID(session.absPath)
 			if !pd.temporary {
 				delete(s.sessions, pd.oldRel)
 				s.sessions[pd.newRel] = session
@@ -644,8 +644,8 @@ func (s *SyncServer) releaseLocked(sessions []*plannedDocument) {
 func (s *SyncServer) documentChange(pd *plannedDocument, edits []LineEdit) DocumentChange {
 	root := s.treeManager.RootPath()
 	return DocumentChange{
-		DocumentID:    s.treeManager.GenerateId(filepath.Join(root, filepath.FromSlash(pd.oldRel))),
-		NewDocumentID: s.treeManager.GenerateId(filepath.Join(root, filepath.FromSlash(pd.newRel))),
+		DocumentID:    s.treeManager.GenerateID(filepath.Join(root, filepath.FromSlash(pd.oldRel))),
+		NewDocumentID: s.treeManager.GenerateID(filepath.Join(root, filepath.FromSlash(pd.newRel))),
 		Path:          pd.oldRel,
 		NewPath:       pd.newRel,
 		Edits:         edits,

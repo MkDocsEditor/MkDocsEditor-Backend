@@ -20,7 +20,7 @@ func (s *SyncServer) movedTarget(sourcePath string, d destination) (movedReferen
 	if d.outside || !s.redirects.hasEntries() {
 		return movedReference{}, false
 	}
-	id := s.treeManager.GenerateId(filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(d.path)))
+	id := s.treeManager.GenerateID(filepath.Join(s.treeManager.RootPath(), filepath.FromSlash(d.path)))
 	item, _, ok := s.resolveRedirect(id, "")
 	if !ok {
 		return movedReference{}, false

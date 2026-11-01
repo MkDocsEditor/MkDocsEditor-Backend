@@ -194,7 +194,7 @@ func (rs *RestService) renamePasskey(c echo.Context) error {
 	if err := decodeJSON(c, &r); err != nil {
 		return err
 	}
-	p, err := rs.authenticator.RenamePasskey(UserFromContext(c), c.Param(urlParamId), r.Name, requestInfo(c))
+	p, err := rs.authenticator.RenamePasskey(UserFromContext(c), c.Param(urlParamID), r.Name, requestInfo(c))
 	if err != nil {
 		return rs.authError(c, err)
 	}
@@ -206,7 +206,7 @@ func (rs *RestService) deletePasskey(c echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
-	if err := rs.authenticator.DeletePasskey(UserFromContext(c), c.Param(urlParamId), requestInfo(c)); err != nil {
+	if err := rs.authenticator.DeletePasskey(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

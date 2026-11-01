@@ -414,7 +414,7 @@ func TestAccountRateLimitResponse(t *testing.T) {
 	})
 	e.setupAdmin()
 	app := e.app()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		expect(t, app.do(http.MethodPost, "/auth/login/", map[string]any{"username": "markus", "password": "wrong password"}), http.StatusUnauthorized, CodeInvalidCredentials)
 	}
 	r := app.do(http.MethodPost, "/auth/login/", map[string]any{"username": "markus", "password": "a long admin secret"})
@@ -524,8 +524,7 @@ func readUntilClose(t *testing.T, ws *websocket.Conn, timeout time.Duration) (st
 	for {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
-			var ce *websocket.CloseError
-			if errors.As(err, &ce) {
+			if ce, ok := errors.AsType[*websocket.CloseError](err); ok {
 				return first, ce.Code
 			}
 			return first, 0

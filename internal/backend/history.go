@@ -59,7 +59,7 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 			return nil, err
 		}
 		added := ""
-		for _, record := range strings.Split(out, "\x1e") {
+		for record := range strings.SplitSeq(out, "\x1e") {
 			if strings.TrimSpace(record) == "" {
 				continue
 			}
@@ -76,13 +76,13 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 				Subject:   fields[4],
 				Path:      current,
 			}
-			for _, co := range strings.Split(fields[5], "\x01") {
+			for co := range strings.SplitSeq(fields[5], "\x01") {
 				if sig, ok := parseSignature(strings.TrimSpace(co)); ok {
 					c.CoAuthors = append(c.CoAuthors, sig)
 				}
 			}
 			added = ""
-			for _, line := range strings.Split(fields[6], "\n") {
+			for line := range strings.SplitSeq(fields[6], "\n") {
 				if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
 					added = c.Revision
 				}
@@ -99,7 +99,7 @@ func (g *GitRepo) FileHistory(path string, limit int) ([]GitCommit, error) {
 			return nil, err
 		}
 		renamedFrom := ""
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			parts := strings.Split(strings.TrimSpace(line), "\t")
 			if len(parts) == 3 && strings.HasPrefix(parts[0], "R") && parts[2] == current {
 				renamedFrom = parts[1]
@@ -202,7 +202,7 @@ func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 
 // historyContext resolves the document and the repository of a history request
 func (rs *RestService) historyContext(c echo.Context) (*Document, string, *GitRepo, error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
 		return nil, "", nil, rs.ReturnNotFound(c, id)
@@ -429,8 +429,7 @@ func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, mess
 }
 
 func exitCode(err error) int {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return exitErr.ExitCode()
 	}
 	return -1

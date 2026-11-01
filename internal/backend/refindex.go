@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	mutexSync "sync"
+	"sync"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
@@ -175,7 +175,7 @@ type ReferenceIndex struct {
 	tm   *TreeManager
 	sync *SyncServer
 
-	mu    mutexSync.Mutex
+	mu    sync.Mutex
 	cache map[string]*indexedDocument
 }
 
@@ -185,8 +185,8 @@ type indexedDocument struct {
 }
 
 // NewReferenceIndex creates the index. sync may be nil.
-func NewReferenceIndex(tm *TreeManager, sync *SyncServer) *ReferenceIndex {
-	return &ReferenceIndex{tm: tm, sync: sync, cache: map[string]*indexedDocument{}}
+func NewReferenceIndex(tm *TreeManager, syncServer *SyncServer) *ReferenceIndex {
+	return &ReferenceIndex{tm: tm, sync: syncServer, cache: map[string]*indexedDocument{}}
 }
 
 // Warm builds the index in the background

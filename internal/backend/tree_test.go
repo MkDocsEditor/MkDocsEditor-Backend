@@ -43,10 +43,10 @@ func TestTreeStructure(t *testing.T) {
 	if setup.Path != wantPath {
 		t.Errorf("path = %s, want %s", setup.Path, wantPath)
 	}
-	if setup.SubUrl != "guide/setup/" {
-		t.Errorf("url = %q, want guide/setup/", setup.SubUrl)
+	if setup.SubURL != "guide/setup/" {
+		t.Errorf("url = %q, want guide/setup/", setup.SubURL)
 	}
-	if setup.ID != tm.GenerateId(wantPath) {
+	if setup.ID != tm.GenerateID(wantPath) {
 		t.Error("document id is not derived from its path")
 	}
 	if tm.GetDocument(setup.ID) != setup {
@@ -187,11 +187,11 @@ func TestTreeConcurrentAccess(t *testing.T) {
 	newTestWiki(t)
 	tm := NewTreeManager()
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		wg.Add(2)
 		go func(i int) {
 			defer wg.Done()
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				name := "doc" + string(rune('a'+i)) + string(rune('a'+j))
 				d, err := tm.CreateDocument(RootSectionID, name)
 				if err != nil {
@@ -205,7 +205,7 @@ func TestTreeConcurrentAccess(t *testing.T) {
 		}(i)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				root := tm.Root()
 				_ = findDocumentByName(root, "index")
 				tm.CreateItemTree()

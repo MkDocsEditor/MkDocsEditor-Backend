@@ -5,11 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"gopkg.in/yaml.v3"
 	"io"
 	"log"
 	"net"
@@ -18,11 +13,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	urlParamParentId = "parentId"
-	urlParamId       = "id"
+	urlParamParentID = "parentID"
+	urlParamID       = "id"
 	urlParamName     = "name"
 	urlParamRevision = "revision"
 	indentationChar  = "  "
@@ -218,31 +219,31 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.GET("/account/passkeys/", rs.listPasskeys)
 	echoRest.POST("/account/passkeys/begin/", rs.addPasskeyBegin)
 	echoRest.POST("/account/passkeys/finish/", rs.addPasskeyFinish)
-	echoRest.PATCH("/account/passkeys/:"+urlParamId+"/", rs.renamePasskey)
-	echoRest.DELETE("/account/passkeys/:"+urlParamId+"/", rs.deletePasskey)
+	echoRest.PATCH("/account/passkeys/:"+urlParamID+"/", rs.renamePasskey)
+	echoRest.DELETE("/account/passkeys/:"+urlParamID+"/", rs.deletePasskey)
 	echoRest.GET("/account/tokens/", rs.listAppTokens)
 	echoRest.POST("/account/tokens/", rs.createAppToken)
-	echoRest.DELETE("/account/tokens/:"+urlParamId+"/", rs.revokeAppToken)
+	echoRest.DELETE("/account/tokens/:"+urlParamID+"/", rs.revokeAppToken)
 	echoRest.GET("/account/device-links/", rs.listDeviceLinks)
 	echoRest.POST("/account/device-links/", rs.createDeviceLink)
-	echoRest.GET("/account/device-links/:"+urlParamId+"/", rs.getDeviceLink)
-	echoRest.DELETE("/account/device-links/:"+urlParamId+"/", rs.revokeDeviceLink)
+	echoRest.GET("/account/device-links/:"+urlParamID+"/", rs.getDeviceLink)
+	echoRest.DELETE("/account/device-links/:"+urlParamID+"/", rs.revokeDeviceLink)
 	echoRest.GET("/account/sessions/", rs.accountSessions)
-	echoRest.DELETE("/account/sessions/:"+urlParamId+"/", rs.revokeAccountSession)
+	echoRest.DELETE("/account/sessions/:"+urlParamID+"/", rs.revokeAccountSession)
 	echoRest.POST("/account/sessions/revoke-others/", rs.revokeOtherSessions)
 
 	echoRest.GET("/admin/invites/", rs.listInvites)
 	echoRest.POST("/admin/invites/", rs.createInvite)
-	echoRest.DELETE("/admin/invites/:"+urlParamId+"/", rs.revokeInvite)
+	echoRest.DELETE("/admin/invites/:"+urlParamID+"/", rs.revokeInvite)
 	echoRest.GET("/admin/users/", rs.adminListUsers)
-	echoRest.PATCH("/admin/users/:"+urlParamId+"/", rs.adminUpdateUser)
-	echoRest.DELETE("/admin/users/:"+urlParamId+"/", rs.adminDeleteUser)
-	echoRest.GET("/admin/users/:"+urlParamId+"/sessions/", rs.adminUserSessions)
-	echoRest.POST("/admin/users/:"+urlParamId+"/sessions/revoke/", rs.adminRevokeUserSessions)
-	echoRest.POST("/admin/users/:"+urlParamId+"/reset-link/", rs.adminCreateResetLink)
-	echoRest.DELETE("/admin/sessions/:"+urlParamId+"/", rs.adminRevokeSession)
+	echoRest.PATCH("/admin/users/:"+urlParamID+"/", rs.adminUpdateUser)
+	echoRest.DELETE("/admin/users/:"+urlParamID+"/", rs.adminDeleteUser)
+	echoRest.GET("/admin/users/:"+urlParamID+"/sessions/", rs.adminUserSessions)
+	echoRest.POST("/admin/users/:"+urlParamID+"/sessions/revoke/", rs.adminRevokeUserSessions)
+	echoRest.POST("/admin/users/:"+urlParamID+"/reset-link/", rs.adminCreateResetLink)
+	echoRest.DELETE("/admin/sessions/:"+urlParamID+"/", rs.adminRevokeSession)
 	echoRest.GET("/admin/reset-links/", rs.adminListResetLinks)
-	echoRest.DELETE("/admin/reset-links/:"+urlParamId+"/", rs.adminRevokeResetLink)
+	echoRest.DELETE("/admin/reset-links/:"+urlParamID+"/", rs.adminRevokeResetLink)
 	echoRest.GET("/admin/settings/", rs.adminSettings)
 	echoRest.PATCH("/admin/settings/", rs.adminUpdateSettings)
 	echoRest.GET("/admin/audit/", rs.adminAudit)
@@ -254,7 +255,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.GET("/references/unused-resources/", rs.getUnusedResources)
 	echoRest.GET("/link/", rs.getLink)
 	echoRest.POST("/move/", rs.postMove)
-	echoRest.GET("/moved/:"+urlParamId+"/", rs.getMoved)
+	echoRest.GET("/moved/:"+urlParamID+"/", rs.getMoved)
 
 	// Authentication
 	// Group level middleware
@@ -266,33 +267,33 @@ func (rs *RestService) createRestService() *echo.Echo {
 	groupMkDocs.GET("/config/", rs.getMkDocsConfig)
 
 	groupSections.GET("/", rs.getTree)
-	groupSections.GET("/:"+urlParamId+"/", rs.getSectionDescription)
-	groupSections.GET("/:"+urlParamId+"/backlinks/", rs.getSectionBacklinks)
+	groupSections.GET("/:"+urlParamID+"/", rs.getSectionDescription)
+	groupSections.GET("/:"+urlParamID+"/backlinks/", rs.getSectionBacklinks)
 	groupSections.POST("/", rs.createSection)
-	groupSections.PUT("/:"+urlParamId+"/", rs.renameSection)
-	groupSections.DELETE("/:"+urlParamId+"/", rs.deleteSection)
+	groupSections.PUT("/:"+urlParamID+"/", rs.renameSection)
+	groupSections.DELETE("/:"+urlParamID+"/", rs.deleteSection)
 
-	groupDocuments.GET("/:"+urlParamId+"/", rs.getDocumentDescription)
-	groupDocuments.GET("/:"+urlParamId+"/ws/", rs.handleWebsocket)
-	groupDocuments.GET("/:"+urlParamId+"/content/", rs.getDocumentContent)
-	groupDocuments.GET("/:"+urlParamId+"/references/", rs.getDocumentReferences)
-	groupDocuments.GET("/:"+urlParamId+"/backlinks/", rs.getDocumentBacklinks)
-	groupDocuments.GET("/:"+urlParamId+"/authorship/", rs.getDocumentAuthorship)
-	groupDocuments.GET("/:"+urlParamId+"/history/", rs.getDocumentHistory)
-	groupDocuments.GET("/:"+urlParamId+"/history/diff/", rs.getDocumentRevisionDiff)
-	groupDocuments.GET("/:"+urlParamId+"/history/:"+urlParamRevision+"/content/", rs.getDocumentRevisionContent)
-	groupDocuments.POST("/:"+urlParamId+"/history/:"+urlParamRevision+"/restore/", rs.restoreDocumentRevision)
+	groupDocuments.GET("/:"+urlParamID+"/", rs.getDocumentDescription)
+	groupDocuments.GET("/:"+urlParamID+"/ws/", rs.handleWebsocket)
+	groupDocuments.GET("/:"+urlParamID+"/content/", rs.getDocumentContent)
+	groupDocuments.GET("/:"+urlParamID+"/references/", rs.getDocumentReferences)
+	groupDocuments.GET("/:"+urlParamID+"/backlinks/", rs.getDocumentBacklinks)
+	groupDocuments.GET("/:"+urlParamID+"/authorship/", rs.getDocumentAuthorship)
+	groupDocuments.GET("/:"+urlParamID+"/history/", rs.getDocumentHistory)
+	groupDocuments.GET("/:"+urlParamID+"/history/diff/", rs.getDocumentRevisionDiff)
+	groupDocuments.GET("/:"+urlParamID+"/history/:"+urlParamRevision+"/content/", rs.getDocumentRevisionContent)
+	groupDocuments.POST("/:"+urlParamID+"/history/:"+urlParamRevision+"/restore/", rs.restoreDocumentRevision)
 	groupDocuments.POST("/", rs.createDocument)
-	groupDocuments.PUT("/:"+urlParamId+"/", rs.renameDocument)
-	groupDocuments.DELETE("/:"+urlParamId+"/", rs.deleteDocument)
+	groupDocuments.PUT("/:"+urlParamID+"/", rs.renameDocument)
+	groupDocuments.DELETE("/:"+urlParamID+"/", rs.deleteDocument)
 
-	groupResources.GET("/:"+urlParamId+"/", rs.getResourceDescription)
-	groupResources.GET("/:"+urlParamId+"/content/", rs.getResourceContent)
-	groupResources.GET("/:"+urlParamId+"/backlinks/", rs.getResourceBacklinks)
-	groupResources.GET("/:"+urlParamId+"/thumbnail/", rs.getResourceThumbnail)
-	groupResources.POST("/:"+urlParamParentId+"/:"+urlParamName+"/", rs.uploadNewResource)
-	groupResources.PUT("/:"+urlParamId+"/", rs.renameResource)
-	groupResources.DELETE("/:"+urlParamId+"/", rs.deleteResource)
+	groupResources.GET("/:"+urlParamID+"/", rs.getResourceDescription)
+	groupResources.GET("/:"+urlParamID+"/content/", rs.getResourceContent)
+	groupResources.GET("/:"+urlParamID+"/backlinks/", rs.getResourceBacklinks)
+	groupResources.GET("/:"+urlParamID+"/thumbnail/", rs.getResourceThumbnail)
+	groupResources.POST("/:"+urlParamParentID+"/:"+urlParamName+"/", rs.uploadNewResource)
+	groupResources.PUT("/:"+urlParamID+"/", rs.renameResource)
+	groupResources.DELETE("/:"+urlParamID+"/", rs.deleteResource)
 
 	return echoRest
 }
@@ -347,7 +348,7 @@ func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 		return rs.ReturnError(c, err)
 	}
 
-	var config map[string]interface{}
+	var config map[string]any
 	// Unmarshal the YAML data into the map
 	err = yaml.Unmarshal(mkDocsConfigFileContent, &config)
 	if err != nil {
@@ -377,9 +378,9 @@ func (rs *RestService) getResourceDescription(c echo.Context) error {
 }
 
 func (rs *RestService) getItemDescription(c echo.Context, itemType string) (err error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 
-	var result interface{}
+	var result any
 	switch itemType {
 	case TypeSection:
 		if s := rs.treeManager.GetSection(id); s != nil {
@@ -405,7 +406,7 @@ func (rs *RestService) getItemDescription(c echo.Context, itemType string) (err 
 
 // returns the content of the document with the given id (if found)
 func (rs *RestService) getDocumentContent(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -507,7 +508,7 @@ func (rs *RestService) deleteResource(c echo.Context) (err error) {
 // deletes an item by id and itemType.
 // Documents (or sections containing documents) with connected clients are only deleted with ?force=true.
 func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 
 	var path string
 	switch itemType {
@@ -557,7 +558,7 @@ func (rs *RestService) deleteItem(c echo.Context, itemType string) (err error) {
 
 // returns the content of a single resource with the given id (if found)
 func (rs *RestService) getResourceContent(c echo.Context) (err error) {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 
 	d := rs.treeManager.GetResource(id)
 	if d == nil {
@@ -570,7 +571,7 @@ func (rs *RestService) getResourceContent(c echo.Context) (err error) {
 // The content is taken from the multipart form field "file", either as a file part (binary safe)
 // or, for older clients, as a plain form value.
 func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
-	parentId := c.Param(urlParamParentId)
+	parentID := c.Param(urlParamParentID)
 	name := c.Param(urlParamName)
 
 	var content io.Reader
@@ -591,7 +592,7 @@ func (rs *RestService) uploadNewResource(c echo.Context) (err error) {
 		}, indentationChar)
 	}
 
-	resource, err := rs.treeManager.CreateResource(parentId, name, content)
+	resource, err := rs.treeManager.CreateResource(parentID, name, content)
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
@@ -639,7 +640,7 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 
 // GET /moved/:id/: where the item with an old id is now
 func (rs *RestService) getMoved(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	notFound := func() error {
 		return apiError(c, http.StatusNotFound, CodeNotFound, "No moved item with id '"+id+"'", nil)
 	}
@@ -655,7 +656,7 @@ func (rs *RestService) getMoved(c echo.Context) error {
 
 // returns the per-character authorship of a document
 func (rs *RestService) getDocumentAuthorship(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
@@ -689,5 +690,5 @@ func (rs *RestService) handleWebsocket(c echo.Context) error {
 	if rs.sync == nil {
 		return echo.ErrNotFound
 	}
-	return rs.sync.HandleWebsocket(c, c.Param(urlParamId))
+	return rs.sync.HandleWebsocket(c, c.Param(urlParamID))
 }

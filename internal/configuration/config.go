@@ -1,10 +1,11 @@
 package configuration
 
 import (
-	"github.com/mitchellh/go-homedir"
-	"github.com/spf13/viper"
 	"log"
 	"path/filepath"
+
+	"github.com/mitchellh/go-homedir"
+	"github.com/spf13/viper"
 )
 
 // default name of the MkDocs configuration file inside the project folder

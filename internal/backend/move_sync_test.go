@@ -97,7 +97,7 @@ func TestMoveOfflineEditsMerge(t *testing.T) {
 	b.insertText(0, "Offline in index.\n")
 
 	// meanwhile the section moves, a new document is created at the old path, the server restarts
-	guide := e.tm.GetSection(e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")))
+	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
 	result := e.postMove("alice", MoveRequest{Type: TypeSection, ID: guide.ID, Parent: RootSectionID, Name: "Handbuch"})
 	// setup.md's "../index.md" stays valid in a section on the same level
 	if len(result.Documents) != 1 || result.Documents[0].Path != "index.md" {
@@ -106,7 +106,7 @@ func TestMoveOfflineEditsMerge(t *testing.T) {
 	if rec := e.doBody(http.MethodPost, "/section/", "alice", `{"parent":"root","name":"guide"}`); rec.Code != http.StatusOK {
 		t.Fatalf("create section: %d", rec.Code)
 	}
-	newGuide := e.tm.GetSection(e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")))
+	newGuide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
 	if rec := e.doBody(http.MethodPost, "/document/", "alice", `{"parent":"`+newGuide.ID+`","name":"setup"}`); rec.Code != http.StatusOK {
 		t.Fatalf("create document: %d", rec.Code)
 	}
@@ -235,7 +235,7 @@ func TestMoveLateFix(t *testing.T) {
 	b.connect(e.docID("index.md"))
 	b.disconnect()
 
-	e.postMove("alice", MoveRequest{Type: TypeSection, ID: e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")), Parent: RootSectionID, Name: "Handbuch"})
+	e.postMove("alice", MoveRequest{Type: TypeSection, ID: e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")), Parent: RootSectionID, Name: "Handbuch"})
 	b.appendText("Offline: ![Bild](guide/image.png) and [again](<guide/setup.md#top>).\n")
 
 	b.connect(e.docID("index.md"))

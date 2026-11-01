@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
@@ -48,13 +48,13 @@ type GitCommitter struct {
 	statePath string
 	sync      *SyncServer
 
-	mu      mutexSync.Mutex
+	mu      sync.Mutex
 	pending map[string]*pendingEdits
 	dirty   bool
 
 	stop     chan struct{}
 	done     chan struct{}
-	stopOnce mutexSync.Once
+	stopOnce sync.Once
 }
 
 // NewGitCommitter creates the committer and loads the uncommitted changes of the last run
@@ -92,9 +92,9 @@ func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts G
 }
 
 // Start registers the committer with the sync server and starts checking the triggers
-func (c *GitCommitter) Start(sync *SyncServer) {
-	c.sync = sync
-	sync.SetChangeRecorder(c)
+func (c *GitCommitter) Start(syncServer *SyncServer) {
+	c.sync = syncServer
+	syncServer.SetChangeRecorder(c)
 	go c.loop()
 }
 

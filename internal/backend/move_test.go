@@ -245,7 +245,7 @@ func TestMoveValidation(t *testing.T) {
 		{"invalid name", MoveRequest{Type: TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, MoveReasonInvalidName},
 		{"hidden name", MoveRequest{Type: TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, MoveReasonInvalidName},
 		{"blacklisted", MoveRequest{Type: TypeSection, ID: sub.ID, Parent: RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, MoveReasonBlacklisted},
-		{"extra_css", MoveRequest{Type: TypeResource, ID: logo.ID, Parent: e.tm.GenerateId(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
+		{"extra_css", MoveRequest{Type: TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
 		{"invalid type", MoveRequest{Type: "folder", ID: guide.ID}, http.StatusBadRequest, MoveReasonInvalidType},
 		{"exists", MoveRequest{Type: TypeDocument, ID: e.docID("rezepte/index.md"), Parent: RootSectionID}, http.StatusConflict, MoveReasonExists},
 		{"unknown item", MoveRequest{Type: TypeDocument, ID: "nope", Parent: RootSectionID}, http.StatusNotFound, ""},

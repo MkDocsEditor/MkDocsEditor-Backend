@@ -328,7 +328,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	eventually(t, "edit on server", func() bool { return strings.HasSuffix(e.serverText("guide/setup.md"), "before rename\n") })
 
 	// rename the section above the document
-	guide := e.tm.GetSection(e.tm.GenerateId(filepath.Join(e.project, "docs", "guide")))
+	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
 	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
@@ -480,7 +480,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 	for _, c := range clients {
 		c.connect(id)
 	}
-	for round := 0; round < 10; round++ {
+	for range 10 {
 		for i, c := range clients {
 			c.appendText(string(rune('a'+i)) + "\n")
 			time.Sleep(5 * time.Millisecond)
@@ -514,7 +514,7 @@ func TestExcludeFromGit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, ".git", "info", "exclude"), []byte("*.tmp"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := ExcludeFromGit(project, filepath.Join(project, ".mkdocseditor")); err != nil {
 			t.Fatal(err)
 		}

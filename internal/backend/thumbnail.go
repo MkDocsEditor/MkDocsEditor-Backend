@@ -62,7 +62,7 @@ func thumbnailSize(param string) (int, error) {
 
 // GET /resource/:id/thumbnail/?size=
 func (rs *RestService) getResourceThumbnail(c echo.Context) error {
-	id := c.Param(urlParamId)
+	id := c.Param(urlParamID)
 	r := rs.treeManager.GetResource(id)
 	if r == nil {
 		return rs.ReturnNotFound(c, id)
@@ -231,7 +231,7 @@ func exifOrientation(tiff []byte) int {
 		return 1
 	}
 	entries := int(order.Uint16(tiff[ifd:]))
-	for i := 0; i < entries; i++ {
+	for i := range entries {
 		e := ifd + 2 + 12*i
 		if e+12 > len(tiff) {
 			return 1
@@ -257,8 +257,8 @@ func orient(src *image.NRGBA, o int) image.Image {
 		dw, dh = h, w
 	}
 	dst := image.NewNRGBA(image.Rect(0, 0, dw, dh))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			var dx, dy int
 			switch o {
 			case 2:

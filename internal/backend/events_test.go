@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 type eventsClient struct {
 	t         *testing.T
 	ws        *websocket.Conn
-	mu        mutexSync.Mutex
+	mu        sync.Mutex
 	messages  []map[string]any
 	closeCode int
 	closed    chan struct{}
@@ -51,9 +52,8 @@ func dialEvents(t *testing.T, e *syncEnv, user string, useTicket bool) *eventsCl
 		for {
 			_, data, err := ws.ReadMessage()
 			if err != nil {
-				var ce *websocket.CloseError
 				c.mu.Lock()
-				if errors.As(err, &ce) {
+				if ce, ok := errors.AsType[*websocket.CloseError](err); ok {
 					c.closeCode = ce.Code
 				}
 				c.mu.Unlock()
@@ -74,9 +74,9 @@ func dialEvents(t *testing.T, e *syncEnv, user string, useTicket bool) *eventsCl
 func (c *eventsClient) last(msgType string) map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i]["type"] == msgType {
-			return c.messages[i]
+	for _, v := range slices.Backward(c.messages) {
+		if v["type"] == msgType {
+			return v
 		}
 	}
 	return nil
@@ -132,7 +132,7 @@ func TestEventsOnlineAndTree(t *testing.T) {
 	b2.disconnect()
 	eventually(t, "all left", func() bool { return ev.online() == "" })
 
-	guide := e.tm.GenerateId(e.project + "/docs/guide")
+	guide := e.tm.GenerateID(e.project + "/docs/guide")
 	if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"`+guide+`","name":"new"}`); rec.Code != http.StatusOK {
 		t.Fatalf("create: %d", rec.Code)
 	}

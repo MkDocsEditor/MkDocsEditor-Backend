@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,7 +23,7 @@ var ErrNotUTF8 = errors.New("the file is not valid UTF-8")
 type docSession struct {
 	server *SyncServer
 
-	mu      sessionMutex
+	mu      sync.Mutex
 	meta    *DocumentMeta
 	absPath string
 	docID   string

@@ -201,7 +201,7 @@ func TestRestDocumentLifecycle(t *testing.T) {
 	rec := e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "todo"})
 	expectStatus(t, rec, http.StatusOK)
 	doc := decode[Document](t, rec)
-	if doc.Name != "todo" || doc.SubUrl != "todo/" {
+	if doc.Name != "todo" || doc.SubURL != "todo/" {
 		t.Fatalf("unexpected document: %+v", doc)
 	}
 	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "todo"}), http.StatusConflict)

@@ -155,7 +155,7 @@ func TestGitNoCommitForDiskChanges(t *testing.T) {
 
 func TestGitCommitsTreeChanges(t *testing.T) {
 	e := newGitEnv(t, GitCommitterOptions{})
-	guide := e.tm.GenerateId(filepath.Join(e.project, "docs", "guide"))
+	guide := e.tm.GenerateID(filepath.Join(e.project, "docs", "guide"))
 
 	if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"`+guide+`","name":"new"}`); rec.Code != http.StatusOK {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())

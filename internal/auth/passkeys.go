@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -261,10 +262,8 @@ func (s *Service) takeCeremony(id string, kinds ...int) (*ceremony, error) {
 	if c == nil || !s.now().Before(c.expires) {
 		return nil, ErrChallengeExpired
 	}
-	for _, k := range kinds {
-		if c.kind == k {
-			return c, nil
-		}
+	if slices.Contains(kinds, c.kind) {
+		return c, nil
 	}
 	return nil, ErrChallengeExpired
 }

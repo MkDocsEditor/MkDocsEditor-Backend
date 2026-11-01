@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"strings"
-	mutexSync "sync"
+	"sync"
 )
 
 // GitSignature is the name and email of a commit author
@@ -28,7 +28,7 @@ type GitRepo struct {
 	top       string
 	prefix    string
 	committer GitSignature
-	mu        mutexSync.Mutex
+	mu        sync.Mutex
 }
 
 // OpenGitRepo checks that dir is inside a git work tree
@@ -147,7 +147,7 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		return "", err
 	}
 	changed := false
-	for _, k := range strings.Split(out, "\x00") {
+	for k := range strings.SplitSeq(out, "\x00") {
 		for _, p := range pathspecs {
 			if k != "" && (k == p || strings.HasPrefix(k, p+"/")) {
 				changed = true
@@ -158,14 +158,15 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		return "", nil
 	}
 
-	message := subject
+	var message strings.Builder
+	message.WriteString(subject)
 	if body != "" {
-		message += "\n\n" + body
+		message.WriteString("\n\n" + body)
 	}
 	if len(coAuthors) > 0 {
-		message += "\n"
+		message.WriteString("\n")
 		for _, co := range coAuthors {
-			message += "\nCo-authored-by: " + co.String()
+			message.WriteString("\nCo-authored-by: " + co.String())
 		}
 	}
 	messageFile, err := os.CreateTemp("", "mkdocseditor-commit-")
@@ -173,7 +174,7 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 		return "", err
 	}
 	defer func() { _ = os.Remove(messageFile.Name()) }()
-	_, err = messageFile.WriteString(message + "\n")
+	_, err = messageFile.WriteString(message.String() + "\n")
 	if cerr := messageFile.Close(); err == nil {
 		err = cerr
 	}

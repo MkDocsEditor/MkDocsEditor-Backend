@@ -168,7 +168,7 @@ func (rs *RestService) createDeviceLink(c echo.Context) error {
 
 // GET /account/device-links/{id}/
 func (rs *RestService) getDeviceLink(c echo.Context) error {
-	l, err := rs.authenticator.DeviceLink(UserFromContext(c).ID, c.Param(urlParamId))
+	l, err := rs.authenticator.DeviceLink(UserFromContext(c).ID, c.Param(urlParamID))
 	if err != nil {
 		return rs.authError(c, err)
 	}
@@ -177,7 +177,7 @@ func (rs *RestService) getDeviceLink(c echo.Context) error {
 
 // DELETE /account/device-links/{id}/
 func (rs *RestService) revokeDeviceLink(c echo.Context) error {
-	if err := rs.authenticator.RevokeDeviceLink(UserFromContext(c), c.Param(urlParamId), requestInfo(c)); err != nil {
+	if err := rs.authenticator.RevokeDeviceLink(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)

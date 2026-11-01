@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,8 +18,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 )
-
-type sessionMutex = mutexSync.Mutex
 
 // ErrDocumentInUse is returned when a document that clients are connected to should be deleted
 var ErrDocumentInUse = errors.New("there are still clients connected to the document")
@@ -51,7 +49,7 @@ type SyncServer struct {
 	// changeRecorder is told which users changed which document (the git committer)
 	changeRecorder ChangeRecorder
 
-	mu sessionMutex
+	mu sync.Mutex
 	// loaded documents by path relative to the docs folder
 	sessions map[string]*docSession
 	closed   bool
@@ -62,7 +60,7 @@ type SyncServer struct {
 	workerDone    chan struct{}
 
 	// events websocket
-	eventsMu      sessionMutex
+	eventsMu      sync.Mutex
 	eventConns    map[*wsConn]struct{}
 	eventsClosed  bool
 	treeEvents    chan struct{}
@@ -84,7 +82,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 		return nil, err
 	}
 	redirects, err := NewRedirectStore(stateDir, func(rel string) string {
-		return treeManager.GenerateId(filepath.Join(treeManager.RootPath(), filepath.FromSlash(rel)))
+		return treeManager.GenerateID(filepath.Join(treeManager.RootPath(), filepath.FromSlash(rel)))
 	})
 	if err != nil {
 		return nil, err
@@ -605,7 +603,7 @@ type wsConn struct {
 	sessionID string
 
 	outgoing   chan outgoingMessage
-	closeOnce  mutexSync.Once
+	closeOnce  sync.Once
 	done       chan struct{}
 	writerDone chan struct{}
 
@@ -897,7 +895,7 @@ func (c *wsConn) syncLocked() {
 			log.Printf("%s: unable to update the reader shadow: %v", c.clientID, err)
 		}
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		msg, valid := c.syncState.GenerateMessage()
 		if !valid {
 			return

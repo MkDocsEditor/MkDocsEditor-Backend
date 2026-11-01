@@ -3,6 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
@@ -10,11 +16,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 const banner = `       _     _                         _   
@@ -38,7 +39,7 @@ var rootCmd = &cobra.Command{
 	// this is the default command to run when no subcommand is specified
 	Run: func(cmd *cobra.Command, args []string) {
 		configuration.InitConfig(global.CfgFile)
-		setupUi()
+		setupUI()
 		printStartupInfo()
 
 		conf := configuration.CurrentConfig
@@ -124,7 +125,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func setupUi() {
+func setupUI() {
 	//ui.SetDebugEnabled(global.Verbose)
 
 	if global.NoColor {

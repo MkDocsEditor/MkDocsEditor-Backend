@@ -11,7 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	mutexSync "sync"
+	"sync"
 	"time"
 )
 
@@ -33,7 +33,7 @@ type DocumentMeta struct {
 	// DiskBaseHeads are the heads of the document whose text was last read from or written to disk
 	DiskBaseHeads []string `json:"diskBaseHeads"`
 	// LastChange is the time of the last change by a user
-	LastChange time.Time `json:"lastChange,omitempty"`
+	LastChange time.Time `json:"lastChange"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.
@@ -46,7 +46,7 @@ type DocumentMeta struct {
 type StateStore struct {
 	dir string
 
-	lock mutexSync.Mutex
+	lock sync.Mutex
 	// active documents: path -> meta
 	index map[string]*DocumentMeta
 	// deleted documents: path -> meta (the most recently deleted one)
@@ -264,8 +264,8 @@ func movePath(p string, oldPath string, newPath string) (string, bool) {
 	if p == oldPath {
 		return newPath, true
 	}
-	if strings.HasPrefix(p, oldPath+"/") {
-		return path.Join(newPath, strings.TrimPrefix(p, oldPath+"/")), true
+	if after, ok := strings.CutPrefix(p, oldPath+"/"); ok {
+		return path.Join(newPath, after), true
 	}
 	return "", false
 }
@@ -319,7 +319,7 @@ func ExcludeFromGit(projectPath string, stateDir string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.TrimSpace(line) == pattern {
 			return nil
 		}
