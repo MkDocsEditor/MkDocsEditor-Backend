@@ -245,7 +245,7 @@ func TestAccountSetupFlow(t *testing.T) {
 		t.Errorf("whoami = %s", r.body)
 	}
 	expect(t, b.do(http.MethodGet, "/section/", nil), http.StatusOK, "")
-	expect(t, b.do(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-markus"}), http.StatusOK, "")
+	expect(t, b.do(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-markus"}), http.StatusOK, "")
 	r = b.do(http.MethodGet, "/auth/status/", nil)
 	r.json(t, &status)
 	if status.SetupRequired {
@@ -268,7 +268,7 @@ func TestAccountCSRF(t *testing.T) {
 	e := newAccountEnv(t)
 	b := e.setupAdmin()
 	create := func(c *client) *response {
-		return c.do(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "doc-" + time.Now().Format("150405.000000000")})
+		return c.do(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "doc-" + time.Now().Format("150405.000000000")})
 	}
 	expect(t, create(b), http.StatusOK, "")
 
@@ -344,7 +344,7 @@ func TestAccountBearerAndInvites(t *testing.T) {
 		t.Fatalf("session = %s", r.body)
 	}
 	app.bearer = sess.Token
-	expect(t, app.do(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK, "")
+	expect(t, app.do(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK, "")
 	expect(t, app.do(http.MethodGet, "/admin/invites/", nil), http.StatusForbidden, CodeForbidden)
 
 	// invalid bearer tokens are 401, even with a valid cookie
@@ -366,7 +366,7 @@ func TestAccountBearerAndInvites(t *testing.T) {
 	// readers may read, not write
 	kid := e.invite(admin, "reader", "kid", false)
 	expect(t, kid.do(http.MethodGet, "/section/", nil), http.StatusOK, "")
-	expect(t, kid.do(http.MethodPost, "/document/", NewDocumentRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden, CodeForbidden)
+	expect(t, kid.do(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden, CodeForbidden)
 	expect(t, kid.do(http.MethodPost, "/auth/ws-ticket/", nil), http.StatusOK, "")
 	expect(t, kid.do(http.MethodGet, "/account/sessions/", nil), http.StatusOK, "")
 

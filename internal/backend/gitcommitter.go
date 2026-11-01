@@ -245,11 +245,8 @@ func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string,
 	}
 	hash, err := c.commit(paths, author, coAuthors, subject, body)
 	if err != nil {
-		for _, p := range paths {
-			// attribute the edits to the first path, the next edit commit takes them along
-			c.restorePending(p, changes)
-			break
-		}
+		// attribute the edits to the first path, the next edit commit takes them along
+		c.restorePending(paths[0], changes)
 	}
 	c.saveIfDirty()
 	return hash
@@ -299,9 +296,6 @@ func (c *GitCommitter) rankUsers(changes map[string]int) []string {
 // migrateSubjects maps the usernames of a pending file written before the account database
 // to account ids
 func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
-	if c.authn == nil {
-		return changes
-	}
 	out := make(map[string]int, len(changes))
 	for subject, n := range changes {
 		if c.authn.UserByID(subject) == nil {
@@ -317,10 +311,8 @@ func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
 // signature returns the git author of a subject (account id)
 func (c *GitCommitter) signature(subject string) GitSignature {
 	name, email, username := subject, "", subject
-	if c.authn != nil {
-		if u := c.authn.UserByID(subject); u != nil {
-			name, email, username = u.DisplayName, u.Email, u.Username
-		}
+	if u := c.authn.UserByID(subject); u != nil {
+		name, email, username = u.DisplayName, u.Email, u.Username
 	}
 	if email == "" {
 		email = username + "@mkdocseditor.invalid"

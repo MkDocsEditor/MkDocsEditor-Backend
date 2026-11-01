@@ -27,6 +27,8 @@ const (
 	thumbnailsDir        = "thumbnails"
 	thumbnailMaxPixels   = 50_000_000
 	thumbnailDefaultSize = 256
+	// image decoding is expensive, so only this many run at the same time
+	maxConcurrentThumbnails = 2
 )
 
 // thumbnail sizes; a requested size is rounded up to the next one
@@ -71,7 +73,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 	if err != nil {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), map[string]any{"field": "size"})
 	}
-	if !hasThumbnail(r.MimeType) || rs.sync == nil {
+	if !hasThumbnail(r.MimeType) {
 		return apiError(c, http.StatusNotFound, CodeNotFound, errNoThumbnail.Error(), nil)
 	}
 	key := strconv.FormatUint(xxhash.ChecksumString64(fmt.Sprintf("%s|%d|%d|%d", r.RelPath, size, r.Filesize, r.ModTime.UnixNano())), 16)

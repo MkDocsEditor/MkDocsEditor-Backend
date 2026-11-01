@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"iter"
 	"log"
 	"net/url"
 	"os"
@@ -40,42 +42,64 @@ var (
 
 type (
 	Section struct {
-		Type        string       `json:"type" xml:"type" form:"type" query:"type"`
-		ID          string       `json:"id" xml:"id" form:"id" query:"id"`
-		Name        string       `json:"name" xml:"name" form:"name" query:"name"`
-		Path        string       `json:"-" xml:"-" form:"-" query:"-"`
-		RelPath     string       `json:"path" xml:"path" form:"path" query:"path"`
-		Index       string       `json:"index" xml:"index" form:"index" query:"index"`
-		Subsections *[]*Section  `json:"subsections" xml:"subsections" form:"subsections" query:"subsections"`
-		Documents   *[]*Document `json:"documents" xml:"documents" form:"documents" query:"documents"`
-		Resources   *[]*Resource `json:"resources" xml:"resources" form:"resources" query:"resources"`
+		Type        string      `json:"type"`
+		ID          string      `json:"id"`
+		Name        string      `json:"name"`
+		Path        string      `json:"-"`
+		RelPath     string      `json:"path"`
+		Index       string      `json:"index"`
+		Subsections []*Section  `json:"subsections"`
+		Documents   []*Document `json:"documents"`
+		Resources   []*Resource `json:"resources"`
 	}
 
 	Document struct {
-		Type     string    `json:"type" xml:"type" form:"type" query:"type"`
-		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
-		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
-		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
-		RelPath  string    `json:"path" xml:"path" form:"path" query:"path"`
-		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
-		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
-		SubURL   string    `json:"url" xml:"url" form:"url" query:"url"`
+		Type     string    `json:"type"`
+		ID       string    `json:"id"`
+		Name     string    `json:"name"`
+		Path     string    `json:"-"`
+		RelPath  string    `json:"path"`
+		Filesize int64     `json:"filesize"`
+		ModTime  time.Time `json:"modtime"`
+		SubURL   string    `json:"url"`
 	}
 
 	Resource struct {
-		Type     string    `json:"type" xml:"type" form:"type" query:"type"`
-		ID       string    `json:"id" xml:"id" form:"id" query:"id"`
-		Name     string    `json:"name" xml:"name" form:"name" query:"name"`
-		Path     string    `json:"-" xml:"-" form:"-" query:"-"`
-		RelPath  string    `json:"path" xml:"path" form:"path" query:"path"`
-		Filesize int64     `json:"filesize" xml:"filesize" form:"filesize" query:"filesize"`
-		ModTime  time.Time `json:"modtime" xml:"modtime" form:"modtime" query:"modtime"`
-		MimeType string    `json:"mimeType" xml:"mimeType" form:"mimeType" query:"mimeType"`
-		Kind     string    `json:"kind" xml:"kind" form:"kind" query:"kind"`
+		Type     string    `json:"type"`
+		ID       string    `json:"id"`
+		Name     string    `json:"name"`
+		Path     string    `json:"-"`
+		RelPath  string    `json:"path"`
+		Filesize int64     `json:"filesize"`
+		ModTime  time.Time `json:"modtime"`
+		MimeType string    `json:"mimeType"`
+		Kind     string    `json:"kind"`
 		// Thumbnail is true when GET /resource/{id}/thumbnail/ works for the resource
-		Thumbnail bool `json:"thumbnail" xml:"thumbnail" form:"thumbnail" query:"thumbnail"`
+		Thumbnail bool `json:"thumbnail"`
 	}
 )
+
+// walk iterates over the section and all sections below it, parents first. A nil section is empty.
+func (s *Section) walk() iter.Seq[*Section] {
+	return func(yield func(*Section) bool) {
+		s.visit(yield)
+	}
+}
+
+func (s *Section) visit(yield func(*Section) bool) bool {
+	if s == nil {
+		return true
+	}
+	if !yield(s) {
+		return false
+	}
+	for _, sub := range s.Subsections {
+		if !sub.visit(yield) {
+			return false
+		}
+	}
+	return true
+}
 
 // TreeManager keeps an in memory representation of the file structure of the docs folder.
 //
@@ -91,6 +115,7 @@ type TreeManager struct {
 	buildLock sync.Mutex
 
 	rootPath string
+	mkdocs   configuration.MkDocsConfiguration
 	tree     *Section
 
 	listenerLock sync.Mutex
@@ -98,14 +123,10 @@ type TreeManager struct {
 }
 
 // NewTreeManager creates a TreeManager for the configured docs path and builds the initial tree
-func NewTreeManager() *TreeManager {
-	return NewTreeManagerForPath(configuration.CurrentConfig.MkDocs.DocsPath)
-}
-
-// NewTreeManagerForPath creates a TreeManager for the given docs path and builds the initial tree
-func NewTreeManagerForPath(rootPath string) *TreeManager {
+func NewTreeManager(mkdocs configuration.MkDocsConfiguration) *TreeManager {
 	treeManager := &TreeManager{
-		rootPath: filepath.Clean(rootPath),
+		rootPath: filepath.Clean(mkdocs.DocsPath),
+		mkdocs:   mkdocs,
 	}
 	treeManager.CreateItemTree()
 	return treeManager
@@ -114,6 +135,11 @@ func NewTreeManagerForPath(rootPath string) *TreeManager {
 // RootPath returns the path of the docs folder
 func (tm *TreeManager) RootPath() string {
 	return tm.rootPath
+}
+
+// ConfigFile returns the path of mkdocs.yml
+func (tm *TreeManager) ConfigFile() string {
+	return tm.mkdocs.ConfigFile
 }
 
 // AddTreeChangeListener registers a function that is called after the tree has been rebuilt.
@@ -136,7 +162,7 @@ func (tm *TreeManager) CreateItemTree() {
 	tm.buildLock.Lock()
 	defer tm.buildLock.Unlock()
 
-	ignore := newIgnoreMatcher(tm.rootPath)
+	ignore := tm.newIgnoreMatcher()
 	parent, name := filepath.Split(tm.rootPath)
 	root := tm.createSectionForTree(parent, name, RootSectionID)
 	tm.populateItemTree(root, root.Path, ignore)
@@ -171,7 +197,7 @@ func (tm *TreeManager) populateItemTree(section *Section, path string, ignore fu
 
 		if f.IsDir() {
 			subSection := tm.createSectionForTree(path, f.Name(), "")
-			*section.Subsections = append(*section.Subsections, subSection)
+			section.Subsections = append(section.Subsections, subSection)
 			tm.populateItemTree(subSection, subSection.Path, ignore)
 			continue
 		}
@@ -185,20 +211,19 @@ func (tm *TreeManager) populateItemTree(section *Section, path string, ignore fu
 			continue
 		}
 		if strings.HasSuffix(info.Name(), markdownFileExtension) {
-			*section.Documents = append(*section.Documents, tm.createDocumentForTree(path, info))
+			section.Documents = append(section.Documents, tm.createDocumentForTree(path, info))
 		} else {
-			*section.Resources = append(*section.Resources, tm.createResourceForTree(path, info))
+			section.Resources = append(section.Resources, tm.createResourceForTree(path, info))
 		}
 	}
 }
 
 // setSectionIndexes sets the index document id of every section
 func setSectionIndexes(s *Section) {
-	if d := sectionIndexDocument(s); d != nil {
-		s.Index = d.ID
-	}
-	for _, sub := range *s.Subsections {
-		setSectionIndexes(sub)
+	for section := range s.walk() {
+		if d := sectionIndexDocument(section); d != nil {
+			section.Index = d.ID
+		}
 	}
 }
 
@@ -213,24 +238,27 @@ func (tm *TreeManager) relPath(absPath string) string {
 
 // newIgnoreMatcher returns a function that reports whether a path should be left out of the tree.
 // Hidden files and folders, the extra_css files of mkdocs.yml and the configured blacklist are ignored.
-func newIgnoreMatcher(rootPath string) func(path string) bool {
-	var extraCSS []string
-	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
-		extraCSS = mkDocsConfig.ExtraCSS
-	}
-	blacklist := configuration.CurrentConfig.MkDocs.Blacklist
-
+func (tm *TreeManager) newIgnoreMatcher() func(path string) bool {
+	blocked := tm.blockedPaths()
 	return func(path string) bool {
 		if strings.HasPrefix(filepath.Base(path), ".") {
 			return true
 		}
-		rel, err := filepath.Rel(rootPath, path)
+		rel, err := filepath.Rel(tm.rootPath, path)
 		if err != nil {
 			return false
 		}
-		rel = filepath.ToSlash(rel)
-		return slices.Contains(extraCSS, rel) || slices.Contains(blacklist, rel)
+		return slices.Contains(blocked, filepath.ToSlash(rel))
 	}
+}
+
+// blockedPaths are the paths that are no items: the blacklist and the extra_css files
+func (tm *TreeManager) blockedPaths() []string {
+	blocked := slices.Clone(tm.mkdocs.Blacklist)
+	if extraCSS, err := readExtraCSS(tm.mkdocs.ConfigFile); err == nil {
+		blocked = append(blocked, extraCSS...)
+	}
+	return blocked
 }
 
 // creates a (non-cryptographic) hash of the given string
@@ -258,9 +286,9 @@ func (tm *TreeManager) createSectionForTree(path string, name string, id string)
 		Name:        name,
 		Path:        sectionPath,
 		RelPath:     tm.relPath(sectionPath),
-		Documents:   &[]*Document{},
-		Subsections: &[]*Section{},
-		Resources:   &[]*Resource{},
+		Documents:   []*Document{},
+		Subsections: []*Section{},
+		Resources:   []*Resource{},
 	}
 }
 
@@ -269,12 +297,10 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 	fileName := f.Name()
 	documentPath := filepath.Join(parentFolderPath, fileName)
 
+	relPath := tm.relPath(documentPath)
 	var subURL strings.Builder
-	for element := range strings.SplitSeq(strings.TrimPrefix(documentPath, tm.rootPath), string(filepath.Separator)) {
-		element = strings.TrimSuffix(element, markdownFileExtension)
-		if len(element) > 0 {
-			subURL.WriteString(url.PathEscape(element) + "/")
-		}
+	for element := range strings.SplitSeq(strings.TrimSuffix(relPath, markdownFileExtension), "/") {
+		subURL.WriteString(url.PathEscape(element) + "/")
 	}
 
 	return &Document{
@@ -282,7 +308,7 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 		ID:       tm.GenerateID(documentPath),
 		Name:     strings.TrimSuffix(fileName, markdownFileExtension),
 		Path:     documentPath,
-		RelPath:  tm.relPath(documentPath),
+		RelPath:  relPath,
 		Filesize: f.Size(),
 		ModTime:  f.ModTime(),
 		SubURL:   subURL.String(),
@@ -309,17 +335,32 @@ func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileI
 
 // GetSection finds a section with the given id in the document tree
 func (tm *TreeManager) GetSection(id string) *Section {
-	return findSectionRecursive(tm.Root(), id)
+	for s := range tm.Root().walk() {
+		if s.ID == id {
+			return s
+		}
+	}
+	return nil
 }
 
 // GetDocument finds a document with the given id in the document tree
 func (tm *TreeManager) GetDocument(id string) *Document {
-	return findDocumentRecursive(tm.Root(), id)
+	for s := range tm.Root().walk() {
+		if i := slices.IndexFunc(s.Documents, func(d *Document) bool { return d.ID == id }); i >= 0 {
+			return s.Documents[i]
+		}
+	}
+	return nil
 }
 
 // GetResource finds a resource with the given id in the document tree
 func (tm *TreeManager) GetResource(id string) *Resource {
-	return findResourceRecursive(tm.Root(), id)
+	for s := range tm.Root().walk() {
+		if i := slices.IndexFunc(s.Resources, func(r *Resource) bool { return r.ID == id }); i >= 0 {
+			return s.Resources[i]
+		}
+	}
+	return nil
 }
 
 // ReadDocumentContent reads the current content of the given document from disk
@@ -329,58 +370,6 @@ func (tm *TreeManager) ReadDocumentContent(d *Document) (string, error) {
 		return "", err
 	}
 	return string(data), nil
-}
-
-// traverses the tree and searches for a section with the given id
-func findSectionRecursive(section *Section, id string) *Section {
-	if section == nil {
-		return nil
-	}
-	if section.ID == id {
-		return section
-	}
-	for _, subsection := range *section.Subsections {
-		if s := findSectionRecursive(subsection, id); s != nil {
-			return s
-		}
-	}
-	return nil
-}
-
-// traverses the tree and searches for a document with the given id
-func findDocumentRecursive(section *Section, id string) *Document {
-	if section == nil {
-		return nil
-	}
-	for _, document := range *section.Documents {
-		if document.ID == id {
-			return document
-		}
-	}
-	for _, subsection := range *section.Subsections {
-		if d := findDocumentRecursive(subsection, id); d != nil {
-			return d
-		}
-	}
-	return nil
-}
-
-// traverses the tree and searches for a resource with the given id
-func findResourceRecursive(section *Section, id string) *Resource {
-	if section == nil {
-		return nil
-	}
-	for _, resource := range *section.Resources {
-		if resource.ID == id {
-			return resource
-		}
-	}
-	for _, subsection := range *section.Subsections {
-		if r := findResourceRecursive(subsection, id); r != nil {
-			return r
-		}
-	}
-	return nil
 }
 
 // ValidateName checks that a name given by a client is a plain, visible file name
@@ -397,7 +386,7 @@ func fileExists(filePath string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	return false, err
@@ -550,30 +539,35 @@ func (tm *TreeManager) RenameResource(resource *Resource, name string) (*Resourc
 	return tm.GetResource(tm.GenerateID(newPath)), nil
 }
 
+// itemPath returns the path of the item with the given id and type, or "" if there is none
+func (tm *TreeManager) itemPath(id string, itemType string) string {
+	switch itemType {
+	case TypeSection:
+		if s := tm.GetSection(id); s != nil {
+			return s.Path
+		}
+	case TypeDocument:
+		if d := tm.GetDocument(id); d != nil {
+			return d.Path
+		}
+	case TypeResource:
+		if r := tm.GetResource(id); r != nil {
+			return r.Path
+		}
+	}
+	return ""
+}
+
 // DeleteItem deletes a file/folder with the given ID and type from disk.
 // It returns false if no item with the given id and type exists.
 func (tm *TreeManager) DeleteItem(id string, itemType string) (bool, error) {
 	tm.fsLock.Lock()
 	defer tm.fsLock.Unlock()
 
-	var path string
-	switch itemType {
-	case TypeSection:
-		if id == RootSectionID {
-			return false, fmt.Errorf("%w: the root section cannot be deleted", ErrInvalidName)
-		}
-		if s := tm.GetSection(id); s != nil {
-			path = s.Path
-		}
-	case TypeDocument:
-		if d := tm.GetDocument(id); d != nil {
-			path = d.Path
-		}
-	case TypeResource:
-		if r := tm.GetResource(id); r != nil {
-			path = r.Path
-		}
+	if itemType == TypeSection && id == RootSectionID {
+		return false, fmt.Errorf("%w: the root section cannot be deleted", ErrInvalidName)
 	}
+	path := tm.itemPath(id, itemType)
 	if path == "" {
 		return false, nil
 	}

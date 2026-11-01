@@ -59,7 +59,7 @@ func (rs *RestService) adminListUsers(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, users, indentationChar)
+	return c.JSONPretty(http.StatusOK, users, jsonIndent)
 }
 
 // PATCH /admin/users/{id}/
@@ -84,7 +84,7 @@ func (rs *RestService) adminUpdateUser(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, u, indentationChar)
+	return c.JSONPretty(http.StatusOK, u, jsonIndent)
 }
 
 // DELETE /admin/users/{id}/
@@ -121,7 +121,7 @@ func (rs *RestService) adminRevokeUserSessions(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, jsonIndent)
 }
 
 // DELETE /admin/sessions/{id}/
@@ -154,7 +154,7 @@ func (rs *RestService) adminCreateResetLink(c echo.Context) error {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Link: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkReset, token)}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Link: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkReset, token)}, jsonIndent)
 }
 
 // GET /admin/reset-links/
@@ -172,7 +172,7 @@ func (rs *RestService) adminRevokeResetLink(c echo.Context) error {
 
 // GET /admin/settings/
 func (rs *RestService) adminSettings(c echo.Context) error {
-	return c.JSONPretty(http.StatusOK, rs.authenticator.Settings(), indentationChar)
+	return c.JSONPretty(http.StatusOK, rs.authenticator.Settings(), jsonIndent)
 }
 
 // PATCH /admin/settings/
@@ -217,7 +217,7 @@ func (rs *RestService) adminAudit(c echo.Context) error {
 	if next != 0 {
 		resp.Next = &next
 	}
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // GET /account/tokens/
@@ -226,7 +226,7 @@ func (rs *RestService) listAppTokens(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, tokens, indentationChar)
+	return c.JSONPretty(http.StatusOK, tokens, jsonIndent)
 }
 
 // POST /account/tokens/
@@ -243,7 +243,7 @@ func (rs *RestService) createAppToken(c echo.Context) error {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CreatedAppTokenResponse{AppToken: t, Token: token}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CreatedAppTokenResponse{AppToken: t, Token: token}, jsonIndent)
 }
 
 // DELETE /account/tokens/{id}/

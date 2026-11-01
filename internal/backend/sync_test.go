@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	automerge "github.com/automerge/automerge-go"
 )
 
@@ -500,7 +501,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 
 func TestStateDirInsideDocsIsRefused(t *testing.T) {
 	project := newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	if _, err := NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
 		t.Error("state dir inside docs accepted")
 	}

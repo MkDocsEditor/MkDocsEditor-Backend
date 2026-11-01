@@ -65,14 +65,14 @@ func newSyncEnv(t *testing.T) *syncEnv {
 
 func (e *syncEnv) start() {
 	e.t.Helper()
-	e.tm = NewTreeManager()
+	e.tm = NewTreeManager(configuration.CurrentConfig.MkDocs)
 	ss, err := NewSyncServer(e.tm, e.authn, e.stateDir, nil)
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	ss.FlushDelay = 50 * time.Millisecond
 	e.ss = ss
-	e.rs = NewRestService(e.tm, ss, e.authn)
+	e.rs = NewRestService(configuration.CurrentConfig.Server, e.tm, ss, e.authn)
 	if e.gitOpts != nil {
 		repo, err := OpenGitRepo(filepath.Join(e.project, "docs"), GitSignature{Name: "Backend", Email: "backend@example.com"})
 		if err != nil {

@@ -56,12 +56,12 @@ func newTestWiki(t *testing.T) string {
 }
 
 func findDocumentByName(s *Section, name string) *Document {
-	for _, d := range *s.Documents {
+	for _, d := range s.Documents {
 		if d.Name == name {
 			return d
 		}
 	}
-	for _, sub := range *s.Subsections {
+	for _, sub := range s.Subsections {
 		if d := findDocumentByName(sub, name); d != nil {
 			return d
 		}
@@ -73,7 +73,7 @@ func findSectionByName(s *Section, name string) *Section {
 	if s.Name == name {
 		return s
 	}
-	for _, sub := range *s.Subsections {
+	for _, sub := range s.Subsections {
 		if r := findSectionByName(sub, name); r != nil {
 			return r
 		}
@@ -82,12 +82,12 @@ func findSectionByName(s *Section, name string) *Section {
 }
 
 func findResourceByName(s *Section, name string) *Resource {
-	for _, r := range *s.Resources {
+	for _, r := range s.Resources {
 		if r.Name == name {
 			return r
 		}
 	}
-	for _, sub := range *s.Subsections {
+	for _, sub := range s.Subsections {
 		if r := findResourceByName(sub, name); r != nil {
 			return r
 		}

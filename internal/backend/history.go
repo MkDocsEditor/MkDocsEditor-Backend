@@ -179,9 +179,6 @@ type HistoryAuthor struct {
 
 func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 	a := HistoryAuthor{Name: sig.Name, Email: sig.Email}
-	if rs.authenticator == nil {
-		return a
-	}
 	var user *auth.User
 	if name, ok := strings.CutSuffix(sig.Email, "@mkdocseditor.invalid"); ok {
 		// current or former username
@@ -208,16 +205,9 @@ func (rs *RestService) historyContext(c echo.Context) (*Document, string, *GitRe
 		return nil, "", nil, rs.ReturnNotFound(c, id)
 	}
 	if rs.git == nil {
-		return nil, "", nil, c.JSONPretty(http.StatusNotFound, &ErrorResult{
-			Name:    "Not found",
-			Message: "the revision history requires git.enabled",
-		}, indentationChar)
+		return nil, "", nil, notFoundError(c, "the revision history requires git.enabled")
 	}
-	rel, err := filepath.Rel(rs.treeManager.RootPath(), d.Path)
-	if err != nil {
-		return nil, "", nil, rs.ReturnError(c, err)
-	}
-	return d, filepath.ToSlash(rel), rs.git.repo, nil
+	return d, d.RelPath, rs.git.repo, nil
 }
 
 // findRevision returns the commit of a revision in the history of a file
@@ -238,10 +228,7 @@ func findRevision(repo *GitRepo, rel string, revision string) (*GitCommit, error
 }
 
 func (rs *RestService) returnUnknownRevision(c echo.Context, revision string) error {
-	return c.JSONPretty(http.StatusNotFound, &ErrorResult{
-		Name:    "Not found",
-		Message: fmt.Sprintf("revision %q is not in the history of this document", revision),
-	}, indentationChar)
+	return notFoundError(c, fmt.Sprintf("revision %q is not in the history of this document", revision))
 }
 
 // GET /document/:id/history/
@@ -253,7 +240,7 @@ func (rs *RestService) getDocumentHistory(c echo.Context) error {
 	limit := 100
 	if v := c.QueryParam("limit"); v != "" {
 		if limit, err = strconv.Atoi(v); err != nil || limit < 1 || limit > 1000 {
-			return c.JSONPretty(http.StatusBadRequest, &ErrorResult{Name: "Bad Request", Message: "limit must be between 1 and 1000"}, indentationChar)
+			return apiError(c, http.StatusBadRequest, CodeBadRequest, "limit must be between 1 and 1000", nil)
 		}
 	}
 	commits, err := repo.FileHistory(rel, limit)
@@ -275,16 +262,14 @@ func (rs *RestService) getDocumentHistory(c echo.Context) error {
 		}
 		entries = append(entries, e)
 	}
-	return c.JSONPretty(http.StatusOK, entries, indentationChar)
+	return c.JSONPretty(http.StatusOK, entries, jsonIndent)
 }
 
 // revisionText returns the text of a document at a revision, or the live text for "current"
 func (rs *RestService) revisionText(d *Document, rel string, repo *GitRepo, revision string) (string, string, error) {
 	if revision == RevisionCurrent {
-		if rs.sync != nil {
-			if text, ok := rs.sync.CurrentText(d); ok {
-				return text, rel, nil
-			}
+		if text, ok := rs.sync.CurrentText(d); ok {
+			return text, rel, nil
 		}
 		data, err := os.ReadFile(d.Path)
 		return string(data), rel, err
@@ -328,7 +313,7 @@ func (rs *RestService) getDocumentRevisionDiff(c echo.Context) error {
 		to = RevisionCurrent
 	}
 	if from == "" {
-		return c.JSONPretty(http.StatusBadRequest, &ErrorResult{Name: "Bad Request", Message: "missing query parameter 'from'"}, indentationChar)
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "missing query parameter 'from'", nil)
 	}
 	fromText, fromPath, err := rs.revisionText(d, rel, repo, from)
 	if errors.Is(err, ErrUnknownRevision) {
@@ -374,9 +359,6 @@ func (rs *RestService) restoreDocumentRevision(c echo.Context) error {
 	}
 	if err != nil {
 		return rs.ReturnError(c, err)
-	}
-	if rs.sync == nil {
-		return echo.ErrNotFound
 	}
 	if err = rs.sync.ReplaceText(d, text, UserFromContext(c), "restore "+shortRevision(revision)); err != nil {
 		return rs.ReturnError(c, err)

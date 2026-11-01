@@ -7,18 +7,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 )
 
 func TestTreeStructure(t *testing.T) {
 	project := newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	root := tm.Root()
 
 	if root.ID != RootSectionID || root.Type != TypeSection {
 		t.Fatalf("unexpected root: %+v", root)
 	}
-	if len(*root.Documents) != 1 || (*root.Documents)[0].Name != "index" {
-		t.Fatalf("expected only index in root documents, got %+v", *root.Documents)
+	if len(root.Documents) != 1 || root.Documents[0].Name != "index" {
+		t.Fatalf("expected only index in root documents, got %+v", root.Documents)
 	}
 	// stylesheets only contains an extra_css file, blacklisted is on the blacklist
 	if findDocumentByName(root, "secret") != nil {
@@ -87,7 +89,7 @@ func TestValidateName(t *testing.T) {
 func TestCreateRenameDelete(t *testing.T) {
 	project := newTestWiki(t)
 	docs := filepath.Join(project, "docs")
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 
 	section, err := tm.CreateSection(RootSectionID, "new")
 	if err != nil || section == nil {
@@ -166,7 +168,7 @@ func TestCreateRenameDelete(t *testing.T) {
 
 func TestTreeChangeListener(t *testing.T) {
 	newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	var calls int
 	tm.AddTreeChangeListener(func(oldTree, newTree *Section) {
 		calls++
@@ -185,7 +187,7 @@ func TestTreeChangeListener(t *testing.T) {
 // Readers and writers run concurrently; run with -race.
 func TestTreeConcurrentAccess(t *testing.T) {
 	newTestWiki(t)
-	tm := NewTreeManager()
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
 	var wg sync.WaitGroup
 	for i := range 4 {
 		wg.Add(2)
@@ -213,4 +215,37 @@ func TestTreeConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// A plain string is a valid theme in mkdocs.yml, it must not hide the extra_css setting
+func TestExtraCSSIsIgnoredWithAPlainTheme(t *testing.T) {
+	project := newTestWiki(t)
+	config := "site_name: Test\ntheme: material\nextra_css:\n  - stylesheets/extra.css\n"
+	if err := os.WriteFile(filepath.Join(project, "mkdocs.yml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	if r := findResourceByName(tm.Root(), "extra.css"); r != nil {
+		t.Fatalf("extra.css is in the tree: %+v", r)
+	}
+}
+
+// Only the file extension is cut from the URL, not the ".md" of a folder name
+func TestDocumentURLKeepsFolderNames(t *testing.T) {
+	project := newTestWiki(t)
+	dir := filepath.Join(project, "docs", "notes.md")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a b.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	d := findDocumentByName(tm.Root(), "a b")
+	if d == nil {
+		t.Fatal("document not found")
+	}
+	if want := "notes.md/a%20b/"; d.SubURL != want {
+		t.Fatalf("got %q, want %q", d.SubURL, want)
+	}
 }

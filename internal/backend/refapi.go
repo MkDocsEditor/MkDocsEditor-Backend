@@ -93,10 +93,8 @@ func (rs *RestService) toReference(r resolvedRef) *Reference {
 		ref.Status = RefStatusBroken
 		ref.Reason = r.Reason
 		ref.Path = r.Dest.path
-		if rs.sync != nil {
-			if moved, ok := rs.sync.movedTarget(r.Source.RelPath, r.Dest); ok {
-				ref.MovedTo, ref.SuggestedDestination = moved.item, moved.destination
-			}
+		if moved, ok := rs.sync.movedTarget(r.Source.RelPath, r.Dest); ok {
+			ref.MovedTo, ref.SuggestedDestination = moved.item, moved.destination
 		}
 	}
 	return ref
@@ -114,7 +112,7 @@ func (rs *RestService) getDocumentReferences(c echo.Context) error {
 	for _, r := range snap.refs[d.RelPath] {
 		result.References = append(result.References, rs.toReference(r))
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // GET /document/:id/backlinks/
@@ -173,7 +171,7 @@ func (rs *RestService) backlinks(c echo.Context, item *ItemRef, section string, 
 			Internal:    item.Type == TypeSection && isInside(r.Source.RelPath, section),
 		})
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // GET /references/broken/
@@ -185,7 +183,7 @@ func (rs *RestService) getBrokenReferences(c echo.Context) error {
 			result.Broken = append(result.Broken, &BrokenReference{Source: documentRef(r.Source), Reference: rs.toReference(r)})
 		}
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // GET /references/unused-resources/
@@ -195,7 +193,7 @@ func (rs *RestService) getUnusedResources(c echo.Context) error {
 	if result.Resources == nil {
 		result.Resources = []*Resource{}
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // GET /link/?from=&to=&anchor=
@@ -225,7 +223,7 @@ func (rs *RestService) getLink(c echo.Context) error {
 	if r := lookup.resources[target.Path]; r != nil && r.Kind == ResourceKindImage {
 		markdown = "![" + escapeLinkText(strings.TrimSuffix(r.Name, path.Ext(r.Name))) + "](" + dest + ")"
 	}
-	return c.JSONPretty(http.StatusOK, &LinkResult{Destination: dest, Markdown: markdown, Target: target}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &LinkResult{Destination: dest, Markdown: markdown, Target: target}, jsonIndent)
 }
 
 // escapeLinkText escapes the characters that would end the text of a markdown link

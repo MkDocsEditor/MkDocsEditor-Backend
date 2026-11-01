@@ -143,7 +143,7 @@ func (rs *RestService) userView(u *auth.User) *UserView {
 func (rs *RestService) writeLoginResult(c echo.Context, r *auth.LoginResult) error {
 	if r.Session == nil {
 		return c.JSONPretty(http.StatusOK, &SecondFactorRequiredResponse{Status: "second-factor-required",
-			Challenge: r.Challenge, Methods: r.Methods, ExpiresAt: r.ExpiresAt}, indentationChar)
+			Challenge: r.Challenge, Methods: r.Methods, ExpiresAt: r.ExpiresAt}, jsonIndent)
 	}
 	resp := &SessionResponse{Status: "ok", User: rs.userView(r.User), Session: r.Session}
 	if r.Session.Type == auth.SessionBearer {
@@ -152,7 +152,7 @@ func (rs *RestService) writeLoginResult(c echo.Context, r *auth.LoginResult) err
 		rs.setSessionCookie(c, r.Token, r.Session.ExpiresAt)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // GET /auth/status/
@@ -163,7 +163,7 @@ func (rs *RestService) authStatus(c echo.Context) error {
 		Passkeys:        PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
 		PasswordPolicy:  PasswordPolicy{MinLength: auth.PasswordMinLength, MaxLength: auth.PasswordMaxLength},
 		LegacyBasicAuth: rs.authenticator.LegacyBasicAuth(),
-	}, indentationChar)
+	}, jsonIndent)
 }
 
 // POST /auth/login/
@@ -201,7 +201,7 @@ func (rs *RestService) whoAmI(c echo.Context) error {
 	if sess := SessionFromContext(c); sess != nil {
 		resp.SessionID = sess.ID
 	}
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // POST /auth/ws-ticket/ issues a single-use ticket for a websocket connection
@@ -210,15 +210,11 @@ func (rs *RestService) issueWsTicket(c echo.Context) error {
 	if user == nil {
 		return rs.unauthorized(c)
 	}
-	sessionID := ""
-	if sess := SessionFromContext(c); sess != nil {
-		sessionID = sess.ID
-	}
-	value, expires, err := rs.authenticator.IssueTicket(user, sessionID)
+	value, expires, err := rs.authenticator.IssueTicket(user, sessionIDFromContext(c))
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &TicketResponse{Ticket: value, ExpiresAt: expires}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &TicketResponse{Ticket: value, ExpiresAt: expires}, jsonIndent)
 }
 
 // POST /auth/link/inspect/
@@ -240,7 +236,7 @@ func (rs *RestService) inspectLink(c echo.Context) error {
 	} else {
 		resp.Role, resp.Note = l.Role, l.Note
 	}
-	return c.JSONPretty(http.StatusOK, resp, indentationChar)
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
 // POST /auth/link/redeem/
@@ -284,7 +280,7 @@ func (rs *RestService) writeSessions(c echo.Context, accountID string) error {
 			}
 		}
 	}
-	return c.JSONPretty(http.StatusOK, sessions, indentationChar)
+	return c.JSONPretty(http.StatusOK, sessions, jsonIndent)
 }
 
 // DELETE /account/sessions/{id}/
@@ -307,7 +303,7 @@ func (rs *RestService) revokeOtherSessions(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &RevokedResponse{Revoked: n}, jsonIndent)
 }
 
 // GET /admin/invites/
@@ -320,7 +316,7 @@ func (rs *RestService) listLinks(c echo.Context, kind string) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, links, indentationChar)
+	return c.JSONPretty(http.StatusOK, links, jsonIndent)
 }
 
 // POST /admin/invites/
@@ -340,7 +336,7 @@ func (rs *RestService) createInvite(c echo.Context) error {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Invite: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkInvite, token)}, indentationChar)
+	return c.JSONPretty(http.StatusOK, &CreatedLinkResponse{Invite: l, Token: token, URL: rs.authenticator.LinkURL(auth.LinkInvite, token)}, jsonIndent)
 }
 
 // DELETE /admin/invites/{id}/

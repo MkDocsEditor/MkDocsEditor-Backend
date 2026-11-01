@@ -10,7 +10,6 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/labstack/echo/v4"
 )
 
@@ -77,7 +76,7 @@ func hostOf(rawURL string) string {
 
 // backendURL is server.backendUrl, else the scheme and host of the request
 func (rs *RestService) backendURL(c echo.Context) string {
-	if u := strings.TrimRight(configuration.CurrentConfig.Server.BackendURL, "/"); u != "" {
+	if u := strings.TrimRight(rs.server.BackendURL, "/"); u != "" {
 		return u
 	}
 	return rs.ownOrigin(c)
@@ -85,7 +84,7 @@ func (rs *RestService) backendURL(c echo.Context) string {
 
 // GET /server-info/
 func (rs *RestService) serverInfo(c echo.Context) error {
-	srv := configuration.CurrentConfig.Server
+	srv := rs.server
 	wikiURL := strings.TrimRight(srv.WikiURL, "/")
 	clientURL := rs.authenticator.ClientURL()
 	name := strings.TrimSpace(srv.InstanceName)
@@ -121,7 +120,7 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 		Passkeys:        PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
 		LoginMethods:    methods,
 		Require2FA:      enabled && rs.authenticator.Require2FA(),
-	}, indentationChar)
+	}, jsonIndent)
 }
 
 // connectURL builds {clientUrl}/connect#<payload>, nil without clientUrl
@@ -144,7 +143,7 @@ func (rs *RestService) listDeviceLinks(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, links, indentationChar)
+	return c.JSONPretty(http.StatusOK, links, jsonIndent)
 }
 
 // POST /account/device-links/
@@ -163,7 +162,7 @@ func (rs *RestService) createDeviceLink(c echo.Context) error {
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	return c.JSONPretty(http.StatusOK, &CreatedDeviceLinkResponse{DeviceLink: l, Token: token, ExpiresAt: l.ExpiresAt,
-		ConnectURL: rs.connectURL(c, u, token, l.ExpiresAt)}, indentationChar)
+		ConnectURL: rs.connectURL(c, u, token, l.ExpiresAt)}, jsonIndent)
 }
 
 // GET /account/device-links/{id}/
@@ -172,7 +171,7 @@ func (rs *RestService) getDeviceLink(c echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
-	return c.JSONPretty(http.StatusOK, l, indentationChar)
+	return c.JSONPretty(http.StatusOK, l, jsonIndent)
 }
 
 // DELETE /account/device-links/{id}/

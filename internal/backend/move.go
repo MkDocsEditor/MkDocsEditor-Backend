@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/labstack/echo/v4"
 )
@@ -139,7 +138,7 @@ func (rs *RestService) postMove(c echo.Context) error {
 	if err != nil {
 		return rs.moveFailed(c, req.ID, err)
 	}
-	return c.JSONPretty(http.StatusOK, result, indentationChar)
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
 
 // moveFailed answers a failed move
@@ -172,20 +171,17 @@ func (rs *RestService) renameViaMove(c echo.Context, itemType string, name strin
 		currentName = strings.TrimSuffix(currentName, markdownFileExtension)
 	}
 	if name == currentName {
-		return rs.getItemDescription(c, itemType)
+		return rs.describeItem(itemType)(c)
 	}
 	result, err := rs.performMove(c, &MoveRequest{Type: itemType, ID: id, Name: name})
 	if err != nil {
 		return rs.moveFailed(c, id, err)
 	}
-	return c.JSONPretty(http.StatusOK, result.Item, indentationChar)
+	return c.JSONPretty(http.StatusOK, result.Item, jsonIndent)
 }
 
 // performMove validates and runs a move, see docs/references.md section 5
 func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResult, error) {
-	if rs.sync == nil {
-		return nil, errors.New("moving needs the sync server")
-	}
 	s := rs.sync
 	tm := rs.treeManager
 
@@ -298,7 +294,7 @@ func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*move
 	if req.Type == TypeSection && isInside(parentRel, oldRel) {
 		return nil, badMove(MoveReasonIntoItself, "a section cannot be moved into itself or a section below it")
 	}
-	if blocked := blockedPaths(); len(blocked) > 0 {
+	if blocked := tm.blockedPaths(); len(blocked) > 0 {
 		for _, item := range rs.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
 			if slices.Contains(blocked, item.NewPath) {
 				return nil, badMove(MoveReasonBlacklisted, item.NewPath+" is on the blacklist or an extra_css file")
@@ -339,15 +335,6 @@ func sameFile(a, b string) bool {
 	}
 	ib, err := os.Stat(b)
 	return err == nil && os.SameFile(ia, ib)
-}
-
-// blockedPaths are the paths that are no items: the blacklist and the extra_css files
-func blockedPaths() []string {
-	blocked := slices.Clone(configuration.CurrentConfig.MkDocs.Blacklist)
-	if mkDocsConfig, err := readMkDocsConfig(); err == nil {
-		blocked = append(blocked, mkDocsConfig.ExtraCSS...)
-	}
-	return blocked
 }
 
 // movedItems lists the item and, for a section, everything inside it, sorted by old path
@@ -420,7 +407,7 @@ func (s *SyncServer) applyMoveLocked(op *moveOp, lookup *treeLookup, result *Mov
 		}
 	}
 
-	configFile := configuration.CurrentConfig.MkDocs.ConfigFile
+	configFile := s.treeManager.ConfigFile()
 	configContent, configErr := os.ReadFile(configFile)
 	var newConfig string
 	if configErr == nil && op.refs {
@@ -694,7 +681,7 @@ func (rs *RestService) commitMove(op *moveOp, changed []*plannedDocument, config
 	}
 	sort.Strings(listed)
 	if configChanged {
-		if rel, err := filepath.Rel(rs.treeManager.RootPath(), configuration.CurrentConfig.MkDocs.ConfigFile); err == nil {
+		if rel, err := filepath.Rel(rs.treeManager.RootPath(), rs.treeManager.ConfigFile()); err == nil {
 			paths = append(paths, filepath.ToSlash(rel))
 			listed = append(listed, filepath.Base(rel))
 		}
@@ -712,9 +699,6 @@ func (rs *RestService) commitMove(op *moveOp, changed []*plannedDocument, config
 
 // auditMove writes the audit log entry of a move
 func (rs *RestService) auditMove(c echo.Context, op *moveOp, result *MoveResult) {
-	if rs.authenticator == nil {
-		return
-	}
 	eventType := auth.AuditItemMoved
 	if op.rename {
 		eventType = auth.AuditItemRenamed

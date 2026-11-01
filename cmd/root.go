@@ -43,7 +43,7 @@ var rootCmd = &cobra.Command{
 		printStartupInfo()
 
 		conf := configuration.CurrentConfig
-		treeManager := backend.NewTreeManager()
+		treeManager := backend.NewTreeManager(conf.MkDocs)
 
 		if err := backend.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
 			log.Fatalf("Invalid state directory: %v", err)
@@ -80,7 +80,7 @@ var rootCmd = &cobra.Command{
 		}
 		defer fileWatcher.Close()
 
-		restService := backend.NewRestService(treeManager, syncServer, authenticator)
+		restService := backend.NewRestService(conf.Server, treeManager, syncServer, authenticator)
 
 		var gitCommitter *backend.GitCommitter
 		if conf.Git.Enabled {

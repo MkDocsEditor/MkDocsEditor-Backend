@@ -168,7 +168,7 @@ func stop(err error) error {
 
 // apiError writes an error response with a machine-readable code
 func apiError(c echo.Context, status int, code string, message string, details map[string]any) error {
-	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, indentationChar)
+	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, jsonIndent)
 }
 
 // authMiddleware authenticates every request (session cookie, bearer session, legacy basic
