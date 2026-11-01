@@ -73,6 +73,34 @@ func TestParseReferences(t *testing.T) {
 	}
 }
 
+func TestParseReferencesRawSpaces(t *testing.T) {
+	cases := map[string]string{
+		"![Checkliste Erstausstattung.png](./Checkliste Erstausstattung.png)": "./Checkliste Erstausstattung.png",
+		"[a](a b.md \"Titel\")":          "a b.md",
+		"[a](a b.md 'Titel')":            "a b.md",
+		"[a]( a b.md )":                  "a b.md",
+		"[a](Foto (2) neu.png)":          "Foto (2) neu.png",
+		"[a](a b.md){ width=300 }":       "a b.md",
+		"[a](a%20b.md \"it's\")":         "a%20b.md",
+		"[a](p.md (y))":                  "p.md",
+		"[a](<a b.md>)":                  "a b.md",
+		"[![b](b c.png)](d e.md) danach": "b c.png",
+	}
+	for text, want := range cases {
+		refs := parseReferences(text)
+		if len(refs) == 0 || refs[0].Raw != want {
+			t.Errorf("%q: got %+v, want %q", text, refs, want)
+			continue
+		}
+		if text[refs[0].Start:refs[0].End] != want {
+			t.Errorf("%q: offsets point to %q", text, text[refs[0].Start:refs[0].End])
+		}
+	}
+	if refs := parseReferences("[a](a b.md"); len(refs) != 0 {
+		t.Errorf("unclosed destination: got %+v", refs)
+	}
+}
+
 func TestParseReferencesCRLF(t *testing.T) {
 	refs := parseReferences("[a](a.md)\r\n[b]: b.md\r\n")
 	if len(refs) != 2 || refs[0].Raw != "a.md" || refs[1].Raw != "b.md" {

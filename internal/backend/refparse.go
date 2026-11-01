@@ -220,9 +220,62 @@ func findBacktickRun(s string, n int) int {
 	return -1
 }
 
-// parseInlineDestination parses "dest", "<dest>", "dest \"title\"" and similar after "](" at
-// position pos. It returns the destination's byte range and the position of the closing ")".
+// parseInlineDestination parses the destination after "](" at position pos. It returns the
+// destination's byte range and the position of the closing ")". Destinations with raw spaces
+// are not valid CommonMark, but Python-Markdown (and so MkDocs) accepts them.
 func parseInlineDestination(line string, pos int) (start int, stop int, closing int, ok bool) {
+	if start, stop, closing, ok = parseStrictDestination(line, pos); ok {
+		return start, stop, closing, true
+	}
+	return parseSpacedDestination(line, pos)
+}
+
+// parseSpacedDestination parses "dest with spaces" and "dest with spaces \"title\"" after "](":
+// everything up to the balancing ")" is the destination, except for a quoted title at its end.
+func parseSpacedDestination(line string, pos int) (start int, stop int, closing int, ok bool) {
+	start = skipSpaces(line, pos)
+	if start < len(line) && line[start] == '<' {
+		return 0, 0, 0, false
+	}
+	depth := 0
+	closing = -1
+loop:
+	for i := start; i < len(line); i++ {
+		switch line[i] {
+		case '\\':
+			i++
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				closing = i
+				break loop
+			}
+			depth--
+		}
+	}
+	if closing < 0 {
+		return 0, 0, 0, false
+	}
+	stop = trimSpacesEnd(line, start, closing)
+	if stop-start >= 2 && (line[stop-1] == '"' || line[stop-1] == '\'') {
+		open := strings.LastIndexByte(line[start:stop-1], line[stop-1])
+		if open > 0 && (line[start+open-1] == ' ' || line[start+open-1] == '\t') {
+			stop = trimSpacesEnd(line, start, start+open)
+		}
+	}
+	return start, stop, closing, true
+}
+
+func trimSpacesEnd(s string, start int, stop int) int {
+	for stop > start && (s[stop-1] == ' ' || s[stop-1] == '\t' || s[stop-1] == '\r') {
+		stop--
+	}
+	return stop
+}
+
+// parseStrictDestination parses "dest", "<dest>", "dest \"title\"" and similar after "](".
+func parseStrictDestination(line string, pos int) (start int, stop int, closing int, ok bool) {
 	i := skipSpaces(line, pos)
 	if i < len(line) && line[i] == '<' {
 		end := strings.IndexAny(line[i+1:], "<>")
