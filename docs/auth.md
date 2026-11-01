@@ -926,7 +926,11 @@ read `assetlinks.json` from the phone: Google's Digital Asset Links service fetc
 from `https://<rpId>/.well-known/assetlinks.json`. If that fails, Bitwarden answers the
 app with "Passkey not supported for this app", while passkeys in the browser keep working
 (the browser checks the origin itself). Check with
-`curl "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://<rpId>&relation=delegate_permission/common.get_login_creds"`.
+`curl "https://digitalassetlinks.googleapis.com/v1/assetlinks:check?source.web.site=https://<rpId>&target.androidApp.packageName=<package>&target.androidApp.certificate.sha256Fingerprint=<fingerprint>&relation=delegate_permission/common.handle_all_urls"`
+(the request Bitwarden makes; it must answer `"linked": true`). The file needs both
+relations: Bitwarden checks only `handle_all_urls`, Google Password Manager
+`get_login_creds`. Google caches its answer for up to an hour, so a fixed file can take
+that long to be accepted.
 A server that is only reachable from a home network therefore needs an RP ID on a public
 parent domain that can serve the file.
 
