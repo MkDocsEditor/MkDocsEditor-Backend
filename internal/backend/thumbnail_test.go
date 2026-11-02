@@ -2,17 +2,22 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/labstack/echo/v4"
 )
 
 // withJPEGOrientation inserts an EXIF APP1 segment with the orientation tag after the SOI marker
@@ -134,5 +139,117 @@ func TestExifOrientations(t *testing.T) {
 		if r, _, _, _ := out.At(p.X, p.Y).RGBA(); r == 0 {
 			t.Errorf("orientation %d: the red pixel is not at %v", o, p)
 		}
+	}
+}
+
+func TestThumbnailsAreRemovedWithTheirResource(t *testing.T) {
+	e := newRestTestEnv(t, withImages(t))
+	dir := filepath.Join(e.project, ".mkdocseditor", thumbnailsDir)
+	cached := func() int {
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(files)
+	}
+	get := func(name string) {
+		t.Helper()
+		r := findResourceByName(e.tm.Root(), name)
+		expectStatus(t, e.do(http.MethodGet, "/resource/"+r.ID+"/thumbnail/", nil, ""), http.StatusOK)
+	}
+	get("Bild vom Strand.jpg")
+	get("icon.png")
+	if n := cached(); n != 2 {
+		t.Fatalf("%d cached thumbnails, want 2", n)
+	}
+
+	// an unrelated change keeps them
+	e.tm.CreateItemTree()
+	if n := cached(); n != 2 {
+		t.Fatalf("%d cached thumbnails after a rebuild, want 2", n)
+	}
+
+	// deleted through the API
+	photo := findResourceByName(e.tm.Root(), "Bild vom Strand.jpg")
+	expectStatus(t, e.do(http.MethodDelete, "/resource/"+photo.ID+"/", nil, ""), http.StatusOK)
+	if n := cached(); n != 1 {
+		t.Fatalf("%d cached thumbnails after the delete, want 1", n)
+	}
+
+	// changed on disk: the old version goes
+	icon := findResourceByName(e.tm.Root(), "icon.png")
+	later := icon.ModTime.Add(time.Hour)
+	if err := os.Chtimes(icon.Path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	e.tm.CreateItemTree()
+	if n := cached(); n != 0 {
+		t.Fatalf("%d cached thumbnails after the change, want 0", n)
+	}
+
+	// deleted on disk
+	get("icon.png")
+	if err := os.Remove(icon.Path); err != nil {
+		t.Fatal(err)
+	}
+	e.tm.CreateItemTree()
+	if n := cached(); n != 0 {
+		t.Fatalf("%d cached thumbnails after the removal, want 0", n)
+	}
+}
+
+func TestThumbnailsOfAMovedResourceAreRemoved(t *testing.T) {
+	e := newRestTestEnv(t, withImages(t))
+	dir := filepath.Join(e.project, ".mkdocseditor", thumbnailsDir)
+	icon := findResourceByName(e.tm.Root(), "icon.png")
+	expectStatus(t, e.do(http.MethodGet, "/resource/"+icon.ID+"/thumbnail/", nil, ""), http.StatusOK)
+	body := strings.NewReader(`{"name":"renamed.png"}`)
+	expectStatus(t, e.do(http.MethodPut, "/resource/"+icon.ID+"/", body, echo.MIMEApplicationJSON), http.StatusOK)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("%d cached thumbnails after the rename, want 0", len(files))
+	}
+}
+
+// A request that waits for a thumbnail slot ends with the request
+func TestThumbnailWaitEndsWithTheRequest(t *testing.T) {
+	e := newRestTestEnv(t, withImages(t))
+	icon := findResourceByName(e.tm.Root(), "icon.png")
+	for range cap(e.rs.thumbnailSlots) {
+		e.rs.thumbnailSlots <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/resource/"+icon.ID+"/thumbnail/", nil).WithContext(ctx)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- e.doRequest(req) }()
+
+	select {
+	case <-done:
+		t.Fatal("the request did not wait for a slot")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case rec := <-done:
+		expectStatus(t, rec, http.StatusServiceUnavailable)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request still waits after its context ended")
+	}
+}
+
+// A failed thumbnail does not keep its slot
+func TestThumbnailSlotIsReleasedAfterAFailure(t *testing.T) {
+	e := newRestTestEnv(t, withImages(t))
+	broken := &Resource{Path: filepath.Join(e.project, "does-not-exist.png")}
+	for range 2 * cap(e.rs.thumbnailSlots) {
+		if _, _, err := e.rs.renderThumbnail(context.Background(), broken, 64); err == nil {
+			t.Fatal("no error for a missing file")
+		}
+	}
+	if n := len(e.rs.thumbnailSlots); n != 0 {
+		t.Fatalf("%d slots are still taken", n)
 	}
 }

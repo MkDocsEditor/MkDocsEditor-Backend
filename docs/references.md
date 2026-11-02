@@ -642,8 +642,9 @@ with transparency) whose longer side is at most `size` pixels (64 to 1024, defau
 rounded up to 64, 128, 256, 512 or 1024). It works for PNG, JPEG, GIF (first frame) and
 WebP images up to 50 megapixels, otherwise `404`. Smaller images are returned scaled to
 themselves (re-encoded, not upscaled). Thumbnails are cached in `<stateDir>/thumbnails/`
-by path, size and modification time; the answer has `Cache-Control: private, max-age=86400`
-and an `ETag`. SVG images get `thumbnail: false`: clients show them directly from
+by path, size and modification time, and removed when the tree no longer has that version of
+the resource (it was deleted, moved or changed, also outside the server); the answer has
+`Cache-Control: private, max-age=86400` and an `ETag`. SVG images get `thumbnail: false`: clients show them directly from
 `/resource/{id}/content/`.
 
 ## 10. Git, audit log and permissions

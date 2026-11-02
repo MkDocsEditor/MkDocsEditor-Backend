@@ -87,6 +87,7 @@ func NewRestService(
 		refs:           NewReferenceIndex(treeManager, syncServer),
 		thumbnailSlots: make(chan struct{}, maxConcurrentThumbnails),
 	}
+	treeManager.AddTreeChangeListener(func(_, newTree *Section) { rs.pruneThumbnails(newTree) })
 	rs.echoRest = rs.createRestService()
 	return rs
 }
@@ -332,6 +333,8 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 // Start the REST service. It returns after Shutdown, or with the error if serving fails.
 func (rs *RestService) Start() error {
 	rs.refs.Warm()
+	// resources may have changed while the server was not running
+	go rs.pruneThumbnails(rs.treeManager.Root())
 	err := rs.echoRest.Start(net.JoinHostPort(rs.server.Host, strconv.Itoa(rs.server.Port)))
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
