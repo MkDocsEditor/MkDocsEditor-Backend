@@ -182,7 +182,6 @@ func (s *Service) ConfirmTOTP(u *User, code string, ri RequestInfo) ([]string, e
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	s.invalidateBasicCache(u.ID)
 	return codes, nil
 }
 

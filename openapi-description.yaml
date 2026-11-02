@@ -18,8 +18,7 @@ info:
     Accounts, sessions and the login flows are specified in
     [docs/auth.md](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/auth.md).
     Requests authenticate with the session cookie (web), `Authorization: Bearer mds_…`
-    (Android), an app token (`Bearer mdp_…`, or as the basic auth password) or, only with
-    `server.auth.legacyBasicAuth: true`, HTTP basic auth with the account password.
+    (Android) or an app token (`Bearer mdp_…`, or as the basic auth password).
     Every request with a method other than `GET`/`HEAD`/`OPTIONS` and without an
     `Authorization` header must send `X-Requested-With`, and an `Origin` header must be an
     allowed origin (CSRF protection). Users with the role `reader` get `403` when they try to
@@ -1361,7 +1360,7 @@ paths:
       description: |
         Upgrades to a websocket that pushes `tree-changed` (refetch the tree) and `online`
         (who has which document open). Authentication works like the document websocket:
-        a basic auth header on the upgrade request, or a ticket in the first message
+        an `Authorization` header on the upgrade request, or a ticket in the first message
         (`{"type":"hello","ticket":"…"}`). Specified in docs/sync-protocol.md, section 6.
       operationId: eventsWebsocket
       tags: [ Auth ]
@@ -1780,7 +1779,7 @@ paths:
       summary: "Realtime editing websocket"
       description: |
         Upgrades to a websocket for realtime collaborative editing of the document. The
-        protocol is specified in docs/sync-protocol.md. Authenticate with a basic auth header
+        protocol is specified in docs/sync-protocol.md. Authenticate with an `Authorization` header
         on the upgrade request or with a ticket (`POST /auth/ws-ticket/`) in the first
         message (`hello`). Without either, the upgrade succeeds and the connection is
         closed with code 4001 if no valid ticket arrives within 10 seconds.
@@ -2228,7 +2227,7 @@ components:
     basicAuth:
       type: http
       scheme: basic
-      description: "Username and app token; username and account password only with `server.auth.legacyBasicAuth` (transition, default off)"
+      description: "Username and app token; account passwords are not accepted"
 
   parameters:
     sectionId:
@@ -2780,7 +2779,7 @@ components:
           properties:
             authMethod:
               type: string
-              enum: [ session, app-token, basic, anonymous ]
+              enum: [ session, app-token, anonymous ]
             secondFactorSetupRequired:
               type: boolean
               description: "The instance requires 2FA and this account has none yet: only the 2FA setup endpoints work"
@@ -2801,7 +2800,7 @@ components:
 
     AuthStatus:
       type: object
-      required: [ setupRequired, authDisabled, passkeys, passwordPolicy, legacyBasicAuth ]
+      required: [ setupRequired, authDisabled, passkeys, passwordPolicy ]
       properties:
         setupRequired:
           type: boolean
@@ -2824,8 +2823,6 @@ components:
               type: integer
             maxLength:
               type: integer
-        legacyBasicAuth:
-          type: boolean
 
     SessionFields:
       type: object

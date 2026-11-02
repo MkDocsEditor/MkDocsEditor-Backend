@@ -24,7 +24,7 @@ type importedUser struct {
 	username, displayName, email, role, color, passwordHash string
 }
 
-// validateConfiguredUsers checks server.auth.users and server.basicAuth like the old
+// validateConfiguredUsers checks server.auth.users like the old
 // file-based authentication did
 func (s *Service) validateConfiguredUsers() ([]importedUser, error) {
 	conf := s.opts.Server
@@ -58,34 +58,20 @@ func (s *Service) validateConfiguredUsers() ([]importedUser, error) {
 			role: role, color: uc.Color, passwordHash: normalizeBcrypt(uc.PasswordHash)})
 	}
 
-	legacy := conf.BasicAuth
-	if legacy.User != "" && legacy.Password != "" {
-		if strings.Contains(legacy.User, ":") {
-			return nil, errors.New("server.basicAuth.user must not contain ':'")
-		}
-		if seen[usernameKey(legacy.User)] {
-			return nil, fmt.Errorf("server.basicAuth.user %q is also in server.auth.users", legacy.User)
-		}
-		h, err := HashPassword(legacy.Password)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, importedUser{username: legacy.User, role: RoleAdmin, passwordHash: h})
-	}
 	return users, nil
 }
 
-// importConfiguredUsers imports server.auth.users and server.basicAuth into an empty
+// importConfiguredUsers imports server.auth.users into an empty
 // database, once
 func (s *Service) importConfiguredUsers() error {
 	done, err := s.setting(settingConfigImported)
 	if err != nil {
 		return err
 	}
-	configured := len(s.opts.Server.Auth.Users) > 0 || (s.opts.Server.BasicAuth.User != "" && s.opts.Server.BasicAuth.Password != "")
+	configured := len(s.opts.Server.Auth.Users) > 0
 	if done != "" {
 		if configured {
-			log.Printf("WARNING: server.auth.users and server.basicAuth are ignored: the accounts were imported into %s on %s. Remove them from the configuration.", DatabaseFileName, done)
+			log.Printf("WARNING: server.auth.users is ignored: the accounts were imported into %s on %s. Remove them from the configuration.", DatabaseFileName, done)
 		}
 		return nil
 	}
@@ -134,7 +120,7 @@ func (s *Service) importConfiguredUsers() error {
 	for _, u := range users {
 		log.Printf("Imported the configured user %q (%s) into %s", u.username, u.role, DatabaseFileName)
 	}
-	log.Printf("From now on server.auth.users and server.basicAuth are ignored; manage the accounts through the API and remove them from the configuration.")
+	log.Printf("From now on server.auth.users is ignored; manage the accounts through the API and remove them from the configuration.")
 	return nil
 }
 

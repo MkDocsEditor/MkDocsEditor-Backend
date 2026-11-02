@@ -21,9 +21,6 @@ func TestInitConfigDefaults(t *testing.T) {
 server:
   host: "127.0.0.1"
   port: 7413
-  basicAuth:
-    user: "a"
-    password: "b"
   cors:
     allowedOrigins:
       - "https://wiki.example.com"
@@ -40,9 +37,6 @@ mkdocs:
 	c := CurrentConfig
 	if c.Server.Host != "127.0.0.1" || c.Server.Port != 7413 {
 		t.Errorf("server = %+v", c.Server)
-	}
-	if c.Server.BasicAuth.User != "a" || c.Server.BasicAuth.Password != "b" {
-		t.Errorf("basic auth = %+v", c.Server.BasicAuth)
 	}
 	if len(c.Server.CORS.AllowedOrigins) != 1 || c.Server.CORS.AllowedOrigins[0] != "https://wiki.example.com" {
 		t.Errorf("cors = %+v", c.Server.CORS)
@@ -136,7 +130,6 @@ server:
   backendUrl: "https://api.example.com"
   auth:
     clientUrl: "https://edit.example.com"
-    legacyBasicAuth: false
     sessionIdleTimeout: "720h"
     sessionMaxLifetime: "2160h"
     cookieSecure: "always"
@@ -166,7 +159,7 @@ mkdocs:
 	if s.InstanceName != "Example Wiki" || s.WikiURL != "https://wiki.example.com" || s.BackendURL != "https://api.example.com" {
 		t.Errorf("server = %+v", s)
 	}
-	if len(s.TrustedProxies) != 1 || a.ClientURL != "https://edit.example.com" || a.LegacyBasicAuth == nil || *a.LegacyBasicAuth ||
+	if len(s.TrustedProxies) != 1 || a.ClientURL != "https://edit.example.com" ||
 		a.SessionIdleTimeout != 720*time.Hour || a.SessionMaxLifetime != 2160*time.Hour || a.CookieSecure != "always" {
 		t.Errorf("auth = %+v", a)
 	}

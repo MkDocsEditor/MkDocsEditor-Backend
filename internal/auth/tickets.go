@@ -1,9 +1,7 @@
 package auth
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"time"
@@ -12,20 +10,12 @@ import (
 const (
 	// TicketLifetime is how long a websocket ticket stays valid
 	TicketLifetime = 60 * time.Second
-	// how long a successful legacy basic auth check is remembered, so not every request pays for hashing
-	verificationCacheLifetime = 10 * time.Minute
 )
 
 type ticket struct {
 	user      *User
 	sessionID string
 	expires   time.Time
-}
-
-type cachedVerification struct {
-	digest  []byte
-	hash    string
-	expires time.Time
 }
 
 // IssueTicket creates a single-use websocket ticket for the given user. sessionID is the
@@ -77,59 +67,6 @@ func (s *Service) RedeemTicket(value string) (*User, string, error) {
 		}
 	}
 	return u, t.sessionID, nil
-}
-
-// AuthenticateBasic checks a username and password for HTTP basic auth. It returns the
-// user, or nil if the credentials are wrong or the account is not active.
-func (s *Service) AuthenticateBasic(username, password string) *User {
-	u := s.UserByUsername(username)
-	if u == nil || u.Status != StatusActive || usernameKey(u.Username) != usernameKey(username) {
-		verifyDummy(password)
-		return nil
-	}
-	var hash string
-	if err := s.db.QueryRow("SELECT password_hash FROM accounts WHERE id = ?", u.ID).Scan(&hash); err != nil || hash == "" {
-		verifyDummy(password)
-		return nil
-	}
-
-	// a keyed digest of the verified password: repeated requests of the same client skip
-	// the expensive password hash
-	mac := hmac.New(sha256.New, s.basicKey)
-	mac.Write([]byte(u.ID + "\x00" + password))
-	digest := mac.Sum(nil)
-	s.basicMu.Lock()
-	cached, hit := s.basicCache[u.ID]
-	s.basicMu.Unlock()
-	if hit && cached.hash == hash && s.now().Before(cached.expires) && hmac.Equal(cached.digest, digest) {
-		return u
-	}
-
-	ok, rehash := VerifyPassword(hash, password)
-	if !ok {
-		return nil
-	}
-	// accounts with a second factor cannot use their password for basic auth
-	if totp, passkeys := s.secondFactors(u.ID); totp || passkeys > 0 {
-		return nil
-	}
-	if rehash {
-		if newHash, err := s.rehashPassword(u.ID, hash, password); err == nil {
-			hash = newHash
-		}
-	}
-	s.basicMu.Lock()
-	s.basicCache[u.ID] = cachedVerification{digest: digest, hash: hash, expires: s.now().Add(verificationCacheLifetime)}
-	s.basicMu.Unlock()
-	return u
-}
-
-// invalidateBasicCache forgets the cached basic auth verification of an account, after its
-// password or second factors changed
-func (s *Service) invalidateBasicCache(accountID string) {
-	s.basicMu.Lock()
-	delete(s.basicCache, accountID)
-	s.basicMu.Unlock()
 }
 
 // rehashPassword replaces an old hash (bcrypt, older Argon2id parameters) after a

@@ -24,10 +24,6 @@ server:
     # (optional) The web client, used to build setup, invite, reset and connect links and as
     # the default passkey origin and RP ID. Without it, only the tokens are shown.
     clientUrl: "https://edit.wiki.mycompany.com"
-    # (optional) Accept HTTP basic auth with account passwords (accounts without a second
-    # factor). Only for old clients during the transition. Default: false. Basic auth with
-    # the username and an app token works without it.
-    #legacyBasicAuth: false
     # (optional) Session lifetimes. Defaults: 720h idle, 2160h absolute
     #sessionIdleTimeout: "720h"
     #sessionMaxLifetime: "2160h"
@@ -80,11 +76,6 @@ server:
         role: "admin"
         # (optional) Colour of the user's cursor, derived from the username by default
         color: "#e8590c"
-  # (optional, deprecated) The old single-user configuration with a plain-text password.
-  # Only read for the one-time import; this user becomes an admin.
-  #basicAuth:
-  #  user: "mkdocsrest"
-  #  password: "mypassword"
   # (optional) Cross-origin resource sharing (CORS) configuration
   cors:
     # (optional) Origins of web clients. With origins listed, browsers may send credentials from

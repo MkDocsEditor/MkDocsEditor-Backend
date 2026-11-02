@@ -30,7 +30,6 @@ const (
 const (
 	AuthMethodSession   = "session"
 	AuthMethodAppToken  = "app-token"
-	AuthMethodBasic     = "basic"
 	AuthMethodAnonymous = "anonymous"
 )
 
@@ -171,8 +170,8 @@ func apiError(c echo.Context, status int, code string, message string, details m
 	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, jsonIndent)
 }
 
-// authMiddleware authenticates every request (session cookie, bearer session, legacy basic
-// auth), applies the CSRF checks and enforces the role of the user. See docs/auth.md
+// authMiddleware authenticates every request (session cookie, bearer session, app token),
+// applies the CSRF checks and enforces the role of the user. See docs/auth.md
 // sections 4 and 5.
 func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -260,24 +259,11 @@ func (rs *RestService) authenticateHeader(c echo.Context, authorization string) 
 			return responded(rs.unauthorized(c))
 		}
 		if auth.ValidAppToken(password) {
-			// username + app token, for tools that only speak basic auth; no password is sent,
-			// so this works without legacy basic auth
+			// username + app token, for tools that only speak basic auth; account passwords
+			// are not accepted here
 			return rs.authenticateAppToken(c, password, username)
 		}
-		if !rs.authenticator.LegacyBasicAuth() {
-			return responded(rs.unauthorized(c))
-		}
-		user := rs.authenticator.AuthenticateBasic(username, password)
-		if user == nil {
-			// failed attempts count against the per-IP limit
-			if err := rs.limitIP(c); err != nil {
-				return err
-			}
-			return responded(rs.unauthorized(c))
-		}
-		c.Set(contextKeyUser, user)
-		c.Set(contextKeyAuthMethod, AuthMethodBasic)
-		return nil
+		return responded(rs.unauthorized(c))
 	}
 	return responded(rs.unauthorized(c))
 }
@@ -431,12 +417,8 @@ func (rs *RestService) clearSessionCookie(c echo.Context) {
 	}
 }
 
-// unauthorized writes a 401 response. With legacy basic auth, requests without
-// "X-Requested-With" (not browser scripts) get a WWW-Authenticate header.
+// unauthorized writes a 401 response
 func (rs *RestService) unauthorized(c echo.Context) error {
-	if rs.authenticator.LegacyBasicAuth() && c.Request().Header.Get("X-Requested-With") == "" {
-		c.Response().Header().Set(echo.HeaderWWWAuthenticate, `Basic realm="MkDocsEditor", charset="UTF-8"`)
-	}
 	return apiError(c, http.StatusUnauthorized, CodeUnauthenticated, "missing or invalid credentials", nil)
 }
 

@@ -683,7 +683,6 @@ func (s *Service) FinishAddPasskey(u *User, ceremonyID string, credential []byte
 	if err != nil {
 		return nil, err
 	}
-	s.invalidateBasicCache(u.ID)
 	s.Audit(AuditEvent{Type: AuditPasskeyAdded, ActorID: u.ID, TargetID: u.ID, IP: ri.IP, UserAgent: ri.UserAgent, Details: map[string]any{"name": name, "passkeyId": id}})
 	return s.passkey(u.ID, id)
 }

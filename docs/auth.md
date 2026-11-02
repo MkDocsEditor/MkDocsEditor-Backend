@@ -239,10 +239,7 @@ Each request is authenticated by the first matching method:
 1. `Authorization: Bearer mds_…`: a bearer session.
 2. `Authorization: Bearer mdp_…`: an app token.
 3. `Authorization: Basic …` with the username and an **app token** as the password, for
-   tools that only speak Basic auth. This always works, since no password is sent.
-   Username and **account password** only when `server.auth.legacyBasicAuth: true`
-   (default `false`), see [Migration](#14-migration-from-configured-users), and only for
-   accounts **without** a second factor.
+   tools that only speak Basic auth. Account passwords are not accepted here.
 4. The session cookie (`__Host-mkdocseditor_session` over HTTPS,
    `mkdocseditor_session` over plain HTTP).
 
@@ -251,8 +248,7 @@ cookie is not tried. An expired or revoked session gives 401 `unauthenticated`, 
 the cookie the response also clears the cookie.
 
 Without any method, endpoints that need authentication return 401 `unauthenticated`. No
-`WWW-Authenticate: Basic` header is sent any more unless legacy Basic auth is enabled
-and the request has no `X-Requested-With` header.
+`WWW-Authenticate: Basic` header is sent.
 
 **Authorization by route group:**
 
@@ -322,8 +318,7 @@ by the official web client).
 3. a **ticket** in the `hello` message, as before: `POST /auth/ws-ticket/` returns
    `{"ticket": "…", "expiresAt": "…"}`, valid for 60 s, single use. Tickets keep working
    for every client and are the fallback when the upgrade cannot carry a cookie.
-4. `Authorization: Basic …` with an app token, or with the account password when legacy
-   Basic auth is enabled.
+4. `Authorization: Basic …` with an app token.
 
 A ticket remembers the session it was issued for and is refused when that session ended
 in the meantime. When a session is revoked, an account is disabled or deleted, its
@@ -745,7 +740,7 @@ creation.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/auth/status/` | | `{"setupRequired": false, "authDisabled": false, "passkeys": {"enabled": true, "rpId": "markusressel.de"}, "passwordPolicy": {"minLength": 10, "maxLength": 256}, "legacyBasicAuth": false}` |
+| GET | `/auth/status/` | | `{"setupRequired": false, "authDisabled": false, "passkeys": {"enabled": true, "rpId": "markusressel.de"}, "passwordPolicy": {"minLength": 10, "maxLength": 256}}` |
 | POST | `/auth/login/` | `{username, password, sessionType?, deviceName?}` | session response, or `second-factor-required` |
 | POST | `/auth/login/second-factor/` | `{challenge, code}` or `{challenge, recoveryCode}`, plus `sessionType?, deviceName?` | session response |
 | POST | `/auth/passkey/login/begin/` | `{}` or `{challenge}` | `{ceremonyId, publicKey}` |
@@ -765,7 +760,7 @@ give 400 `invalid-link`.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/auth/whoami/` | | user object plus `"authMethod": "session" \| "app-token" \| "basic" \| "anonymous"`, `"secondFactorSetupRequired": bool`, `"sessionId"` (sessions only) |
+| GET | `/auth/whoami/` | | user object plus `"authMethod": "session" \| "app-token" \| "anonymous"`, `"secondFactorSetupRequired": bool`, `"sessionId"` (sessions only) |
 | POST | `/auth/logout/` | | 204 |
 | POST | `/auth/ws-ticket/` | | `{ticket, expiresAt}` (unchanged) |
 | POST | `/auth/reauth/` | `{password?, code?}` | `{reauthenticatedUntil}` |
@@ -1018,10 +1013,6 @@ server:
     # The web client, used to build setup, invite, reset and connect links, reported as
     # webClientUrl by /server-info/, and the default passkey origin and RP ID.
     clientUrl: "https://edit.wiki.markusressel.de"
-    # Accept HTTP Basic with username + password (accounts without a second factor). Only
-    # for the transition from server.auth.users. Default: false. Username + app token
-    # works without it.
-    legacyBasicAuth: false
     # Session lifetimes (Go durations).
     sessionIdleTimeout: "720h"   # 30 days
     sessionMaxLifetime: "2160h"  # 90 days
@@ -1061,8 +1052,6 @@ server:
     users: []
 ```
 
-`server.basicAuth` (the old single user) is also only read for the import.
-
 For local development, with the web client on `http://localhost:4174` and the backend
 on `http://localhost:17414`: `server.cors.allowedOrigins: ["http://localhost:4174"]`,
 `server.auth.clientUrl: "http://localhost:4174"`, `server.auth.webauthn.rpId: "localhost"`.
@@ -1082,12 +1071,11 @@ The upgrade must not lock anyone out.
 On start, after opening `auth.db`:
 
 1. **Import.** If the database has no accounts and the configuration has
-   `server.auth.users` or `server.basicAuth`, every configured user becomes an account
+   `server.auth.users`, every configured user becomes an account
    with the same username, display name, email, role and colour, and the bcrypt hash as
-   password (upgraded to Argon2id at the first login). The `basicAuth` user becomes an
-   admin; its plain-text password is hashed with Argon2id right away. Each import is
+   password (upgraded to Argon2id at the first login). Each import is
    logged and recorded as `account.imported`. The import happens once: the database
-   records it, and from then on `server.auth.users` and `server.basicAuth` are
+   records it, and from then on `server.auth.users` is
    **ignored**; the server logs a warning on every start while they are still in the
    file. Remove them after the upgrade. Passwords that do not meet the new rules keep
    working until the user changes them.
@@ -1105,21 +1093,19 @@ On start, after opening `auth.db`:
    Before, such a server ran without authentication; it now requires the setup link. To
    keep the old behaviour for development, set `server.auth.disabled: true`.
 
-**Transition for clients.** `legacyBasicAuth` defaults to `false`. Clients older than the
-account system (HTTP Basic with the configured passwords) only keep working when the
-operator sets `server.auth.legacyBasicAuth: true`; the imported accounts keep the same
-usernames and passwords. Once all clients use sessions, remove the flag.
+**Removed settings.** `server.basicAuth` and `server.auth.legacyBasicAuth` no longer exist;
+the server ignores them. A database that has no accounts yet does not import the old
+`server.basicAuth` user: it starts in setup mode. Clients older than the account system
+(HTTP Basic with account passwords) get 401 and must be updated.
 
 Steps for a running deployment:
 
 1. Back up the state directory.
 2. Deploy the new version with the old configuration plus `server.auth.clientUrl`,
-   `server.trustedProxies`, `server.auth.webauthn.*` and, only while old clients are
-   still in use, `server.auth.legacyBasicAuth: true`.
+   `server.trustedProxies` and `server.auth.webauthn.*`.
 3. Check the log for the import lines. Log in with the web client using the existing
    passwords; set up passkeys or TOTP.
-4. After the clients are updated: remove `server.auth.users`, `server.basicAuth` and
-   `legacyBasicAuth` from the configuration.
+4. Remove `server.auth.users` from the configuration.
 
 ## 15. Changes to protocol v1
 
@@ -1224,5 +1210,4 @@ compromised client device while unlocked, a malicious admin.
 
 Residual risks: rate limits are per process and reset on restart; an attacker with read
 access to both the database and `auth.key` can read TOTP secrets (not passwords);
-`legacyBasicAuth` sends passwords on every request and bypasses 2FA, so it is off by
-default and meant for the transition only; `auth.disabled` is for development only.
+`auth.disabled` is for development only.

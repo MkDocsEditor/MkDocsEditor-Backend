@@ -73,11 +73,10 @@ type (
 	}
 
 	AuthStatusResponse struct {
-		SetupRequired   bool           `json:"setupRequired"`
-		AuthDisabled    bool           `json:"authDisabled"`
-		Passkeys        PasskeyStatus  `json:"passkeys"`
-		PasswordPolicy  PasswordPolicy `json:"passwordPolicy"`
-		LegacyBasicAuth bool           `json:"legacyBasicAuth"`
+		SetupRequired  bool           `json:"setupRequired"`
+		AuthDisabled   bool           `json:"authDisabled"`
+		Passkeys       PasskeyStatus  `json:"passkeys"`
+		PasswordPolicy PasswordPolicy `json:"passwordPolicy"`
 	}
 
 	LinkInspectResponse struct {
@@ -158,11 +157,10 @@ func (rs *RestService) writeLoginResult(c echo.Context, r *auth.LoginResult) err
 // GET /auth/status/
 func (rs *RestService) authStatus(c echo.Context) error {
 	return c.JSONPretty(http.StatusOK, &AuthStatusResponse{
-		SetupRequired:   rs.authenticator.SetupRequired(),
-		AuthDisabled:    !rs.authenticator.Enabled(),
-		Passkeys:        PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
-		PasswordPolicy:  PasswordPolicy{MinLength: auth.PasswordMinLength, MaxLength: auth.PasswordMaxLength},
-		LegacyBasicAuth: rs.authenticator.LegacyBasicAuth(),
+		SetupRequired:  rs.authenticator.SetupRequired(),
+		AuthDisabled:   !rs.authenticator.Enabled(),
+		Passkeys:       PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
+		PasswordPolicy: PasswordPolicy{MinLength: auth.PasswordMinLength, MaxLength: auth.PasswordMaxLength},
 	}, jsonIndent)
 }
 
