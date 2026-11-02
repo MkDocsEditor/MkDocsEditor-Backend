@@ -319,7 +319,7 @@ func TestAccountCSRF(t *testing.T) {
 }
 
 func TestAccountBearerAndInvites(t *testing.T) {
-	e := newAccountEnv(t, legacyBasicAuth)
+	e := newAccountEnv(t)
 	admin := e.setupAdmin()
 
 	// invites are admin-only and need a session
@@ -395,17 +395,6 @@ func TestAccountBearerAndInvites(t *testing.T) {
 	// wrong passwords give a generic error
 	expect(t, e.app().do(http.MethodPost, "/auth/login/", map[string]any{"username": "anna", "password": "wrong password"}), http.StatusUnauthorized, CodeInvalidCredentials)
 	expect(t, e.app().do(http.MethodPost, "/auth/login/", map[string]any{"username": "nobody", "password": "wrong password"}), http.StatusUnauthorized, CodeInvalidCredentials)
-	// account and admin endpoints need a session, not basic auth
-	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/account/sessions/", nil)
-	req.SetBasicAuth("anna", "violets are blue 7")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("basic auth on /account/: %d", resp.StatusCode)
-	}
 }
 
 func TestAccountRateLimitResponse(t *testing.T) {
@@ -424,11 +413,8 @@ func TestAccountRateLimitResponse(t *testing.T) {
 	}
 }
 
-func TestAccountLegacyBasicAuthOff(t *testing.T) {
-	off := false
-	e := newAccountEnv(t, func(c *configuration.Configuration) {
-		c.Server.Auth.LegacyBasicAuth = &off
-	})
+func TestAccountPasswordOverBasicAuthRefused(t *testing.T) {
+	e := newAccountEnv(t)
 	e.setupAdmin()
 	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/section/", nil)
 	req.SetBasicAuth("markus", "a long admin secret")

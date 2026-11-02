@@ -236,7 +236,6 @@ func (s *Service) setPassword(u *User, sess *Session, hash, auditType string, ri
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	s.invalidateBasicCache(u.ID)
 	if n > 0 {
 		s.notifyRevoked(RevokeEvent{AccountID: u.ID, ExceptSessionID: except, Reason: RevokeSession})
 	}

@@ -2,7 +2,6 @@ package backend
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -43,7 +42,7 @@ func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *co
 	for _, f := range configure {
 		f(&configuration.CurrentConfig)
 	}
-	if srv := &configuration.CurrentConfig.Server; !accounts && len(srv.Auth.Users) == 0 && srv.BasicAuth.User == "" {
+	if srv := &configuration.CurrentConfig.Server; !accounts && len(srv.Auth.Users) == 0 {
 		// tests without users run without authentication, like before the account system
 		srv.Auth.Disabled = true
 	}
@@ -302,31 +301,6 @@ func newTestAuthenticator(t *testing.T, stateDir string) *auth.Service {
 	return a
 }
 
-func TestRestLegacyBasicAuth(t *testing.T) {
-	e := newRestTestEnv(t, legacyBasicAuth, func(c *configuration.Configuration) {
-		c.Server.BasicAuth = configuration.AuthenticationConfiguration{User: "admin", Password: "secret"}
-	})
-
-	// the liveness probe needs no credentials
-	expectStatus(t, e.do(http.MethodGet, "/alive/", nil, ""), http.StatusOK)
-	rec := e.do(http.MethodGet, "/section/", nil, "")
-	expectStatus(t, rec, http.StatusUnauthorized)
-	if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Basic") {
-		t.Errorf("missing WWW-Authenticate header: %v", rec.Header())
-	}
-
-	e.user, e.pass = "admin", "wrong"
-	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
-	e.user, e.pass = "admin", "secret"
-	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusOK)
-
-	rec = e.do(http.MethodGet, "/auth/whoami/", nil, "")
-	expectStatus(t, rec, http.StatusOK)
-	if u := decode[auth.User](t, rec); u.Username != "admin" || u.Role != auth.RoleAdmin {
-		t.Errorf("whoami = %+v", u)
-	}
-}
-
 func hashFor(t *testing.T, password string) string {
 	t.Helper()
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
@@ -351,6 +325,8 @@ func newMultiUserEnv(t *testing.T) *restTestEnv {
 func TestRestMultiUserAuth(t *testing.T) {
 	e := newMultiUserEnv(t)
 
+	// the liveness probe needs no credentials
+	expectStatus(t, e.do(http.MethodGet, "/alive/", nil, ""), http.StatusOK)
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
 	e.user, e.pass = "anna", "pw-markus"
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusUnauthorized)
@@ -456,12 +432,6 @@ func TestWebsocketOriginCheck(t *testing.T) {
 	}
 }
 
-// legacyBasicAuth enables HTTP basic auth with account passwords
-func legacyBasicAuth(c *configuration.Configuration) {
-	on := true
-	c.Server.Auth.LegacyBasicAuth = &on
-}
-
 // testSessions caches the bearer sessions of authHeader per authenticator and credentials
 var testSessions sync.Map
 
@@ -470,13 +440,10 @@ type testSessionKey struct {
 	user, pass string
 }
 
-// authHeader returns the Authorization header of a test user: HTTP basic while legacy basic
-// auth is on, otherwise a bearer session. Wrong credentials give a token that matches no session.
+// authHeader returns the Authorization header of a test user: a bearer session. Wrong
+// credentials give a token that matches no session.
 func authHeader(t *testing.T, a *auth.Service, user, pass string) string {
 	t.Helper()
-	if a.LegacyBasicAuth() {
-		return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
-	}
 	key := testSessionKey{a: a, user: user, pass: pass}
 	if token, ok := testSessions.Load(key); ok {
 		return "Bearer " + token.(string)

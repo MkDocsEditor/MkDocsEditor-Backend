@@ -70,9 +70,6 @@ username, a bcrypt password hash, an optional display name and email, and a role
 | `editor` | everything except user administration | full editing |
 | `admin` | everything | full editing |
 
-The old single-user configuration (`server.basicAuth.user/password`) keeps working; that
-user is an `admin`.
-
 The server assigns every user a stable colour (derived from the username, overridable in
 the configuration). Clients use it for cursors, selections and authorship.
 
@@ -139,10 +136,7 @@ All REST endpoints except `GET /alive/`, `GET /auth/status/` and the login and l
 endpoints require authentication.
 
 - **REST:** a session, either the HttpOnly session cookie (web client) or
-  `Authorization: Bearer mds_…` (native clients). During the transition, HTTP Basic auth
-  against the account passwords also works (`server.auth.legacyBasicAuth`); requests that
-  send `X-Requested-With: XMLHttpRequest` get no `WWW-Authenticate` header on a 401, so
-  the browser does not show its own login dialog.
+  `Authorization: Bearer mds_…` (native clients), or an app token.
 - `GET /auth/whoami/` returns the authenticated user:
   `{"id","username","displayName","role","color","authMethod",…}`. `id` is the stable
   account id; the username can change.
@@ -412,7 +406,7 @@ Presence is ephemeral. The server relays it and never stores it.
 ### Events websocket
 
 `GET /events/ws/` pushes changes for the file browser. It authenticates like the
-document websocket: a basic auth header on the upgrade request, or a ticket in the
+document websocket: an `Authorization` header on the upgrade request, or a ticket in the
 first message. The first message is always `hello`:
 
 ```json

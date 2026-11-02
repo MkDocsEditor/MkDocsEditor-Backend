@@ -56,12 +56,14 @@ when the last login is older than 10 minutes.
 a reset link.
 
 **Upgrading from configured users.** On the first start of this version, the users of
-`server.auth.users` (and the old `server.basicAuth` user) are imported into the database
-once, with their roles and bcrypt hashes; a bcrypt hash is replaced by Argon2id on the
-next login. After that the configuration list is ignored and can be removed. HTTP basic
-auth with these passwords is off by default; set `server.auth.legacyBasicAuth: true`
-while old clients are still in use. `mkdocsrest hash-password` still creates bcrypt
-hashes for that list.
+`server.auth.users` are imported into the database once, with their roles and bcrypt
+hashes; a bcrypt hash is replaced by Argon2id on the next login. After that the
+configuration list is ignored and can be removed. `mkdocsrest hash-password` still creates
+bcrypt hashes for that list. Account passwords only work for the login endpoints, not for
+HTTP basic auth; `server.basicAuth` and `server.auth.legacyBasicAuth` no longer exist.
+
+**Development instances.** `server.auth.disabled: true` turns authentication off: every
+request is the anonymous admin. Only use it on instances that nobody else can reach.
 
 Clients:
 

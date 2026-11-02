@@ -35,37 +35,32 @@ const (
 
 // settings are the normalized authentication settings
 type settings struct {
-	disabled        bool
-	clientURL       string
-	legacyBasicAuth bool
-	idleTimeout     time.Duration
-	maxLifetime     time.Duration
-	cookieSecure    string
-	auditRetention  time.Duration
-	rateLimits      configuration.RateLimitConfiguration
-	secretKeyFile   string
+	disabled       bool
+	clientURL      string
+	idleTimeout    time.Duration
+	maxLifetime    time.Duration
+	cookieSecure   string
+	auditRetention time.Duration
+	rateLimits     configuration.RateLimitConfiguration
+	secretKeyFile  string
 	// issuer is the name shown by authenticator apps and passkey providers
 	issuer string
 }
 
 func newSettings(conf configuration.AuthConfiguration) (settings, error) {
 	s := settings{
-		disabled:        conf.Disabled,
-		clientURL:       strings.TrimRight(conf.ClientURL, "/"),
-		legacyBasicAuth: false,
-		idleTimeout:     conf.SessionIdleTimeout,
-		maxLifetime:     conf.SessionMaxLifetime,
-		cookieSecure:    conf.CookieSecure,
-		auditRetention:  conf.AuditRetention,
-		rateLimits:      conf.RateLimits,
-		secretKeyFile:   conf.SecretKeyFile,
-		issuer:          strings.TrimSpace(conf.WebAuthn.RPName),
+		disabled:       conf.Disabled,
+		clientURL:      strings.TrimRight(conf.ClientURL, "/"),
+		idleTimeout:    conf.SessionIdleTimeout,
+		maxLifetime:    conf.SessionMaxLifetime,
+		cookieSecure:   conf.CookieSecure,
+		auditRetention: conf.AuditRetention,
+		rateLimits:     conf.RateLimits,
+		secretKeyFile:  conf.SecretKeyFile,
+		issuer:         strings.TrimSpace(conf.WebAuthn.RPName),
 	}
 	if s.issuer == "" {
 		s.issuer = "MkDocsEditor"
-	}
-	if conf.LegacyBasicAuth != nil {
-		s.legacyBasicAuth = *conf.LegacyBasicAuth
 	}
 	if s.clientURL != "" {
 		u, err := url.Parse(s.clientURL)
@@ -110,11 +105,6 @@ func newSettings(conf configuration.AuthConfiguration) (settings, error) {
 // Disabled reports whether authentication is turned off (server.auth.disabled)
 func (s *Service) Disabled() bool {
 	return s.cfg.disabled
-}
-
-// LegacyBasicAuth reports whether HTTP Basic auth is accepted
-func (s *Service) LegacyBasicAuth() bool {
-	return s.cfg.legacyBasicAuth
 }
 
 // CookieSecure returns the cookie secure mode

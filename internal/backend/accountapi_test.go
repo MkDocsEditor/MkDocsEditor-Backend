@@ -55,7 +55,7 @@ func (e *accountEnv) clock() *testClock {
 }
 
 func TestAccountTOTPFlow(t *testing.T) {
-	e := newAccountEnv(t, legacyBasicAuth)
+	e := newAccountEnv(t)
 	clk := e.clock()
 	b := e.setupAdmin()
 
@@ -145,18 +145,6 @@ func TestAccountTOTPFlow(t *testing.T) {
 		http.StatusOK, "")
 	if b.cookie == nil {
 		t.Fatal("no session cookie after the second factor")
-	}
-
-	// basic auth is refused for accounts with a second factor
-	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/auth/whoami/", nil)
-	req.SetBasicAuth("mr", "a long admin secret")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("basic auth with TOTP: %d", resp.StatusCode)
 	}
 
 	// step-up with password and code

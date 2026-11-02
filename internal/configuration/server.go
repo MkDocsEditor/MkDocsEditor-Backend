@@ -19,9 +19,7 @@ type (
 		TrustedProxies []string `yaml:"trustedProxies"`
 		// Auth configures accounts and sessions, see docs/auth.md
 		Auth AuthConfiguration `yaml:"auth"`
-		// BasicAuth is the old single-user configuration. It keeps working; the user is an admin.
-		BasicAuth AuthenticationConfiguration `yaml:"basicAuth"`
-		CORS      CorsConfiguration           `yaml:"cors"`
+		CORS CorsConfiguration `yaml:"cors"`
 	}
 
 	AuthConfiguration struct {
@@ -29,9 +27,6 @@ type (
 		Disabled bool `yaml:"disabled"`
 		// ClientURL is the web client, used for setup, invite and reset links
 		ClientURL string `yaml:"clientUrl"`
-		// LegacyBasicAuth accepts HTTP Basic auth with account passwords (transition from
-		// server.auth.users). Default false.
-		LegacyBasicAuth *bool `yaml:"legacyBasicAuth"`
 		// SessionIdleTimeout ends sessions that were not used for this long (default 720h)
 		SessionIdleTimeout time.Duration `yaml:"sessionIdleTimeout"`
 		// SessionMaxLifetime ends sessions this long after the login (default 2160h)
@@ -94,11 +89,6 @@ type (
 		Role string `yaml:"role"`
 		// Color overrides the colour derived from the username, e.g. "#1971c2" (optional)
 		Color string `yaml:"color"`
-	}
-
-	AuthenticationConfiguration struct {
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
 	}
 
 	CorsConfiguration struct {

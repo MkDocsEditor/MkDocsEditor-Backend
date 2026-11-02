@@ -238,10 +238,6 @@ func TestPasskeySecondFactorAndReset(t *testing.T) {
 	if _, err := s.FinishAddPasskey(admin, id, mustCreate(t, phone, options), "", ri()); err != nil {
 		t.Fatal(err)
 	}
-	if s.AuthenticateBasic("admin", "boss secret 2026!") != nil {
-		t.Error("basic auth works for an account with a passkey")
-	}
-
 	r, err := s.LoginPassword("admin", "boss secret 2026!", sp(""))
 	if err != nil || r.Session != nil || strings.Join(r.Methods, ",") != "passkey" {
 		t.Fatal(r, err)

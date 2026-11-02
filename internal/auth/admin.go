@@ -152,7 +152,6 @@ func (s *Service) UpdateUser(by *User, id string, upd AdminUpdate, ri RequestInf
 			return nil, err
 		}
 		s.invalidateCache()
-		s.invalidateBasicCache(id)
 		switch {
 		case disabling:
 			s.notifyRevoked(RevokeEvent{AccountID: id, Reason: RevokeDisabled})
@@ -279,7 +278,6 @@ func (s *Service) DeleteUser(by *User, id string, ri RequestInfo) error {
 		return err
 	}
 	s.invalidateCache()
-	s.invalidateBasicCache(id)
 	s.notifyRevoked(RevokeEvent{AccountID: id, Reason: RevokeDisabled})
 	return nil
 }

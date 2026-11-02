@@ -148,10 +148,6 @@ func TestTOTPEnrollment(t *testing.T) {
 func TestSecondFactorLogin(t *testing.T) {
 	s, c, admin := setupService(t, configuration.AuthConfiguration{RateLimits: configuration.RateLimitConfiguration{Disabled: true}})
 	secret, codes := enrollTOTP(t, s, c, admin)
-	if s.AuthenticateBasic("admin", "boss secret 2026!") != nil {
-		t.Error("basic auth works for an account with TOTP")
-	}
-
 	r, err := s.LoginPassword("admin", "boss secret 2026!", sp(SessionCookie))
 	if err != nil || r.Session != nil || r.Challenge == "" || strings.Join(r.Methods, ",") != "totp,recovery-code" {
 		t.Fatal(r, err)

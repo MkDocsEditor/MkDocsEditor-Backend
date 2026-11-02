@@ -50,10 +50,6 @@ func TestImportValidation(t *testing.T) {
 		"bad color":      users(configuration.UserConfiguration{Username: "a", PasswordHash: good, Color: "red"}),
 		"duplicate":      users(configuration.UserConfiguration{Username: "a", PasswordHash: good}, configuration.UserConfiguration{Username: "a", PasswordHash: good}),
 		"duplicate case": users(configuration.UserConfiguration{Username: "a", PasswordHash: good}, configuration.UserConfiguration{Username: "A", PasswordHash: good}),
-		"legacy duplicate": {
-			Auth:      configuration.AuthConfiguration{Users: []configuration.UserConfiguration{{Username: "a", PasswordHash: good}}},
-			BasicAuth: configuration.AuthenticationConfiguration{User: "a", Password: "x"},
-		},
 	}
 	for name, c := range cases {
 		if s, err := Open(Options{StateDir: t.TempDir(), Server: c}); err == nil {
@@ -63,21 +59,29 @@ func TestImportValidation(t *testing.T) {
 	}
 }
 
-func TestImportAndBasicAuth(t *testing.T) {
+// loginUser logs in with a password and returns the user, or nil if the login fails
+func loginUser(s *Service, username, password string) *User {
+	r, err := s.LoginPassword(username, password, SessionParams{Type: SessionBearer, DeviceName: "test"})
+	if err != nil {
+		return nil
+	}
+	return r.User
+}
+
+func TestImportConfiguredUsers(t *testing.T) {
 	dir := t.TempDir()
 	conf := configuration.ServerConfiguration{
 		Auth: configuration.AuthConfiguration{Users: []configuration.UserConfiguration{
 			{Username: "markus", PasswordHash: hash(t, "secret"), Role: "admin", DisplayName: "Markus", Email: "m@example.com"},
 			{Username: "kid", PasswordHash: "$2y$" + hash(t, "kidpw")[4:], Role: "reader", Color: "#123456"},
 		}},
-		BasicAuth: configuration.AuthenticationConfiguration{User: "legacy", Password: "old"},
 	}
 	a := openTest(t, dir, conf)
-	if !a.Enabled() || len(a.Users()) != 3 {
+	if !a.Enabled() || len(a.Users()) != 2 {
 		t.Fatalf("users = %v", a.Users())
 	}
 
-	u := a.AuthenticateBasic("markus", "secret")
+	u := loginUser(a, "markus", "secret")
 	if u == nil || u.DisplayName != "Markus" || u.Email != "m@example.com" || !u.CanWrite() || len(u.ID) != 26 {
 		t.Fatalf("markus = %+v", u)
 	}
@@ -86,28 +90,21 @@ func TestImportAndBasicAuth(t *testing.T) {
 	if err := a.db.QueryRow("SELECT password_hash FROM accounts WHERE id = ?", u.ID).Scan(&h); err != nil || !strings.HasPrefix(h, "$argon2id$") {
 		t.Fatalf("hash after login = %q, %v", h, err)
 	}
-	if a.AuthenticateBasic("markus", "secret") == nil {
-		t.Error("cached authentication failed")
+	if loginUser(a, "markus", "secret") == nil {
+		t.Error("login with the upgraded hash failed")
 	}
-	if a.AuthenticateBasic("markus", "wrong") != nil {
-		t.Error("wrong password accepted after a cached success")
+	if loginUser(a, "markus", "wrong") != nil {
+		t.Error("wrong password accepted")
 	}
-	if a.AuthenticateBasic("nobody", "secret") != nil {
+	if loginUser(a, "nobody", "secret") != nil {
 		t.Error("unknown user accepted")
 	}
-	kid := a.AuthenticateBasic("kid", "kidpw")
+	kid := loginUser(a, "kid", "kidpw")
 	if kid == nil || kid.CanWrite() || kid.Color != "#123456" || kid.DisplayName != "kid" {
 		t.Errorf("kid = %+v", kid)
 	}
-	legacy := a.AuthenticateBasic("legacy", "old")
-	if legacy == nil || legacy.Role != RoleAdmin {
-		t.Errorf("legacy = %+v", legacy)
-	}
-	if a.AuthenticateBasic("legacy", "olD") != nil {
-		t.Error("wrong legacy password accepted")
-	}
 	var events int
-	if err := a.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE type = ?", AuditAccountImported).Scan(&events); err != nil || events != 3 {
+	if err := a.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE type = ?", AuditAccountImported).Scan(&events); err != nil || events != 2 {
 		t.Errorf("import audit events = %d, %v", events, err)
 	}
 	_ = a.Close()
@@ -116,7 +113,7 @@ func TestImportAndBasicAuth(t *testing.T) {
 	conf.Auth.Users = conf.Auth.Users[:1]
 	conf.Auth.Users[0].PasswordHash = hash(t, "changed")
 	b := openTest(t, dir, conf)
-	if len(b.Users()) != 3 || b.AuthenticateBasic("markus", "changed") != nil || b.AuthenticateBasic("markus", "secret") == nil {
+	if len(b.Users()) != 2 || loginUser(b, "markus", "changed") != nil || loginUser(b, "markus", "secret") == nil {
 		t.Error("configuration was imported again")
 	}
 	if b.UserByID(u.ID).Username != "markus" {
@@ -198,7 +195,7 @@ func TestImportActorsFile(t *testing.T) {
 		t.Error("actors.json.imported missing")
 	}
 	// tombstones do not enable authentication on their own and cannot log in
-	if a.AuthenticateBasic("gone", "") != nil {
+	if loginUser(a, "gone", "") != nil {
 		t.Error("tombstone could log in")
 	}
 
