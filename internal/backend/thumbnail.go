@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,7 +79,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 	if !hasThumbnail(r.MimeType) {
 		return apiError(c, http.StatusNotFound, CodeNotFound, errNoThumbnail.Error(), nil)
 	}
-	key := strconv.FormatUint(xxhash.ChecksumString64(fmt.Sprintf("%s|%d|%d|%d", r.RelPath, size, r.Filesize, r.ModTime.UnixNano())), 16)
+	key := thumbnailKey(r, size)
 	etag := `"` + key + `"`
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
 	c.Response().Header().Set("ETag", etag)
@@ -84,15 +87,17 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 		return c.NoContent(http.StatusNotModified)
 	}
 
-	dir := filepath.Join(rs.sync.store.Dir(), thumbnailsDir)
+	dir := rs.thumbnailDir()
 	for _, ext := range []string{".jpg", ".png"} {
 		if data, err := os.ReadFile(filepath.Join(dir, key+ext)); err == nil {
 			return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
 		}
 	}
-	rs.thumbnailSlots <- struct{}{}
-	data, ext, err := makeThumbnail(r.Path, size)
-	<-rs.thumbnailSlots
+	data, ext, err := rs.renderThumbnail(c.Request().Context(), r, size)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// the client is gone, nobody reads this
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
 	if errors.Is(err, errNoThumbnail) {
 		return apiError(c, http.StatusNotFound, CodeNotFound, err.Error(), nil)
 	}
@@ -107,6 +112,60 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 		c.Logger().Warnf("Unable to cache the thumbnail of %s: %v", r.RelPath, err)
 	}
 	return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
+}
+
+// renderThumbnail makes a thumbnail in one of the limited slots. It gives up waiting for a slot
+// when ctx ends.
+func (rs *RestService) renderThumbnail(ctx context.Context, r *Resource, size int) ([]byte, string, error) {
+	select {
+	case rs.thumbnailSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	}
+	defer func() { <-rs.thumbnailSlots }()
+	return makeThumbnail(r.Path, size)
+}
+
+// thumbnailKey is the name of a cached thumbnail, without the extension. It changes with the
+// path and the content of the resource.
+func thumbnailKey(r *Resource, size int) string {
+	return strconv.FormatUint(xxhash.ChecksumString64(fmt.Sprintf("%s|%d|%d|%d", r.RelPath, size, r.Filesize, r.ModTime.UnixNano())), 16)
+}
+
+func (rs *RestService) thumbnailDir() string {
+	return filepath.Join(rs.sync.store.Dir(), thumbnailsDir)
+}
+
+// pruneThumbnails removes the cached thumbnails that belong to no current version of a resource
+// in the tree: the resource was deleted, moved or changed. Hidden files are temporary files of
+// thumbnails that are being written.
+func (rs *RestService) pruneThumbnails(root *Section) {
+	entries, err := os.ReadDir(rs.thumbnailDir())
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("Unable to clean up the thumbnails: %v", err)
+		}
+		return
+	}
+	keep := map[string]bool{}
+	for s := range root.walk() {
+		for _, r := range s.Resources {
+			if hasThumbnail(r.MimeType) {
+				for _, size := range thumbnailSizes {
+					keep[thumbnailKey(r, size)] = true
+				}
+			}
+		}
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || strings.HasPrefix(name, ".") || keep[strings.TrimSuffix(name, filepath.Ext(name))] {
+			continue
+		}
+		if err = os.Remove(filepath.Join(rs.thumbnailDir(), name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("Unable to remove the thumbnail %s: %v", name, err)
+		}
+	}
 }
 
 func thumbnailContentType(ext string) string {
