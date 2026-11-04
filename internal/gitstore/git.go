@@ -1,4 +1,6 @@
-package backend
+// Package gitstore commits the changes made through the backend to the git repository of the
+// wiki and reads the history of its files.
+package gitstore
 
 import (
 	"bytes"
@@ -12,32 +14,32 @@ import (
 	"sync"
 )
 
-// GitSignature is the name and email of a commit author
-type GitSignature struct {
+// Signature is the name and email of a commit author
+type Signature struct {
 	Name  string
 	Email string
 }
 
-func (s GitSignature) String() string {
+func (s Signature) String() string {
 	return fmt.Sprintf("%s <%s>", s.Name, s.Email)
 }
 
-// GitRepo runs the git CLI in the docs folder. Paths are relative to the docs folder.
-type GitRepo struct {
+// Repo runs the git CLI in the docs folder. Paths are relative to the docs folder.
+type Repo struct {
 	dir string
 	// top is the root of the work tree, prefix the docs folder relative to it ("docs/" or "")
 	top       string
 	prefix    string
-	committer GitSignature
+	committer Signature
 	mu        sync.Mutex
 }
 
-// OpenGitRepo checks that dir is inside a git work tree
-func OpenGitRepo(dir string, committer GitSignature) (*GitRepo, error) {
+// Open checks that dir is inside a git work tree
+func Open(dir string, committer Signature) (*Repo, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, errors.New("git is not installed")
 	}
-	g := &GitRepo{dir: dir, committer: committer}
+	g := &Repo{dir: dir, committer: committer}
 	out, err := g.run(nil, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		return nil, fmt.Errorf("%s is not inside a git repository: %w", dir, err)
@@ -57,19 +59,19 @@ func OpenGitRepo(dir string, committer GitSignature) (*GitRepo, error) {
 }
 
 // run runs git in the docs folder and returns its stdout
-func (g *GitRepo) run(env []string, args ...string) (string, error) {
+func (g *Repo) run(env []string, args ...string) (string, error) {
 	return g.runInput(env, "", args...)
 }
 
 // runInput runs git in the docs folder with stdin
-func (g *GitRepo) runInput(env []string, stdin string, args ...string) (string, error) {
+func (g *Repo) runInput(env []string, stdin string, args ...string) (string, error) {
 	return g.runIn(g.dir, env, stdin, args...)
 }
 
 // runIn runs git in dir with stdin. User provided values (paths, names, messages) are never passed
 // as arguments: paths go through stdin (--pathspec-from-file), authors through the environment
 // and messages through a file.
-func (g *GitRepo) runIn(dir string, env []string, stdin string, args ...string) (string, error) {
+func (g *Repo) runIn(dir string, env []string, stdin string, args ...string) (string, error) {
 	// the repository may belong to another uid (an NFS volume), git would refuse it.
 	// Literal pathspecs: a file named ":(glob)*" is just a file.
 	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off", "--literal-pathspecs"}, args...)
@@ -106,7 +108,7 @@ func (e *gitError) Unwrap() error {
 // folder; "../mkdocs.yml" for a file next to it) and nothing else. Other staged changes in the
 // repository stay staged and uncommitted. body is optional text between the subject and the
 // trailers. It returns the abbreviated hash of the commit, or "" if the paths have no changes.
-func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string, body string) (string, error) {
+func (g *Repo) Commit(paths []string, author Signature, coAuthors []Signature, subject string, body string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -151,7 +153,7 @@ func (g *GitRepo) Commit(paths []string, author GitSignature, coAuthors []GitSig
 // stageablePaths maps paths to paths relative to the root of the work tree, so files next to the
 // docs folder work too. It keeps the paths git can stage: existing files (tracked or not, not
 // ignored) and deleted tracked files.
-func (g *GitRepo) stageablePaths(paths []string) ([]string, error) {
+func (g *Repo) stageablePaths(paths []string) ([]string, error) {
 	out, err := g.runIn(g.top, nil, "", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, err
@@ -178,7 +180,7 @@ func coveredBy(file string, paths []string) bool {
 }
 
 // writeCommitMessage writes the message to a temporary file and returns its name
-func writeCommitMessage(subject string, body string, coAuthors []GitSignature) (string, error) {
+func writeCommitMessage(subject string, body string, coAuthors []Signature) (string, error) {
 	var message strings.Builder
 	message.WriteString(subject)
 	if body != "" {
@@ -208,7 +210,7 @@ func writeCommitMessage(subject string, body string, coAuthors []GitSignature) (
 }
 
 // Push pushes the current branch
-func (g *GitRepo) Push(remote string, branch string) error {
+func (g *Repo) Push(remote string, branch string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	args := []string{"push", "--quiet"}

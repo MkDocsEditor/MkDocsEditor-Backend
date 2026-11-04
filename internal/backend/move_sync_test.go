@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
@@ -188,7 +189,7 @@ func TestMoveRedirectsOldIDAfterHello(t *testing.T) {
 // A move is one git commit: a rename with history, the rewritten documents and mkdocs.yml,
 // authored by the user who moved
 func TestMoveGitCommit(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 	e.withLinks()
 	e.writeFile("guide/setup.md", "# Setup\n\nBack [home](../index.md).\n\n"+strings.Repeat("Some longer text of the page.\n", 10))
 	if err := os.WriteFile(filepath.Join(e.project, "mkdocs.yml"),

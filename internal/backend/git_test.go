@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 )
 
 // newGitEnv runs a backend whose project folder is a git repository with one commit
-func newGitEnv(t *testing.T, opts GitCommitterOptions) *syncEnv {
+func newGitEnv(t *testing.T, opts gitstore.CommitterOptions) *syncEnv {
 	t.Helper()
 	// keep the user's git configuration (signing, hooks, templates) out of the tests
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -72,7 +74,7 @@ func (e *syncEnv) doBody(method, path, user, body string) *httpRecorder {
 }
 
 func TestGitCommitAfterLeave(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{AfterLeave: 300 * time.Millisecond})
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterLeave: 300 * time.Millisecond})
 	id := e.docID("guide/setup.md")
 
 	// unrelated staged work of someone else must stay staged and uncommitted
@@ -115,7 +117,7 @@ func TestGitCommitAfterLeave(t *testing.T) {
 }
 
 func TestGitCommitAfterIdleWhileConnected(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{AfterIdle: 300 * time.Millisecond})
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterIdle: 300 * time.Millisecond})
 	a := newTestClient(t, e, "bob")
 	a.connect(e.docID("guide/setup.md"))
 	a.appendText("idle\n")
@@ -126,7 +128,7 @@ func TestGitCommitAfterIdleWhileConnected(t *testing.T) {
 }
 
 func TestGitCommitMaxInterval(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{MaxInterval: 400 * time.Millisecond})
+	e := newGitEnv(t, gitstore.CommitterOptions{MaxInterval: 400 * time.Millisecond})
 	a := newTestClient(t, e, "alice")
 	a.connect(e.docID("guide/setup.md"))
 	deadline := time.Now().Add(5 * time.Second)
@@ -140,7 +142,7 @@ func TestGitCommitMaxInterval(t *testing.T) {
 }
 
 func TestGitNoCommitForDiskChanges(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{AfterLeave: 50 * time.Millisecond, AfterIdle: 50 * time.Millisecond})
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterLeave: 50 * time.Millisecond, AfterIdle: 50 * time.Millisecond})
 	a := newTestClient(t, e, "alice")
 	a.connect(e.docID("guide/setup.md"))
 	e.writeFile("guide/setup.md", setupText+"from git pull\n")
@@ -154,7 +156,7 @@ func TestGitNoCommitForDiskChanges(t *testing.T) {
 }
 
 func TestGitCommitsTreeChanges(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 	guide := e.tm.GenerateID(filepath.Join(e.project, "docs", "guide"))
 
 	if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"`+guide+`","name":"new"}`); rec.Code != http.StatusOK {
@@ -192,7 +194,7 @@ func TestGitCommitsTreeChanges(t *testing.T) {
 }
 
 func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 	a := newTestClient(t, e, "alice")
 	a.connect(e.docID("guide/setup.md"))
 	a.appendText("before shutdown\n")
@@ -208,12 +210,11 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 	a.appendText("before crash\n")
 	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
 	eventually(t, "pending saved", func() bool {
-		data, err := os.ReadFile(filepath.Join(e.stateDir, gitPendingFile))
+		data, err := os.ReadFile(filepath.Join(e.stateDir, gitstore.PendingFile))
 		return err == nil && strings.Contains(string(data), e.authn.UserByUsername("bob").ID)
 	})
 	a.disconnect()
-	close(e.git.stop)
-	<-e.git.done
+	e.git.Abandon()
 	e.git = nil // skip the commit on shutdown
 	e.stop()
 	e.gitOpts.AfterLeave = 100 * time.Millisecond
@@ -226,13 +227,13 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 
 // a pending file written before the account database (keyed by usernames) is still committed
 func TestGitPendingFileWithUsernames(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{AfterLeave: 100 * time.Millisecond})
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterLeave: 100 * time.Millisecond})
 	e.stop()
 	pending := `{"guide/setup.md": {"changes": {"bob": 3, "alice": 1}, "firstChange": "2026-01-01T00:00:00Z", "lastChange": "2026-01-01T00:00:00Z"}}`
 	if err := os.WriteFile(filepath.Join(e.project, "docs", "guide", "setup.md"), []byte("# Setup\n\nchanged\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(e.stateDir, gitPendingFile), []byte(pending), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(e.stateDir, gitstore.PendingFile), []byte(pending), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	e.start()
@@ -244,7 +245,7 @@ func TestGitPendingFileWithUsernames(t *testing.T) {
 
 // file names are never interpreted as pathspec magic or options
 func TestGitCommitsOddNames(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 	for _, name := range []string{":(exclude)index", "--all", "*"} {
 		rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"root","name":"`+name+`"}`)
 		if rec.Code != http.StatusOK {

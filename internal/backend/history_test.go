@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 )
 
 func (e *syncEnv) history(id string) []HistoryEntry {
@@ -21,7 +23,7 @@ func (e *syncEnv) history(id string) []HistoryEntry {
 }
 
 func TestHistory(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 
 	a := newTestClient(t, e, "alice")
 	a.connect(e.docID("guide/setup.md"))
@@ -126,7 +128,7 @@ func TestHistoryRequiresGit(t *testing.T) {
 // new pages start empty, so git sees each one as a copy of the previous one; the history must
 // not follow copies
 func TestHistoryIgnoresCopiesOfEmptyPages(t *testing.T) {
-	e := newGitEnv(t, GitCommitterOptions{})
+	e := newGitEnv(t, gitstore.CommitterOptions{})
 	for _, name := range []string{"first", "second", "third"} {
 		if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"root","name":"`+name+`"}`); rec.Code != http.StatusOK {
 			t.Fatalf("create %s: %d", name, rec.Code)
