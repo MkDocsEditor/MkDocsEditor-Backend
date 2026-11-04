@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/api"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
@@ -68,7 +68,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if err := collab.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
 		return fmt.Errorf("invalid state directory: %w", err)
 	}
-	if _, err := backend.ParseTrustedProxies(conf.Server.TrustedProxies); err != nil {
+	if _, err := api.ParseTrustedProxies(conf.Server.TrustedProxies); err != nil {
 		return fmt.Errorf("invalid server.trustedProxies: %w", err)
 	}
 	authenticator, err := openAuthenticator(conf)
@@ -92,7 +92,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 	defer fileWatcher.Close()
 
-	restService := backend.NewRestService(conf.Server, treeManager, syncServer, authenticator)
+	restService := api.NewRestService(conf.Server, treeManager, syncServer, authenticator)
 
 	metricsServer, err := startMetricsServer(conf)
 	if err != nil {
@@ -113,7 +113,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		restService.SetGitCommitter(gitCommitter)
 	}
 	if metricsServer != nil {
-		metrics.Registry.MustRegister(backend.NewMetricsCollector(syncServer, treeManager, gitCommitter))
+		metrics.Registry.MustRegister(api.NewMetricsCollector(syncServer, treeManager, gitCommitter))
 	}
 
 	// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents

@@ -1,4 +1,6 @@
-package backend
+// Package api is the REST API and the websocket endpoints of the backend: routes, authentication
+// middleware and the HTTP handlers on top of the other packages. See openapi-description.yaml.
+package api
 
 import (
 	"context"
