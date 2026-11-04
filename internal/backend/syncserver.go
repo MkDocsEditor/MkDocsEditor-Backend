@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -54,6 +55,9 @@ type SyncServer struct {
 
 	// changeRecorder is told which users changed which document (the git committer)
 	changeRecorder ChangeRecorder
+
+	// eventLog receives the sync events, nil if they are not logged. See SetEventLog.
+	eventLog *log.Logger
 
 	mu sync.Mutex
 	// loaded documents by path relative to the docs folder
@@ -118,6 +122,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 		eventsDone:       make(chan struct{}),
 	}
 	treeManager.AddTreeChangeListener(func(_, _ *Section) {
+		metrics.TreeRebuilds.Inc()
 		select {
 		case s.treeChanges <- struct{}{}:
 		default:
@@ -396,6 +401,7 @@ func (s *SyncServer) closeDeletedLocked(p string, session *docSession) {
 		c.close(CloseNotFound, "document deleted")
 	}
 	session.closed = true
+	s.logSyncEvent(SyncEvent{Kind: SyncEventDeleted, Path: session.meta.Path, Connections: len(session.conns)})
 	if session.flushTimer != nil {
 		session.flushTimer.Stop()
 	}
@@ -480,6 +486,7 @@ func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
 		return nil
 	}
 	ws.SetReadLimit(maxMessageSize)
+	metrics.WebsocketConnections.WithLabelValues(metrics.ConnectionDocument).Inc()
 
 	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
 	go conn.writeLoop()
@@ -511,6 +518,10 @@ func (s *SyncServer) join(conn *wsConn, d *Document) (*docSession, error) {
 	if err = conn.attachLocked(session); err != nil {
 		return nil, err
 	}
+	s.logSyncEvent(SyncEvent{
+		Kind: SyncEventJoined, Path: session.meta.Path, User: conn.user.Username, ClientID: conn.clientID,
+		Client: conn.clientName, Access: conn.access(), Connections: len(session.conns),
+	})
 	s.onlineChanged()
 	return session, nil
 }
@@ -563,6 +574,10 @@ func (s *SyncServer) leave(conn *wsConn) {
 		return
 	}
 	delete(session.conns, conn)
+	s.logSyncEvent(SyncEvent{
+		Kind: SyncEventLeft, Path: session.meta.Path, User: conn.user.Username, ClientID: conn.clientID,
+		Client: conn.clientName, Access: conn.access(), Connections: len(session.conns),
+	})
 	s.onlineChanged()
 	session.broadcastLocked(&PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: session.docID, ClientID: conn.clientID}, nil)
 	remaining := len(session.conns)
@@ -588,6 +603,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 	if s.sessions[session.meta.Path] == session {
 		delete(s.sessions, session.meta.Path)
 	}
+	s.logSyncEvent(SyncEvent{Kind: SyncEventUnloaded, Path: session.meta.Path})
 }
 
 // wsConn is one websocket connection to a document
@@ -596,6 +612,8 @@ type wsConn struct {
 	ws       *websocket.Conn
 	user     *auth.User
 	clientID string
+	// clientName is the name the client sent in its hello message, shortened for the log
+	clientName string
 	// sessionID is the session the connection authenticated with, if any. user and
 	// sessionID are set before the connection is added to a session or the events list.
 	sessionID string
@@ -645,6 +663,7 @@ func (c *wsConn) send(msg any) {
 	case c.outgoing <- outgoingMessage{data: data}:
 	default:
 		log.Printf("%s: send queue full, disconnecting", c.clientID)
+		metrics.WebsocketSendQueueFull.Inc()
 		c.terminate()
 	}
 }
@@ -767,6 +786,7 @@ func (c *wsConn) readMessage() ([]byte, bool) {
 	if err != nil {
 		var netErr interface{ Timeout() bool }
 		if errors.As(err, &netErr) && netErr.Timeout() {
+			metrics.WebsocketHeartbeatTimeouts.Inc()
 			c.close(CloseHeartbeatTimout, "heartbeat timeout")
 		}
 		return nil, false
@@ -806,6 +826,7 @@ func (c *wsConn) run(documentID string) {
 		return
 	}
 	c.actorID = hello.ActorID
+	c.clientName = shortClientName(hello.Client)
 
 	if c.openDocument(documentID, hello) {
 		c.readLoop()
@@ -950,7 +971,10 @@ func (c *wsConn) syncLocked() {
 		if !valid {
 			return
 		}
-		c.send(&SyncMessage{Type: MsgSyncRequest, DocumentID: c.session.docID, SyncMessage: encodeBase64(msg.Bytes())})
+		data := msg.Bytes()
+		metrics.SyncMessages.WithLabelValues(metrics.DirectionSent).Inc()
+		metrics.SyncBytes.WithLabelValues(metrics.DirectionSent).Add(float64(len(data)))
+		c.send(&SyncMessage{Type: MsgSyncRequest, DocumentID: c.session.docID, SyncMessage: encodeBase64(data)})
 	}
 }
 
@@ -958,11 +982,15 @@ func (c *wsConn) syncLocked() {
 func (c *wsConn) handleSync(m SyncMessage) bool {
 	raw, err := base64.StdEncoding.DecodeString(m.SyncMessage)
 	if err != nil {
+		c.rejectSync(metrics.RejectInvalidMessage, "")
 		c.fail(CloseProtocolError, ErrCodeBadRequest, "syncMessage is not base64")
 		return false
 	}
+	metrics.SyncMessages.WithLabelValues(metrics.DirectionReceived).Inc()
+	metrics.SyncBytes.WithLabelValues(metrics.DirectionReceived).Add(float64(len(raw)))
 	decoded, err := automerge.LoadSyncMessage(raw)
 	if err != nil {
+		c.rejectSync(metrics.RejectInvalidMessage, "")
 		c.fail(CloseProtocolError, ErrCodeBadRequest, "invalid sync message")
 		return false
 	}
@@ -984,19 +1012,32 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 		return false
 	}
 
+	start := time.Now()
 	before := session.doc.Heads()
 	if _, err = c.syncState.ReceiveMessage(raw); err != nil {
 		log.Printf("%s: unable to apply sync message: %v", c.clientID, err)
+		c.rejectSync(metrics.RejectApplyFailed, session.meta.Path)
 		c.fail(CloseProtocolError, ErrCodeBadRequest, "unable to apply the sync message")
 		return false
 	}
+	metrics.SyncApplyDuration.Observe(time.Since(start).Seconds())
 	for _, actor := range newActors {
 		session.announceActorLocked(actor, c.user.ID, nil)
 	}
-	if sameHeads(before, session.doc.Heads()) {
+	heads := session.doc.Heads()
+	if sameHeads(before, heads) {
 		c.syncLocked()
 		return true
 	}
+	metrics.SyncChanges.WithLabelValues(c.user.Username).Add(float64(len(changes)))
+	event := SyncEvent{
+		Kind: SyncEventChangesApplied, Path: session.meta.Path, User: c.user.Username, ClientID: c.clientID,
+		Changes: len(changes), Bytes: len(raw), Heads: len(heads), DurationMs: milliseconds(start),
+	}
+	if len(changes) > 0 {
+		event.Actor = changes[len(changes)-1].ActorID()
+	}
+	c.server.logSyncEvent(event)
 	if _, err := session.text(); err != nil {
 		log.Printf("%s: the document %s has no text content any more: %v", c.clientID, session.meta.Path, err)
 	}
@@ -1009,6 +1050,9 @@ func (c *wsConn) handleSync(m SyncMessage) bool {
 // handleReaderSyncLocked applies a sync message of a reader: changes only ever reach the private
 // shadow. It returns false if the connection must close. Caller holds session.mu.
 func (c *wsConn) handleReaderSyncLocked(raw []byte, hasChanges bool) bool {
+	if hasChanges {
+		c.rejectSync(metrics.RejectReadOnly, c.session.meta.Path)
+	}
 	if hasChanges && !c.warnedRO {
 		c.warnedRO = true
 		c.sendError(ErrCodeReadOnly, "you have read-only access, your changes are not saved")
@@ -1029,6 +1073,11 @@ func (c *wsConn) bindChangeActors(changes []*automerge.Change) ([]string, bool) 
 		actor := ch.ActorID()
 		bound, err := c.server.actors.Bind(actor, c.user.ID)
 		if err != nil {
+			reason := metrics.RejectInvalidMessage
+			if errors.Is(err, ErrForeignActor) {
+				reason = metrics.RejectForeignActor
+			}
+			c.rejectSync(reason, c.session.meta.Path)
 			c.failActor(err, "the message contains changes of another user's actor "+actor)
 			return nil, false
 		}
@@ -1037,6 +1086,13 @@ func (c *wsConn) bindChangeActors(changes []*automerge.Change) ([]string, bool) 
 		}
 	}
 	return newActors, true
+}
+
+// rejectSync records a sync message that is not applied. path is empty unless the caller holds
+// session.mu.
+func (c *wsConn) rejectSync(reason string, path string) {
+	metrics.SyncRejected.WithLabelValues(reason).Inc()
+	c.server.logSyncEvent(SyncEvent{Kind: SyncEventRejected, Path: path, User: c.user.Username, ClientID: c.clientID, Reason: reason})
 }
 
 func sameHeads(a, b []automerge.ChangeHash) bool {
@@ -1056,6 +1112,7 @@ func sameHeads(a, b []automerge.ChangeHash) bool {
 }
 
 func (c *wsConn) handlePresence(selections json.RawMessage) {
+	metrics.PresenceMessages.Inc()
 	session := c.session
 	session.mu.Lock()
 	defer session.mu.Unlock()

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 )
 
 // Audit event types, see docs/auth.md section 2
@@ -79,6 +81,9 @@ func insertAudit(db execer, now time.Time, e AuditEvent) error {
 	}
 	_, err = db.Exec("INSERT INTO audit_events (time, type, actor_id, target_id, ip, user_agent, details) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		toMillis(now), e.Type, e.ActorID, e.TargetID, e.IP, ua, string(data))
+	if err == nil {
+		metrics.AuthEvents.WithLabelValues(e.Type).Inc()
+	}
 	return err
 }
 

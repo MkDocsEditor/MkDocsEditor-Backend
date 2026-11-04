@@ -11,6 +11,9 @@ import (
 // default name of the MkDocs configuration file inside the project folder
 const mkdocsConfigFileDefaultName = "mkdocs.yml"
 
+// DefaultMetricsPort is the port of the metrics server
+const DefaultMetricsPort = 9413
+
 // DefaultStateDirName is the name of the state folder inside the project folder
 const DefaultStateDirName = ".mkdocseditor"
 
@@ -56,6 +59,12 @@ func InitConfig(cfgFile string) error {
 
 func setDefaultValues() {
 	CurrentConfig.Git.setDefaults()
+	if CurrentConfig.Server.Metrics.Host == "" {
+		CurrentConfig.Server.Metrics.Host = CurrentConfig.Server.Host
+	}
+	if CurrentConfig.Server.Metrics.Port == 0 {
+		CurrentConfig.Server.Metrics.Port = DefaultMetricsPort
+	}
 	if CurrentConfig.MkDocs.DocsPath == "" {
 		CurrentConfig.MkDocs.DocsPath = filepath.Join(CurrentConfig.MkDocs.ProjectPath, "docs")
 	}

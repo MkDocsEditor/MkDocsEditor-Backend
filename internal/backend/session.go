@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	automerge "github.com/automerge/automerge-go"
 )
 
@@ -62,9 +63,24 @@ func (s *SyncServer) newDocument(text string) (*automerge.Doc, error) {
 	return doc, nil
 }
 
-// loadSession loads the saved document of a markdown file, or creates it, and merges the
-// current file content into it. The caller holds s.mu.
+// loadSession loads a document into memory and records how that went. The caller holds s.mu.
 func (s *SyncServer) loadSession(relPath string, absPath string, docID string) (*docSession, error) {
+	start := time.Now()
+	session, err := s.openSession(relPath, absPath, docID)
+	metrics.DocumentLoadDuration.Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DocumentLoads.WithLabelValues(metrics.ResultError).Inc()
+		s.logSyncEvent(SyncEvent{Kind: SyncEventLoadFailed, Path: relPath, DurationMs: milliseconds(start), Reason: err.Error()})
+		return nil, err
+	}
+	metrics.DocumentLoads.WithLabelValues(metrics.ResultOK).Inc()
+	s.logSyncEvent(SyncEvent{Kind: SyncEventLoaded, Path: relPath, Heads: len(session.doc.Heads()), DurationMs: milliseconds(start)})
+	return session, nil
+}
+
+// openSession loads the saved document of a markdown file, or creates it, and merges the
+// current file content into it. The caller holds s.mu.
+func (s *SyncServer) openSession(relPath string, absPath string, docID string) (*docSession, error) {
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, err
@@ -98,6 +114,8 @@ func (s *SyncServer) loadSession(relPath string, absPath string, docID string) (
 	}
 	if err != nil && meta != nil {
 		log.Printf("The saved state of %s cannot be loaded, starting a new epoch: %v", relPath, err)
+		metrics.DocumentStateCorrupt.Inc()
+		s.logSyncEvent(SyncEvent{Kind: SyncEventStateCorrupt, Path: relPath, Reason: err.Error()})
 		if cerr := s.store.MarkCorrupt(meta); cerr != nil {
 			return nil, cerr
 		}
@@ -185,7 +203,18 @@ func (ds *docSession) text() (string, error) {
 
 // ingestExternalLocked merges a new file content into the document as a change of the disk actor,
 // concurrent to everything users changed since the disk base. Caller holds mu.
-func (ds *docSession) ingestExternalLocked(fileText string) error {
+func (ds *docSession) ingestExternalLocked(fileText string) (err error) {
+	start := time.Now()
+	defer func() {
+		result := metrics.ResultOK
+		event := SyncEvent{Kind: SyncEventExternalChange, Path: ds.meta.Path, Heads: len(ds.doc.Heads()), DurationMs: milliseconds(start)}
+		if err != nil {
+			result = metrics.ResultError
+			event.Reason = err.Error()
+		}
+		metrics.ExternalChanges.WithLabelValues(result).Inc()
+		ds.server.logSyncEvent(event)
+	}()
 	if !utf8.ValidString(fileText) {
 		return ErrNotUTF8
 	}
@@ -283,20 +312,28 @@ func (ds *docSession) flushLocked() {
 	if !ds.dirty {
 		return
 	}
+	start := time.Now()
 	ds.fixMovedReferencesLocked()
 	failed := false
 	if err := ds.writeToDiskLocked(); err != nil {
 		log.Printf("Unable to write %s: %v", ds.meta.Path, err)
 		failed = true
 	}
-	if err := ds.server.store.Save(ds.meta, ds.doc.Save()); err != nil {
+	state := ds.doc.Save()
+	if err := ds.server.store.Save(ds.meta, state); err != nil {
 		log.Printf("Unable to save the state of %s: %v", ds.meta.Path, err)
 		failed = true
 	}
+	metrics.DocumentFlushDuration.Observe(time.Since(start).Seconds())
 	if failed {
+		metrics.DocumentFlushes.WithLabelValues(metrics.ResultError).Inc()
+		ds.server.logSyncEvent(SyncEvent{Kind: SyncEventFlushFailed, Path: ds.meta.Path, DurationMs: milliseconds(start)})
 		ds.scheduleFlushLocked()
 		return
 	}
+	metrics.DocumentFlushes.WithLabelValues(metrics.ResultOK).Inc()
+	metrics.DocumentStateSize.Observe(float64(len(state)))
+	ds.server.logSyncEvent(SyncEvent{Kind: SyncEventFlushed, Path: ds.meta.Path, Bytes: len(state), Heads: len(ds.doc.Heads()), DurationMs: milliseconds(start)})
 	ds.dirty = false
 }
 
@@ -327,6 +364,7 @@ func (ds *docSession) flushAfterDelay() {
 		if s.sessions[ds.meta.Path] == ds {
 			delete(s.sessions, ds.meta.Path)
 		}
+		s.logSyncEvent(SyncEvent{Kind: SyncEventUnloaded, Path: ds.meta.Path})
 	}
 }
 

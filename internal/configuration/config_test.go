@@ -38,6 +38,12 @@ mkdocs:
 	if c.Server.Host != "127.0.0.1" || c.Server.Port != 7413 {
 		t.Errorf("server = %+v", c.Server)
 	}
+	if c.Server.Metrics.Enabled || c.Server.Metrics.EventLog {
+		t.Errorf("metrics must be off by default: %+v", c.Server.Metrics)
+	}
+	if c.Server.Metrics.Host != "127.0.0.1" || c.Server.Metrics.Port != DefaultMetricsPort {
+		t.Errorf("metrics = %+v", c.Server.Metrics)
+	}
 	if len(c.Server.CORS.AllowedOrigins) != 1 || c.Server.CORS.AllowedOrigins[0] != "https://wiki.example.com" {
 		t.Errorf("cors = %+v", c.Server.CORS)
 	}

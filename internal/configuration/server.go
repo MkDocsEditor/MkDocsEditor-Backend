@@ -17,9 +17,22 @@ type (
 		// TrustedProxies are the addresses (CIDRs or IPs) of reverse proxies whose
 		// X-Forwarded-For and X-Forwarded-Proto headers are trusted
 		TrustedProxies []string `yaml:"trustedProxies"`
+		// Metrics configures the Prometheus metrics, see docs/metrics.md
+		Metrics MetricsConfiguration `yaml:"metrics"`
 		// Auth configures accounts and sessions, see docs/auth.md
 		Auth AuthConfiguration `yaml:"auth"`
 		CORS CorsConfiguration `yaml:"cors"`
+	}
+
+	MetricsConfiguration struct {
+		// Enabled serves /metrics on a port of its own
+		Enabled bool `yaml:"enabled"`
+		// Host the metrics server listens on (default: server.host)
+		Host string `yaml:"host"`
+		// Port the metrics server listens on (default 9413)
+		Port int `yaml:"port"`
+		// EventLog writes the sync events as JSON lines to stdout
+		EventLog bool `yaml:"eventLog"`
 	}
 
 	AuthConfiguration struct {

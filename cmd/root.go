@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -88,12 +91,26 @@ func runServer(cmd *cobra.Command, _ []string) error {
 
 	restService := backend.NewRestService(conf.Server, treeManager, syncServer, authenticator)
 
+	metricsServer, err := startMetricsServer(conf)
+	if err != nil {
+		return fmt.Errorf("unable to start the metrics server: %w", err)
+	}
+	if metricsServer != nil {
+		defer metricsServer.Shutdown(context.Background())
+	}
+	if conf.Server.Metrics.EventLog {
+		syncServer.SetEventLog(os.Stdout)
+	}
+
 	gitCommitter, err := startGitCommitter(conf, authenticator, syncServer)
 	if err != nil {
 		return err
 	}
 	if gitCommitter != nil {
 		restService.SetGitCommitter(gitCommitter)
+	}
+	if metricsServer != nil {
+		metrics.Registry.MustRegister(backend.NewMetricsCollector(syncServer, treeManager, gitCommitter))
 	}
 
 	// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents
@@ -134,6 +151,21 @@ func openAuthenticator(conf configuration.Configuration) (*auth.Service, error) 
 		}
 	}
 	return authenticator, nil
+}
+
+// startMetricsServer serves the metrics if they are enabled. It returns nil if not.
+func startMetricsServer(conf configuration.Configuration) (*metrics.Server, error) {
+	if !conf.Server.Metrics.Enabled {
+		return nil, nil
+	}
+	server, err := metrics.Listen(net.JoinHostPort(conf.Server.Metrics.Host, strconv.Itoa(conf.Server.Metrics.Port)))
+	if err != nil {
+		return nil, err
+	}
+	metrics.SetBuildInfo(global.Version, global.Commit)
+	go server.Serve()
+	log.Printf("Serving metrics at http://%s/metrics", server.Addr())
+	return server, nil
 }
 
 // startGitCommitter starts committing changes if git is enabled. It returns nil if not.

@@ -17,6 +17,17 @@ server:
   # X-Forwarded-Proto headers are trusted. Default: none, the TCP peer is the client.
   #trustedProxies:
   #  - "10.42.0.0/16"
+  # (optional) Prometheus metrics and the sync event log, see docs/metrics.md
+  #metrics:
+  #  # Serve /metrics on a port of its own. It has no authentication and tells usernames, so do
+  #  # not publish this port.
+  #  enabled: true
+  #  # Default: server.host
+  #  host: "0.0.0.0"
+  #  # Default: 9413
+  #  port: 9413
+  #  # Write the sync events as JSON lines to stdout, for a log system like Loki
+  #  eventLog: true
   # (optional) Accounts and login, see docs/auth.md. Accounts live in <stateDir>/auth.db.
   # Without any account, the backend starts in setup mode and prints a setup link for the
   # first admin (again with: mkdocsrest setup-link). Further users join by invite links.
