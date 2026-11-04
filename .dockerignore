@@ -1,7 +1,15 @@
 .git
+.github
+.claude
 .idea
 bin
 build
 dist
+docs
+interop
 mkdocsrest.yaml
-interop/node_modules
+mkdocsrest_example.yaml
+openapi-description.yaml
+redocly.yaml
+*.md
+**/*_test.go
