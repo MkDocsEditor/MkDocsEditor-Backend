@@ -89,7 +89,16 @@ type (
 		Item    *ItemRef  `json:"item"`
 		MovedAt time.Time `json:"movedAt"`
 	}
+
+	// MovedListResponse is the answer of GET /moved/?id=…&id=…
+	MovedListResponse struct {
+		Moved []*MovedResponse `json:"moved"`
+	}
 )
+
+// maxMovedLookupIDs is the limit of ids in one GET /moved/ request. At 20 digits per id the
+// request line stays below the 8 KiB that common reverse proxies allow.
+const maxMovedLookupIDs = 200
 
 // moveError is a rejected move with its answer
 type moveError struct {

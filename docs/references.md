@@ -484,6 +484,27 @@ at an old path, the old id belongs to it.
 is an old id of an item that still exists, otherwise `404`. A current id also answers
 `404`: it has not moved.
 
+`GET /moved/?id=<id>&id=<id>…` (readers too) asks about several ids in one request, for
+clients that hold many local copies:
+
+```json
+{ "moved": [ { "oldId": "577…", "type": "document", "item": { "type": "document", "id": "130…", "path": "Handbuch/guide/setup.md", "name": "setup" }, "movedAt": "2026-11-01T10:00:00Z" } ] }
+```
+
+- Each element of `moved` is the `200` answer of `GET /moved/{id}/` for that id, in the
+  order of the request. An id appears at most once, also when the request repeats it.
+- An id without an element would answer `404` there: it is current, unknown or gone. The
+  answer does not say which. `moved` is `[]` when nothing moved or the request has no id.
+- At most 200 `id` parameters per request, repeats included. More answer `400`
+  `bad-request` with `details: {"reason": "too-many-ids", "maxIds": 200}`, and nothing is
+  resolved. Clients with more ids send several requests.
+- Authorization is that of `GET /moved/{id}/`. Every account may read every item, so no
+  answer depends on the user.
+- Any answer other than `200` says nothing about any of the ids: ask again later.
+- `features` of `GET /server-info/` (see [auth.md](auth.md)) contains `moved-lookup` on a
+  server with this route. On a server without it, use `GET /moved/{id}/`, which stays
+  available.
+
 Every `404` (`not-found`) of an item endpoint for an id that has a redirect carries it:
 
 ```json
@@ -703,6 +724,7 @@ Clients switch on `code` and `details.reason`.
 | HTTP | `code` | `details` | When |
 |---|---|---|---|
 | 400 | `bad-request` | `reason`: `invalid-name`, `blacklisted`, `into-itself`, `root`, `no-change`, `invalid-type` | invalid move |
+| 400 | `bad-request` | `reason: "too-many-ids"`, `maxIds` | more ids than `GET /moved/` allows |
 | 403 | `forbidden` | | readers |
 | 404 | `not-found` | `movedTo` (optional, see section 7) | unknown item or target section |
 | 409 | `conflict` | `reason: "exists"`, `path` | the new path exists |
@@ -742,7 +764,8 @@ resolve bookmarked old ids through `GET /moved/{id}/`.
 **Android:** for every document held offline, the next connection uses the stored id and
 epoch; follow `document-renamed` and re-key the stored copy before syncing. Run the
 re-key in the same transaction as the update of the stored document, so a crash in between
-cannot lose the copy.
+cannot lose the copy. To ask about many stored copies at once, use `GET /moved/?id=…&id=…`
+where `GET /server-info/` lists the feature `moved-lookup`.
 
 ## 13. Limits and future work
 

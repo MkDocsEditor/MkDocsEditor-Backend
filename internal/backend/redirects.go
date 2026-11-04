@@ -141,7 +141,11 @@ func (rs *RedirectStore) Resolve(id string, epoch string, r redirectResolver) (r
 // resolveRedirect returns the current item of an old id. With epoch set, only a document whose
 // Automerge state has that epoch matches.
 func (s *SyncServer) resolveRedirect(id string, epoch string) (*ItemRef, RedirectEntry, bool) {
-	lookup := newTreeLookup(s.treeManager.Root())
+	return s.resolveRedirectIn(newTreeLookup(s.treeManager.Root()), id, epoch)
+}
+
+// resolveRedirectIn is resolveRedirect on an existing lookup of the tree
+func (s *SyncServer) resolveRedirectIn(lookup *treeLookup, id string, epoch string) (*ItemRef, RedirectEntry, bool) {
 	itemAt := func(itemType string, p string) *ItemRef {
 		switch itemType {
 		case TypeDocument:

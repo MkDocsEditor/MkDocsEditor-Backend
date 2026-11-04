@@ -220,6 +220,62 @@ func TestMoveSection(t *testing.T) {
 	}
 }
 
+func TestMovedList(t *testing.T) {
+	e := newRestTestEnv(t, withReferenceWiki(t), withTestUsers(t))
+	guide := findSectionByName(e.tm.Root(), "guide")
+	oldSetupID := e.docID("guide/setup.md")
+	indexID := e.docID("index.md")
+
+	e.user, e.pass = "anna", "pw-anna"
+	e.move(MoveRequest{Type: TypeSection, ID: guide.ID, Parent: RootSectionID, Name: "Anleitung"}, http.StatusOK)
+	newSetupID := e.docID("Anleitung/setup.md")
+
+	// readers may look up too; current, unknown and repeated ids are left out or answered once
+	e.user, e.pass = "kid", "pw-kid"
+	var list MovedListResponse
+	e.getJSON("/moved/?id="+oldSetupID+"&id="+indexID+"&id=unknown&id="+guide.ID+"&id="+oldSetupID, &list)
+	if len(list.Moved) != 2 {
+		t.Fatalf("moved: %+v", list.Moved)
+	}
+	document, section := list.Moved[0], list.Moved[1]
+	if document.OldID != oldSetupID || document.Type != TypeDocument || document.Item.ID != newSetupID || document.MovedAt.IsZero() {
+		t.Errorf("document: %+v", document)
+	}
+	if section.OldID != guide.ID || section.Type != TypeSection {
+		t.Errorf("section: %+v", section)
+	}
+
+	// the same answer as the lookup of one id
+	var single MovedResponse
+	e.getJSON("/moved/"+oldSetupID+"/", &single)
+	if single.Item.ID != document.Item.ID || !single.MovedAt.Equal(document.MovedAt) {
+		t.Errorf("single: %+v, list: %+v", single, document)
+	}
+
+	// nothing moved, or no ids: an empty list, not null
+	for _, path := range []string{"/moved/?id=" + indexID, "/moved/"} {
+		rec := e.do(http.MethodGet, path, nil, "")
+		expectStatus(t, rec, http.StatusOK)
+		if !strings.Contains(rec.Body.String(), `"moved": []`) {
+			t.Errorf("%s: %s", path, rec.Body.String())
+		}
+	}
+
+	// the limit
+	full := "/moved/?id=x" + strings.Repeat("&id=x", maxMovedLookupIDs-1)
+	expectStatus(t, e.do(http.MethodGet, full, nil, ""), http.StatusOK)
+	rec := e.do(http.MethodGet, full+"&id=x", nil, "")
+	expectStatus(t, rec, http.StatusBadRequest)
+	tooMany := decode[ErrorResult](t, rec)
+	if tooMany.Code != CodeBadRequest || tooMany.Details["reason"] != "too-many-ids" || tooMany.Details["maxIds"] != float64(maxMovedLookupIDs) {
+		t.Errorf("too many: %+v", tooMany)
+	}
+
+	// not without an account
+	e.user, e.pass = "", ""
+	expectStatus(t, e.do(http.MethodGet, "/moved/?id="+oldSetupID, nil, ""), http.StatusUnauthorized)
+}
+
 func TestMoveValidation(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
 	root := e.tm.Root()
