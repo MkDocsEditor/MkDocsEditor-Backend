@@ -269,6 +269,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/references/unused-resources/", rs.getUnusedResources)
 	echoRest.GET("/link/", rs.getLink)
 	echoRest.POST("/move/", rs.postMove)
+	echoRest.GET("/moved/", rs.getMovedList)
 	echoRest.GET("/moved/:"+urlParamID+"/", rs.getMoved)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
@@ -579,17 +580,47 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 // GET /moved/:id/: where the item with an old id is now
 func (rs *RestService) getMoved(c echo.Context) error {
 	id := c.Param(urlParamID)
-	notFound := func() error {
+	moved := rs.movedItem(newTreeLookup(rs.treeManager.Root()), id)
+	if moved == nil {
 		return apiError(c, http.StatusNotFound, CodeNotFound, "No moved item with id '"+id+"'", nil)
 	}
-	if newTreeLookup(rs.treeManager.Root()).item(id) != nil {
-		return notFound()
+	return c.JSONPretty(http.StatusOK, moved, jsonIndent)
+}
+
+// GET /moved/?id=…&id=…: GET /moved/:id/ for several ids in one request. Ids that have not
+// moved are left out of the answer.
+func (rs *RestService) getMovedList(c echo.Context) error {
+	ids := c.QueryParams()["id"]
+	if len(ids) > maxMovedLookupIDs {
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "too many ids", map[string]any{
+			"reason": "too-many-ids", "maxIds": maxMovedLookupIDs})
 	}
-	item, entry, ok := rs.sync.resolveRedirect(id, "")
+	lookup := newTreeLookup(rs.treeManager.Root())
+	result := &MovedListResponse{Moved: []*MovedResponse{}}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if moved := rs.movedItem(lookup, id); moved != nil {
+			result.Moved = append(result.Moved, moved)
+		}
+	}
+	return c.JSONPretty(http.StatusOK, result, jsonIndent)
+}
+
+// movedItem returns where the item with an old id is now, or nil if the id names an existing
+// item or has no redirect to an existing item
+func (rs *RestService) movedItem(lookup *treeLookup, id string) *MovedResponse {
+	if lookup.item(id) != nil {
+		return nil
+	}
+	item, entry, ok := rs.sync.resolveRedirectIn(lookup, id, "")
 	if !ok {
-		return notFound()
+		return nil
 	}
-	return c.JSONPretty(http.StatusOK, &MovedResponse{OldID: id, Type: item.Type, Item: item, MovedAt: entry.Time}, jsonIndent)
+	return &MovedResponse{OldID: id, Type: item.Type, Item: item, MovedAt: entry.Time}
 }
 
 // returns the per-character authorship of a document

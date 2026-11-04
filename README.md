@@ -172,6 +172,7 @@ checks that it lists exactly the routes the backend serves. Overview:
 | GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`, updates references), delete |
 | POST | `/move/` | Move or rename a section, document or resource and update every reference to it (`dryRun` for a preview) |
 | GET | `/moved/{id}/` | Where the item with an old id is now |
+| GET | `/moved/?id=&id=` | The same for up to 200 ids in one request; ids that have not moved are left out |
 | GET | `/resource/{id}/content/` | The file |
 
 # Contributing

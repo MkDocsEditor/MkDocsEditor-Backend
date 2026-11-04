@@ -27,7 +27,8 @@ func TestServerInfo(t *testing.T) {
 		info.WikiURL == nil || *info.WikiURL != "https://wiki.example.com" ||
 		info.WebClientURL == nil || *info.WebClientURL != testWebOrigin ||
 		!info.SetupRequired || info.AuthDisabled || !info.Passkeys.Enabled || info.Passkeys.RPID != "localhost" ||
-		strings.Join(info.LoginMethods, ",") != "password,passkey,device-link" || info.Require2FA {
+		strings.Join(info.LoginMethods, ",") != "password,passkey,device-link" || info.Require2FA ||
+		strings.Join(info.Features, ",") != FeatureMovedLookup {
 		t.Errorf("server info = %s", r.body)
 	}
 	// nothing about accounts

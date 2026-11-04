@@ -2186,6 +2186,42 @@ paths:
         "500":
           $ref: "#/components/responses/Error"
 
+  /moved/:
+    get:
+      summary: "Where several moved items are now"
+      description: |
+        `GET /moved/{itemId}/` for several ids in one request (docs/references.md section 7). An
+        id that would answer 404 there has no element in `moved`. `features` of
+        `GET /server-info/` contains `moved-lookup` on a server with this route.
+      operationId: getMovedList
+      tags: [ References ]
+      parameters:
+        - name: id
+          in: query
+          description: "The ids to look up, as a repeated parameter"
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 200
+            items:
+              type: string
+      responses:
+        "200":
+          description: "The ids that moved, in the order of the request, without repeats"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MovedList"
+        "400":
+          description: "More than 200 ids (`details.reason: too-many-ids`, `details.maxIds`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /moved/{itemId}/:
     parameters:
       - name: itemId
@@ -2733,6 +2769,15 @@ components:
           type: string
           format: date-time
 
+    MovedList:
+      type: object
+      required: [ moved ]
+      properties:
+        moved:
+          type: array
+          items:
+            $ref: "#/components/schemas/Moved"
+
     NewItemRequest:
       type: object
       required: [ parent, name ]
@@ -3207,7 +3252,7 @@ components:
 
     ServerInfo:
       type: object
-      required: [ name, version, protocolVersion, backendUrl, wikiUrl, webClientUrl, setupRequired, authDisabled, passkeys, loginMethods, require2FA ]
+      required: [ name, version, protocolVersion, backendUrl, wikiUrl, webClientUrl, setupRequired, authDisabled, passkeys, loginMethods, require2FA, features ]
       properties:
         name:
           type: string
@@ -3246,6 +3291,11 @@ components:
             enum: [ password, passkey, device-link ]
         require2FA:
           type: boolean
+        features:
+          type: array
+          description: "Optional API features of this server. Clients ignore names they do not know."
+          items:
+            type: string
 
     DeviceLink:
       type: object

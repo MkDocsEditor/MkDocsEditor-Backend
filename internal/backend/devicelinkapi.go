@@ -27,6 +27,7 @@ type (
 		Passkeys        PasskeyStatus `json:"passkeys"`
 		LoginMethods    []string      `json:"loginMethods"`
 		Require2FA      bool          `json:"require2FA"`
+		Features        []string      `json:"features"`
 	}
 
 	CreateDeviceLinkRequest struct {
@@ -58,6 +59,9 @@ type (
 
 // ConnectPayloadVersion is the version of the connect link payload
 const ConnectPayloadVersion = 1
+
+// FeatureMovedLookup in GET /server-info/ says that the server has GET /moved/?id=…&id=…
+const FeatureMovedLookup = "moved-lookup"
 
 func optionalString(s string) *string {
 	if s == "" {
@@ -120,6 +124,7 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 		Passkeys:        PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
 		LoginMethods:    methods,
 		Require2FA:      enabled && rs.authenticator.Require2FA(),
+		Features:        []string{FeatureMovedLookup},
 	}, jsonIndent)
 }
 

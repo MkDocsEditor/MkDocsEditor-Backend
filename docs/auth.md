@@ -711,7 +711,8 @@ provider (from the AAGUID) and absent for unknown authenticators.
  "backendUrl": "https://backend.wiki.markusressel.de", "wikiUrl": "https://wiki.markusressel.de",
  "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
  "passkeys": {"enabled": true, "rpId": "markusressel.de"},
- "loginMethods": ["password", "passkey", "device-link"], "require2FA": false}
+ "loginMethods": ["password", "passkey", "device-link"], "require2FA": false,
+ "features": ["moved-lookup"]}
 ```
 
 - `name`: `server.instanceName`, else the host of `wikiUrl`, else the host of
@@ -722,6 +723,10 @@ provider (from the AAGUID) and absent for unknown authenticators.
   published site. `webClientUrl`: `server.auth.clientUrl`. Each is `null` when unknown.
 - `loginMethods`: `password` (always, unless `authDisabled`), `passkey` (when passkeys
   are enabled), `device-link` (always, unless `authDisabled`). Empty with `authDisabled`.
+- `features`: optional API features of this server, for clients that also talk to older
+  servers. A server from before this field has none. Clients ignore names they do not
+  know. `moved-lookup`: `GET /moved/?id=…&id=…`, see
+  [references.md](references.md#7-ids-after-a-move-redirects).
 - Nothing secret and nothing about accounts (no user counts, no usernames). `/auth/status/`
   stays as it is; `/server-info/` is the superset for onboarding screens.
 
