@@ -67,7 +67,8 @@ jobs:
             GIT_REV=${{ github.sha }}
             BUILD_DATE=${{ steps.version.outputs.date }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Pull requests reuse the cache from master, writing it would take about 40 s per run.
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max' || '' }}
 
       - name: Smoke test the image
         if: github.event_name == 'pull_request'
