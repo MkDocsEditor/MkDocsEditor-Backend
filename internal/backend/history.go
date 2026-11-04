@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v4"
 )
 
@@ -220,7 +221,7 @@ func (rs *RestService) historyAuthor(sig GitSignature) HistoryAuthor {
 }
 
 // historyContext resolves the document and the repository of a history request
-func (rs *RestService) historyContext(c echo.Context) (*Document, string, *GitRepo, error) {
+func (rs *RestService) historyContext(c echo.Context) (*wiki.Document, string, *GitRepo, error) {
 	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -288,7 +289,7 @@ func (rs *RestService) getDocumentHistory(c echo.Context) error {
 }
 
 // revisionText returns the text of a document at a revision, or the live text for "current"
-func (rs *RestService) revisionText(d *Document, rel string, repo *GitRepo, revision string) (string, string, error) {
+func (rs *RestService) revisionText(d *wiki.Document, rel string, repo *GitRepo, revision string) (string, string, error) {
 	if revision == RevisionCurrent {
 		if text, ok := rs.sync.CurrentText(d); ok {
 			return text, rel, nil
@@ -392,7 +393,7 @@ func (rs *RestService) restoreDocumentRevision(c echo.Context) error {
 
 // ReplaceText changes the text of a document to text, as splices of a new server actor, so
 // connected clients merge it like any other change. The change counts for user in git.
-func (s *SyncServer) ReplaceText(d *Document, text string, user *auth.User, message string) error {
+func (s *SyncServer) ReplaceText(d *wiki.Document, text string, user *auth.User, message string) error {
 	return s.withSession(d, func(ds *docSession) error {
 		current, err := ds.text()
 		if err != nil {

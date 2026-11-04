@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 )
 
@@ -292,7 +293,7 @@ func (ds *docSession) writeToDiskLocked() error {
 	if text == ds.diskBaseText {
 		return nil
 	}
-	if err = WriteFile(ds.absPath, []byte(text)); err != nil {
+	if err = wiki.WriteFile(ds.absPath, []byte(text)); err != nil {
 		return err
 	}
 	ds.diskBaseText = text

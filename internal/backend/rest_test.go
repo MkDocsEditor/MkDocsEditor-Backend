@@ -15,6 +15,8 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -22,7 +24,7 @@ import (
 type restTestEnv struct {
 	t       *testing.T
 	project string
-	tm      *TreeManager
+	tm      *wiki.TreeManager
 	rs      *RestService
 	user    string
 	pass    string
@@ -38,7 +40,7 @@ func newRestTestEnv(t *testing.T, configure ...func(c *configuration.Configurati
 // authentication is off unless accounts is true (setup mode)
 func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *configuration.Configuration)) *restTestEnv {
 	t.Helper()
-	project := newTestWiki(t)
+	project := wikitest.New(t)
 	for _, f := range configure {
 		f(&configuration.CurrentConfig)
 	}
@@ -46,7 +48,7 @@ func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *co
 		// tests without users run without authentication, like before the account system
 		srv.Auth.Disabled = true
 	}
-	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	tm := wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
 	authenticator := newTestAuthenticator(t, filepath.Join(project, ".mkdocseditor"))
 	ss, err := NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
 	if err != nil {
@@ -116,23 +118,23 @@ func TestRestAliveAndTree(t *testing.T) {
 
 	rec := e.do(http.MethodGet, "/section/", nil, "")
 	expectStatus(t, rec, http.StatusOK)
-	root := decode[Section](t, rec)
-	if root.ID != RootSectionID || findSectionByName(&root, "guide") == nil {
+	root := decode[wiki.Section](t, rec)
+	if root.ID != wiki.RootSectionID || wikitest.FindSection(&root, "guide") == nil {
 		t.Fatalf("unexpected tree: %s", rec.Body.String())
 	}
 
-	guide := findSectionByName(&root, "guide")
+	guide := wikitest.FindSection(&root, "guide")
 	rec = e.do(http.MethodGet, "/section/"+guide.ID+"/", nil, "")
 	expectStatus(t, rec, http.StatusOK)
-	if decode[Section](t, rec).Name != "guide" {
+	if decode[wiki.Section](t, rec).Name != "guide" {
 		t.Error("wrong section returned")
 	}
 	expectStatus(t, e.do(http.MethodGet, "/section/unknown/", nil, ""), http.StatusNotFound)
 
-	setup := findDocumentByName(&root, "setup")
+	setup := wikitest.FindDocument(&root, "setup")
 	rec = e.do(http.MethodGet, "/document/"+setup.ID+"/", nil, "")
 	expectStatus(t, rec, http.StatusOK)
-	if decode[Document](t, rec).Name != "setup" {
+	if decode[wiki.Document](t, rec).Name != "setup" {
 		t.Error("wrong document returned")
 	}
 	rec = e.do(http.MethodGet, "/document/"+setup.ID+"/content/", nil, "")
@@ -143,7 +145,7 @@ func TestRestAliveAndTree(t *testing.T) {
 	expectStatus(t, e.do(http.MethodGet, "/document/unknown/", nil, ""), http.StatusNotFound)
 	expectStatus(t, e.do(http.MethodGet, "/document/unknown/content/", nil, ""), http.StatusNotFound)
 
-	png := findResourceByName(&root, "image.png")
+	png := wikitest.FindResource(&root, "image.png")
 	rec = e.do(http.MethodGet, "/resource/"+png.ID+"/", nil, "")
 	expectStatus(t, rec, http.StatusOK)
 	rec = e.do(http.MethodGet, "/resource/"+png.ID+"/content/", nil, "")
@@ -166,9 +168,9 @@ func TestRestMkDocsConfig(t *testing.T) {
 func TestRestSectionLifecycle(t *testing.T) {
 	e := newRestTestEnv(t)
 
-	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "notes"})
+	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: wiki.RootSectionID, Name: "notes"})
 	expectStatus(t, rec, http.StatusOK)
-	section := decode[Section](t, rec)
+	section := decode[wiki.Section](t, rec)
 	if section.Name != "notes" || section.ID == "" {
 		t.Fatalf("unexpected section: %+v", section)
 	}
@@ -176,13 +178,13 @@ func TestRestSectionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "notes"}), http.StatusConflict)
+	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: wiki.RootSectionID, Name: "notes"}), http.StatusConflict)
 	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
-	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "../x"}), http.StatusBadRequest)
+	expectStatus(t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: wiki.RootSectionID, Name: "../x"}), http.StatusBadRequest)
 
 	rec = e.doJSON(http.MethodPut, "/section/"+section.ID+"/", RenameRequest{Name: "journal"})
 	expectStatus(t, rec, http.StatusOK)
-	renamed := decode[Section](t, rec)
+	renamed := decode[wiki.Section](t, rec)
 	if renamed.Name != "journal" || renamed.ID == section.ID {
 		t.Fatalf("unexpected renamed section: %+v", renamed)
 	}
@@ -198,18 +200,18 @@ func TestRestSectionLifecycle(t *testing.T) {
 func TestRestDocumentLifecycle(t *testing.T) {
 	e := newRestTestEnv(t)
 
-	rec := e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "todo"})
+	rec := e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: wiki.RootSectionID, Name: "todo"})
 	expectStatus(t, rec, http.StatusOK)
-	doc := decode[Document](t, rec)
+	doc := decode[wiki.Document](t, rec)
 	if doc.Name != "todo" || doc.SubURL != "todo/" {
 		t.Fatalf("unexpected document: %+v", doc)
 	}
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "todo"}), http.StatusConflict)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: wiki.RootSectionID, Name: "todo"}), http.StatusConflict)
 	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: "unknown", Name: "x"}), http.StatusNotFound)
 
 	rec = e.doJSON(http.MethodPut, "/document/"+doc.ID+"/", RenameRequest{Name: "done"})
 	expectStatus(t, rec, http.StatusOK)
-	renamed := decode[Document](t, rec)
+	renamed := decode[wiki.Document](t, rec)
 	if renamed.Name != "done" {
 		t.Fatalf("unexpected renamed document: %+v", renamed)
 	}
@@ -234,9 +236,9 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	}
 	_, _ = fw.Write([]byte(binary))
 	_ = mw.Close()
-	rec := e.do(http.MethodPost, "/resource/"+RootSectionID+"/upload.bin/", &body, mw.FormDataContentType())
+	rec := e.do(http.MethodPost, "/resource/"+wiki.RootSectionID+"/upload.bin/", &body, mw.FormDataContentType())
 	expectStatus(t, rec, http.StatusOK)
-	res := decode[Resource](t, rec)
+	res := decode[wiki.Resource](t, rec)
 	if b, _ := os.ReadFile(filepath.Join(e.project, "docs", "upload.bin")); string(b) != binary {
 		t.Errorf("uploaded content = %q", b)
 	}
@@ -246,15 +248,15 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	mw = multipart.NewWriter(&body)
 	_ = mw.WriteField("file", "text content")
 	_ = mw.Close()
-	expectStatus(t, e.do(http.MethodPost, "/resource/"+RootSectionID+"/notes.txt/", &body, mw.FormDataContentType()), http.StatusOK)
+	expectStatus(t, e.do(http.MethodPost, "/resource/"+wiki.RootSectionID+"/notes.txt/", &body, mw.FormDataContentType()), http.StatusOK)
 	if b, _ := os.ReadFile(filepath.Join(e.project, "docs", "notes.txt")); string(b) != "text content" {
 		t.Errorf("uploaded content = %q", b)
 	}
 
 	// percent-encoded names are decoded, also without the trailing slash
 	for _, tc := range []struct{ path, name string }{
-		{"/resource/" + RootSectionID + "/Strand%20(2).png/", "Strand (2).png"},
-		{"/resource/" + RootSectionID + "/Gr%C3%BC%C3%9Fe%20%C3%A4.txt", "Grüße ä.txt"},
+		{"/resource/" + wiki.RootSectionID + "/Strand%20(2).png/", "Strand (2).png"},
+		{"/resource/" + wiki.RootSectionID + "/Gr%C3%BC%C3%9Fe%20%C3%A4.txt", "Grüße ä.txt"},
 	} {
 		body.Reset()
 		mw = multipart.NewWriter(&body)
@@ -262,7 +264,7 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 		_ = mw.Close()
 		rec = e.do(http.MethodPost, tc.path, &body, mw.FormDataContentType())
 		expectStatus(t, rec, http.StatusOK)
-		if got := decode[Resource](t, rec); got.Name != tc.name {
+		if got := decode[wiki.Resource](t, rec); got.Name != tc.name {
 			t.Errorf("resource name %q, want %q", got.Name, tc.name)
 		}
 		if _, err := os.Stat(filepath.Join(e.project, "docs", tc.name)); err != nil {
@@ -274,17 +276,17 @@ func TestRestResourceUploadAndRename(t *testing.T) {
 	_ = mw.WriteField("file", "x")
 	_ = mw.Close()
 	// an encoded slash decodes into the name and is rejected, not used as a folder
-	expectStatus(t, e.do(http.MethodPost, "/resource/"+RootSectionID+"/a%2Fb.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
+	expectStatus(t, e.do(http.MethodPost, "/resource/"+wiki.RootSectionID+"/a%2Fb.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
 
 	// missing field
 	body.Reset()
 	mw = multipart.NewWriter(&body)
 	_ = mw.Close()
-	expectStatus(t, e.do(http.MethodPost, "/resource/"+RootSectionID+"/empty.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
+	expectStatus(t, e.do(http.MethodPost, "/resource/"+wiki.RootSectionID+"/empty.txt/", &body, mw.FormDataContentType()), http.StatusBadRequest)
 
 	rec = e.doJSON(http.MethodPut, "/resource/"+res.ID+"/", RenameRequest{Name: "renamed.bin"})
 	expectStatus(t, rec, http.StatusOK)
-	renamed := decode[Resource](t, rec)
+	renamed := decode[wiki.Resource](t, rec)
 	if renamed.Name != "renamed.bin" {
 		t.Fatalf("unexpected resource: %+v", renamed)
 	}
@@ -339,13 +341,13 @@ func TestRestMultiUserAuth(t *testing.T) {
 	if u := decode[auth.User](t, rec); u.Username != "anna" || u.Role != auth.RoleEditor || u.DisplayName != "anna" || u.Color == "" {
 		t.Errorf("whoami = %+v", u)
 	}
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-anna"}), http.StatusOK)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: wiki.RootSectionID, Name: "by-anna"}), http.StatusOK)
 
 	// readers may read, but not change anything
 	e.user, e.pass = "kid", "pw-kid"
 	expectStatus(t, e.do(http.MethodGet, "/section/", nil, ""), http.StatusOK)
-	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: RootSectionID, Name: "by-kid"}), http.StatusForbidden)
-	expectStatus(t, e.do(http.MethodDelete, "/section/"+RootSectionID+"/", nil, ""), http.StatusForbidden)
+	expectStatus(t, e.doJSON(http.MethodPost, "/document/", NewItemRequest{Parent: wiki.RootSectionID, Name: "by-kid"}), http.StatusForbidden)
+	expectStatus(t, e.do(http.MethodDelete, "/section/"+wiki.RootSectionID+"/", nil, ""), http.StatusForbidden)
 	// but they may get a websocket ticket
 	expectStatus(t, e.do(http.MethodPost, "/auth/ws-ticket/", nil, ""), http.StatusOK)
 }

@@ -9,11 +9,12 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 const (
@@ -187,7 +188,7 @@ func (s *StateStore) RestoreDeleted(relPath string) (bool, error) {
 func (s *StateStore) Save(meta *DocumentMeta, doc []byte) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if err := WriteFile(s.docFile(s.activeDir(), meta.UUID), doc); err != nil {
+	if err := wiki.WriteFile(s.docFile(s.activeDir(), meta.UUID), doc); err != nil {
 		return err
 	}
 	if err := s.writeMeta(s.activeDir(), meta); err != nil {
@@ -202,7 +203,7 @@ func (s *StateStore) writeMeta(dir string, meta *DocumentMeta) error {
 	if err != nil {
 		return err
 	}
-	return WriteFile(s.metaFile(dir, meta.UUID), data)
+	return wiki.WriteFile(s.metaFile(dir, meta.UUID), data)
 }
 
 // Move updates the path of the document at oldPath, or of every document below it for a folder
@@ -210,7 +211,7 @@ func (s *StateStore) Move(oldPath string, newPath string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for p, meta := range s.index {
-		moved, ok := movePath(p, oldPath, newPath)
+		moved, ok := wiki.MovePath(p, oldPath, newPath)
 		if !ok {
 			continue
 		}
@@ -231,7 +232,7 @@ func (s *StateStore) Archive(relPath string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for p, meta := range s.index {
-		if !isInside(p, relPath) {
+		if !wiki.IsInside(p, relPath) {
 			continue
 		}
 		for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
@@ -258,17 +259,6 @@ func (s *StateStore) MarkCorrupt(meta *DocumentMeta) error {
 	}
 	delete(s.index, meta.Path)
 	return nil
-}
-
-// movePath maps p to its new path if p is oldPath or below it
-func movePath(p string, oldPath string, newPath string) (string, bool) {
-	if p == oldPath {
-		return newPath, true
-	}
-	if after, ok := strings.CutPrefix(p, oldPath+"/"); ok {
-		return path.Join(newPath, after), true
-	}
-	return "", false
 }
 
 func copyMeta(m *DocumentMeta) *DocumentMeta {
@@ -328,5 +318,5 @@ func ExcludeFromGit(projectPath string, stateDir string) error {
 		content += "\n"
 	}
 	content += "# MkDocsEditor backend state\n" + pattern + "\n"
-	return WriteFile(excludeFile, []byte(content))
+	return wiki.WriteFile(excludeFile, []byte(content))
 }

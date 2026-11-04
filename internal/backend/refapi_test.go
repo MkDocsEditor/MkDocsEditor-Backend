@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 )
 
 // referenceWikiFiles are added to the test wiki by withReferenceWiki
@@ -83,10 +85,10 @@ func TestDocumentReferences(t *testing.T) {
 		t.Errorf("setup: %+v %+v", setup, setup.Target)
 	}
 	// a folder link resolves to the section's index document
-	if rezepte.Target == nil || rezepte.Target.Type != TypeDocument || rezepte.Target.Path != "rezepte/index.md" {
+	if rezepte.Target == nil || rezepte.Target.Type != wiki.TypeDocument || rezepte.Target.Path != "rezepte/index.md" {
 		t.Errorf("rezepte: %+v", rezepte)
 	}
-	if logo.Kind != RefKindImage || logo.Target.Type != TypeResource || logo.Target.Name != "logo.png" {
+	if logo.Kind != RefKindImage || logo.Target.Type != wiki.TypeResource || logo.Target.Name != "logo.png" {
 		t.Errorf("logo: %+v", logo)
 	}
 	if broken.Status != RefStatusBroken || broken.Target != nil || broken.Reason != BrokenNotFound || broken.Path != "fehlt.md" {
@@ -110,7 +112,7 @@ func TestDocumentReferences(t *testing.T) {
 
 func TestBacklinks(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	logo := findResourceByName(e.tm.Root(), "logo.png")
+	logo := wikitest.FindResource(e.tm.Root(), "logo.png")
 
 	var result Backlinks
 	e.getJSON("/resource/"+logo.ID+"/backlinks/", &result)
@@ -130,9 +132,9 @@ func TestBacklinks(t *testing.T) {
 	}
 
 	// a section's backlinks include its index document and everything inside it
-	rezepte := findSectionByName(e.tm.Root(), "rezepte")
+	rezepte := wikitest.FindSection(e.tm.Root(), "rezepte")
 	e.getJSON("/section/"+rezepte.ID+"/backlinks/", &result)
-	if result.Item.Type != TypeSection || len(result.Backlinks) != 2 {
+	if result.Item.Type != wiki.TypeSection || len(result.Backlinks) != 2 {
 		t.Fatalf("section backlinks: %+v", result)
 	}
 	if b := result.Backlinks[0]; b.Source.Path != "index.md" || b.Target.Path != "rezepte/index.md" || b.Internal {
@@ -145,7 +147,7 @@ func TestBacklinks(t *testing.T) {
 	// readers may read backlinks
 	e2 := newRestTestEnv(t, withReferenceWiki(t), withTestUsers(t))
 	e2.user, e2.pass = "kid", "pw-kid"
-	if rec := e2.do(http.MethodGet, "/resource/"+findResourceByName(e2.tm.Root(), "logo.png").ID+"/backlinks/", nil, ""); rec.Code != http.StatusOK {
+	if rec := e2.do(http.MethodGet, "/resource/"+wikitest.FindResource(e2.tm.Root(), "logo.png").ID+"/backlinks/", nil, ""); rec.Code != http.StatusOK {
 		t.Errorf("reader: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -182,7 +184,7 @@ func TestLinkEndpoint(t *testing.T) {
 	setup := e.docID("guide/setup.md")
 
 	var result LinkResult
-	e.getJSON("/link/?from="+setup+"&to="+findResourceByName(root, "Strand (2).png").ID, &result)
+	e.getJSON("/link/?from="+setup+"&to="+wikitest.FindResource(root, "Strand (2).png").ID, &result)
 	if result.Destination != "../img/Strand%20%282%29.png" || result.Markdown != "![Strand (2)](../img/Strand%20%282%29.png)" {
 		t.Errorf("image: %+v", result)
 	}
@@ -190,11 +192,11 @@ func TestLinkEndpoint(t *testing.T) {
 	if result.Destination != "../rezepte/Käsekuchen.md#zutaten" || result.Markdown != "[Käsekuchen](../rezepte/Käsekuchen.md#zutaten)" {
 		t.Errorf("document: %+v", result)
 	}
-	e.getJSON("/link/?from="+setup+"&to="+findSectionByName(root, "rezepte").ID, &result)
-	if result.Destination != "../rezepte/index.md" || result.Target.Type != TypeSection {
+	e.getJSON("/link/?from="+setup+"&to="+wikitest.FindSection(root, "rezepte").ID, &result)
+	if result.Destination != "../rezepte/index.md" || result.Target.Type != wiki.TypeSection {
 		t.Errorf("section with index: %+v", result)
 	}
-	e.getJSON("/link/?from="+setup+"&to="+findSectionByName(root, "reference").ID, &result)
+	e.getJSON("/link/?from="+setup+"&to="+wikitest.FindSection(root, "reference").ID, &result)
 	if result.Destination != "../reference/" {
 		t.Errorf("section without index: %+v", result)
 	}
@@ -218,30 +220,30 @@ func TestTreeResourceFields(t *testing.T) {
 		t.Errorf("root: path %v index %v", root["path"], root["index"])
 	}
 	tree := e.tm.Root()
-	if s := findSectionByName(tree, "rezepte"); s.RelPath != "rezepte" || s.Index != e.docID("rezepte/index.md") {
+	if s := wikitest.FindSection(tree, "rezepte"); s.RelPath != "rezepte" || s.Index != e.docID("rezepte/index.md") {
 		t.Errorf("rezepte: %+v", s)
 	}
-	if s := findSectionByName(tree, "reference"); s.Index != "" {
+	if s := wikitest.FindSection(tree, "reference"); s.Index != "" {
 		t.Errorf("reference has index %q", s.Index)
 	}
-	if d := findDocumentByName(tree, "Käsekuchen"); d.RelPath != "rezepte/Käsekuchen.md" {
+	if d := wikitest.FindDocument(tree, "Käsekuchen"); d.RelPath != "rezepte/Käsekuchen.md" {
 		t.Errorf("document path %q", d.RelPath)
 	}
 	for name, want := range map[string][2]string{
-		"logo.png":       {"image/png", ResourceKindImage},
-		"unbenutzt.pdf":  {"application/pdf", ResourceKindPDF},
-		"beispiel.zip":   {"application/zip", ResourceKindArchive},
-		"Strand (2).png": {"image/png", ResourceKindImage},
+		"logo.png":       {"image/png", wiki.ResourceKindImage},
+		"unbenutzt.pdf":  {"application/pdf", wiki.ResourceKindPDF},
+		"beispiel.zip":   {"application/zip", wiki.ResourceKindArchive},
+		"Strand (2).png": {"image/png", wiki.ResourceKindImage},
 	} {
-		r := findResourceByName(tree, name)
+		r := wikitest.FindResource(tree, name)
 		if r.MimeType != want[0] || r.Kind != want[1] {
 			t.Errorf("%s: %s %s", name, r.MimeType, r.Kind)
 		}
 	}
-	if r := findResourceByName(tree, "Strand (2).png"); r.RelPath != "img/Strand (2).png" {
+	if r := wikitest.FindResource(tree, "Strand (2).png"); r.RelPath != "img/Strand (2).png" {
 		t.Errorf("resource path %q", r.RelPath)
 	}
-	if mimeTypeOf("x.unknownext") != mimeTypeUnknown || resourceKind(mimeTypeUnknown) != ResourceKindOther {
+	if wiki.MimeTypeOf("x.unknownext") != wiki.MimeTypeUnknown || wiki.ResourceKind(wiki.MimeTypeUnknown) != wiki.ResourceKindOther {
 		t.Error("unknown extension")
 	}
 }

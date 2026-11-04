@@ -1,4 +1,4 @@
-package backend
+package wiki
 
 import (
 	"mime"
@@ -16,7 +16,7 @@ const (
 	ResourceKindArchive = "archive"
 	ResourceKindOther   = "other"
 
-	mimeTypeUnknown = "application/octet-stream"
+	MimeTypeUnknown = "application/octet-stream"
 )
 
 // MIME types of common wiki files. The system's mime.types differs between hosts and is often
@@ -80,8 +80,8 @@ var mimeTypes = map[string]string{
 	".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
-// mimeTypeOf returns the MIME type of a file name, from its extension
-func mimeTypeOf(name string) string {
+// MimeTypeOf returns the MIME type of a file name, from its extension
+func MimeTypeOf(name string) string {
 	ext := strings.ToLower(path.Ext(name))
 	if t, ok := mimeTypes[ext]; ok {
 		return t
@@ -91,11 +91,11 @@ func mimeTypeOf(name string) string {
 			return mediaType
 		}
 	}
-	return mimeTypeUnknown
+	return MimeTypeUnknown
 }
 
-// resourceKind groups MIME types for icons and pickers
-func resourceKind(mimeType string) string {
+// ResourceKind groups MIME types for icons and pickers
+func ResourceKind(mimeType string) string {
 	switch {
 	case strings.HasPrefix(mimeType, "image/"):
 		return ResourceKindImage
@@ -113,4 +113,12 @@ func resourceKind(mimeType string) string {
 		return ResourceKindArchive
 	}
 	return ResourceKindOther
+}
+
+// thumbnailMimeTypes are the image types that get thumbnails
+var thumbnailMimeTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
+
+// HasThumbnail reports whether GET /resource/{id}/thumbnail/ works for a MIME type
+func HasThumbnail(mimeType string) bool {
+	return thumbnailMimeTypes[mimeType]
 }

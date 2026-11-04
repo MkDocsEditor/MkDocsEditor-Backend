@@ -17,6 +17,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"gopkg.in/yaml.v3"
@@ -59,7 +60,7 @@ type RestService struct {
 	allowedOrigins []string
 	trustedProxies []*net.IPNet
 	authenticator  *auth.Service
-	treeManager    *TreeManager
+	treeManager    *wiki.TreeManager
 	sync           *SyncServer
 	git            *GitCommitter
 	refs           *ReferenceIndex
@@ -71,7 +72,7 @@ type RestService struct {
 
 func NewRestService(
 	server configuration.ServerConfiguration,
-	treeManager *TreeManager,
+	treeManager *wiki.TreeManager,
 	syncServer *SyncServer,
 	authenticator *auth.Service,
 ) *RestService {
@@ -89,7 +90,7 @@ func NewRestService(
 		refs:           NewReferenceIndex(treeManager, syncServer),
 		thumbnailSlots: make(chan struct{}, maxConcurrentThumbnails),
 	}
-	treeManager.AddTreeChangeListener(func(_, newTree *Section) { rs.pruneThumbnails(newTree) })
+	treeManager.AddTreeChangeListener(func(_, newTree *wiki.Section) { rs.pruneThumbnails(newTree) })
 	rs.echoRest = rs.createRestService()
 	return rs
 }
@@ -284,13 +285,13 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	groupMkDocs.GET("/config/", rs.getMkDocsConfig)
 
 	groupSections.GET("/", rs.getTree)
-	groupSections.GET("/:"+urlParamID+"/", rs.describeItem(TypeSection))
+	groupSections.GET("/:"+urlParamID+"/", rs.describeItem(wiki.TypeSection))
 	groupSections.GET("/:"+urlParamID+"/backlinks/", rs.getSectionBacklinks)
 	groupSections.POST("/", rs.createSection)
-	groupSections.PUT("/:"+urlParamID+"/", rs.renameItem(TypeSection))
-	groupSections.DELETE("/:"+urlParamID+"/", rs.deleteItem(TypeSection))
+	groupSections.PUT("/:"+urlParamID+"/", rs.renameItem(wiki.TypeSection))
+	groupSections.DELETE("/:"+urlParamID+"/", rs.deleteItem(wiki.TypeSection))
 
-	groupDocuments.GET("/:"+urlParamID+"/", rs.describeItem(TypeDocument))
+	groupDocuments.GET("/:"+urlParamID+"/", rs.describeItem(wiki.TypeDocument))
 	groupDocuments.GET("/:"+urlParamID+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamID+"/content/", rs.getDocumentContent)
 	groupDocuments.GET("/:"+urlParamID+"/references/", rs.getDocumentReferences)
@@ -301,16 +302,16 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	groupDocuments.GET("/:"+urlParamID+"/history/:"+urlParamRevision+"/content/", rs.getDocumentRevisionContent)
 	groupDocuments.POST("/:"+urlParamID+"/history/:"+urlParamRevision+"/restore/", rs.restoreDocumentRevision)
 	groupDocuments.POST("/", rs.createDocument)
-	groupDocuments.PUT("/:"+urlParamID+"/", rs.renameItem(TypeDocument))
-	groupDocuments.DELETE("/:"+urlParamID+"/", rs.deleteItem(TypeDocument))
+	groupDocuments.PUT("/:"+urlParamID+"/", rs.renameItem(wiki.TypeDocument))
+	groupDocuments.DELETE("/:"+urlParamID+"/", rs.deleteItem(wiki.TypeDocument))
 
-	groupResources.GET("/:"+urlParamID+"/", rs.describeItem(TypeResource))
+	groupResources.GET("/:"+urlParamID+"/", rs.describeItem(wiki.TypeResource))
 	groupResources.GET("/:"+urlParamID+"/content/", rs.getResourceContent)
 	groupResources.GET("/:"+urlParamID+"/backlinks/", rs.getResourceBacklinks)
 	groupResources.GET("/:"+urlParamID+"/thumbnail/", rs.getResourceThumbnail)
 	groupResources.POST("/:"+urlParamParentID+"/:"+urlParamName+"/", rs.uploadNewResource)
-	groupResources.PUT("/:"+urlParamID+"/", rs.renameItem(TypeResource))
-	groupResources.DELETE("/:"+urlParamID+"/", rs.deleteItem(TypeResource))
+	groupResources.PUT("/:"+urlParamID+"/", rs.renameItem(wiki.TypeResource))
+	groupResources.DELETE("/:"+urlParamID+"/", rs.deleteItem(wiki.TypeResource))
 }
 
 // corsConfig builds the CORS configuration. With explicit origins, credentials are allowed,
@@ -383,15 +384,15 @@ func (rs *RestService) describeItem(itemType string) echo.HandlerFunc {
 		id := c.Param(urlParamID)
 		var result any
 		switch itemType {
-		case TypeSection:
+		case wiki.TypeSection:
 			if s := rs.treeManager.GetSection(id); s != nil {
 				result = s
 			}
-		case TypeDocument:
+		case wiki.TypeDocument:
 			if d := rs.treeManager.GetDocument(id); d != nil {
 				result = d
 			}
-		case TypeResource:
+		case wiki.TypeResource:
 			if r := rs.treeManager.GetResource(id); r != nil {
 				result = r
 			}
@@ -477,7 +478,7 @@ func (rs *RestService) renameItem(itemType string) echo.HandlerFunc {
 func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		id := c.Param(urlParamID)
-		path := rs.treeManager.itemPath(id, itemType)
+		path := rs.treeManager.ItemPath(id, itemType)
 		if path == "" {
 			return rs.ReturnNotFound(c, id)
 		}
@@ -547,11 +548,11 @@ func (rs *RestService) uploadNewResource(c echo.Context) error {
 func (rs *RestService) ReturnError(c echo.Context, e error) error {
 	var httpErr *echo.HTTPError
 	switch {
-	case errors.Is(e, ErrInvalidName):
+	case errors.Is(e, wiki.ErrInvalidName):
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, e.Error(), nil)
-	case errors.Is(e, ErrAlreadyExists):
+	case errors.Is(e, wiki.ErrAlreadyExists):
 		return apiError(c, http.StatusConflict, CodeConflict, e.Error(), nil)
-	case errors.Is(e, ErrNotFound):
+	case errors.Is(e, wiki.ErrNotFound):
 		return notFoundError(c, e.Error())
 	case errors.As(e, &httpErr) && httpErr.Code < http.StatusInternalServerError:
 		// c.Bind failed: a malformed body or an unsupported content type

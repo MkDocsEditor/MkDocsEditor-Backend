@@ -15,6 +15,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -37,7 +38,7 @@ const (
 // SyncServer serves the document websocket: Automerge sync, presence and the persistence of
 // the documents. See docs/sync-protocol.md.
 type SyncServer struct {
-	treeManager   *TreeManager
+	treeManager   *wiki.TreeManager
 	store         *StateStore
 	redirects     *RedirectStore
 	actors        *ActorRegistry
@@ -79,7 +80,7 @@ type SyncServer struct {
 }
 
 // NewSyncServer creates the sync server. stateDir holds the Automerge state.
-func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateDir string, allowedOrigins []string) (*SyncServer, error) {
+func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, stateDir string, allowedOrigins []string) (*SyncServer, error) {
 	if err := CheckStateDir(stateDir, treeManager.RootPath()); err != nil {
 		return nil, err
 	}
@@ -92,7 +93,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 		return nil, err
 	}
 	redirects, err := NewRedirectStore(stateDir, func(rel string) string {
-		return treeManager.idOfRelPath(rel)
+		return treeManager.IDOfRelPath(rel)
 	})
 	if err != nil {
 		return nil, err
@@ -121,7 +122,7 @@ func NewSyncServer(treeManager *TreeManager, authenticator *auth.Service, stateD
 		onlineChanges:    make(chan struct{}, 1),
 		eventsDone:       make(chan struct{}),
 	}
-	treeManager.AddTreeChangeListener(func(_, _ *Section) {
+	treeManager.AddTreeChangeListener(func(_, _ *wiki.Section) {
 		metrics.TreeRebuilds.Inc()
 		select {
 		case s.treeChanges <- struct{}{}:
@@ -318,7 +319,7 @@ func (s *SyncServer) Actors() []ActorInfo {
 }
 
 // CurrentText returns the live text of a loaded document. ok is false if it is not loaded.
-func (s *SyncServer) CurrentText(d *Document) (string, bool) {
+func (s *SyncServer) CurrentText(d *wiki.Document) (string, bool) {
 	rel, err := s.relPath(d.Path)
 	if err != nil {
 		return "", false
@@ -347,7 +348,7 @@ func (s *SyncServer) IsClientConnected(absPath string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for p, session := range s.sessions {
-		if rel == "." || isInside(p, rel) {
+		if rel == "." || wiki.IsInside(p, rel) {
 			session.mu.Lock()
 			n := len(session.conns)
 			session.mu.Unlock()
@@ -374,7 +375,7 @@ func (s *SyncServer) DeleteItem(absPath string, force bool, remove func() error)
 	defer s.mu.Unlock()
 	affected := map[string]*docSession{}
 	for p, session := range s.sessions {
-		if isInside(p, rel) {
+		if wiki.IsInside(p, rel) {
 			affected[p] = session
 			session.mu.Lock()
 			session.flushLocked()
@@ -476,7 +477,7 @@ func (s *SyncServer) Close() {
 func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
 	if s.treeManager.GetDocument(documentID) == nil {
 		// an old id is upgraded, so the client learns the new id after hello
-		if item, _, ok := s.resolveRedirect(documentID, ""); !ok || item.Type != TypeDocument {
+		if item, _, ok := s.resolveRedirect(documentID, ""); !ok || item.Type != wiki.TypeDocument {
 			return echo.ErrNotFound
 		}
 	}
@@ -495,7 +496,7 @@ func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
 }
 
 // join adds an authenticated connection to the session of its document, loading it if needed
-func (s *SyncServer) join(conn *wsConn, d *Document) (*docSession, error) {
+func (s *SyncServer) join(conn *wsConn, d *wiki.Document) (*docSession, error) {
 	rel, err := s.relPath(d.Path)
 	if err != nil {
 		return nil, err
@@ -528,7 +529,7 @@ func (s *SyncServer) join(conn *wsConn, d *Document) (*docSession, error) {
 
 // withSession runs f with the session of a document, holding its lock. A document that is not
 // loaded is loaded for the call and unloaded again afterwards.
-func (s *SyncServer) withSession(d *Document, f func(session *docSession) error) error {
+func (s *SyncServer) withSession(d *wiki.Document, f func(session *docSession) error) error {
 	rel, err := s.relPath(d.Path)
 	if err != nil {
 		return err

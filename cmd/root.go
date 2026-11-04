@@ -16,6 +16,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -60,7 +61,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	printStartupInfo()
 
 	conf := configuration.CurrentConfig
-	treeManager := backend.NewTreeManager(conf.MkDocs)
+	treeManager := wiki.NewTreeManager(conf.MkDocs)
 
 	if err := backend.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
 		return fmt.Errorf("invalid state directory: %w", err)
@@ -83,7 +84,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		log.Printf("Unable to add the state directory to .git/info/exclude: %v", err)
 	}
 
-	fileWatcher, err := backend.NewFileWatcher(conf.MkDocs.DocsPath, treeManager.CreateItemTree)
+	fileWatcher, err := wiki.NewFileWatcher(conf.MkDocs.DocsPath, treeManager.CreateItemTree)
 	if err != nil {
 		return fmt.Errorf("unable to watch the docs folder: %w", err)
 	}

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	"github.com/labstack/echo/v4"
 )
 
@@ -83,8 +85,8 @@ func withImages(t *testing.T) func(c *configuration.Configuration) {
 func TestResourceThumbnail(t *testing.T) {
 	e := newRestTestEnv(t, withImages(t))
 	tree := e.tm.Root()
-	photo := findResourceByName(tree, "Bild vom Strand.jpg")
-	if !photo.Thumbnail || findResourceByName(tree, "logo.svg").Thumbnail {
+	photo := wikitest.FindResource(tree, "Bild vom Strand.jpg")
+	if !photo.Thumbnail || wikitest.FindResource(tree, "logo.svg").Thumbnail {
 		t.Error("thumbnail flags")
 	}
 
@@ -116,15 +118,15 @@ func TestResourceThumbnail(t *testing.T) {
 	expectStatus(t, rec304, http.StatusNotModified)
 
 	// transparency stays: PNG; small images are not upscaled
-	rec = e.do(http.MethodGet, "/resource/"+findResourceByName(tree, "icon.png").ID+"/thumbnail/", nil, "")
+	rec = e.do(http.MethodGet, "/resource/"+wikitest.FindResource(tree, "icon.png").ID+"/thumbnail/", nil, "")
 	expectStatus(t, rec, http.StatusOK)
 	icon, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
 	if err != nil || rec.Header().Get("Content-Type") != "image/png" || icon.Bounds().Dx() != 100 {
 		t.Errorf("icon: %v %v", err, rec.Header())
 	}
 
-	expectStatus(t, e.do(http.MethodGet, "/resource/"+findResourceByName(tree, "logo.svg").ID+"/thumbnail/", nil, ""), http.StatusNotFound)
-	expectStatus(t, e.do(http.MethodGet, "/resource/"+findResourceByName(tree, "kaputt.png").ID+"/thumbnail/", nil, ""), http.StatusNotFound)
+	expectStatus(t, e.do(http.MethodGet, "/resource/"+wikitest.FindResource(tree, "logo.svg").ID+"/thumbnail/", nil, ""), http.StatusNotFound)
+	expectStatus(t, e.do(http.MethodGet, "/resource/"+wikitest.FindResource(tree, "kaputt.png").ID+"/thumbnail/", nil, ""), http.StatusNotFound)
 	expectStatus(t, e.do(http.MethodGet, "/resource/"+photo.ID+"/thumbnail/?size=5000", nil, ""), http.StatusBadRequest)
 	expectStatus(t, e.do(http.MethodGet, "/resource/nope/thumbnail/", nil, ""), http.StatusNotFound)
 }
@@ -154,7 +156,7 @@ func TestThumbnailsAreRemovedWithTheirResource(t *testing.T) {
 	}
 	get := func(name string) {
 		t.Helper()
-		r := findResourceByName(e.tm.Root(), name)
+		r := wikitest.FindResource(e.tm.Root(), name)
 		expectStatus(t, e.do(http.MethodGet, "/resource/"+r.ID+"/thumbnail/", nil, ""), http.StatusOK)
 	}
 	get("Bild vom Strand.jpg")
@@ -170,14 +172,14 @@ func TestThumbnailsAreRemovedWithTheirResource(t *testing.T) {
 	}
 
 	// deleted through the API
-	photo := findResourceByName(e.tm.Root(), "Bild vom Strand.jpg")
+	photo := wikitest.FindResource(e.tm.Root(), "Bild vom Strand.jpg")
 	expectStatus(t, e.do(http.MethodDelete, "/resource/"+photo.ID+"/", nil, ""), http.StatusOK)
 	if n := cached(); n != 1 {
 		t.Fatalf("%d cached thumbnails after the delete, want 1", n)
 	}
 
 	// changed on disk: the old version goes
-	icon := findResourceByName(e.tm.Root(), "icon.png")
+	icon := wikitest.FindResource(e.tm.Root(), "icon.png")
 	later := icon.ModTime.Add(time.Hour)
 	if err := os.Chtimes(icon.Path, later, later); err != nil {
 		t.Fatal(err)
@@ -201,7 +203,7 @@ func TestThumbnailsAreRemovedWithTheirResource(t *testing.T) {
 func TestThumbnailsOfAMovedResourceAreRemoved(t *testing.T) {
 	e := newRestTestEnv(t, withImages(t))
 	dir := filepath.Join(e.project, ".mkdocseditor", thumbnailsDir)
-	icon := findResourceByName(e.tm.Root(), "icon.png")
+	icon := wikitest.FindResource(e.tm.Root(), "icon.png")
 	expectStatus(t, e.do(http.MethodGet, "/resource/"+icon.ID+"/thumbnail/", nil, ""), http.StatusOK)
 	body := strings.NewReader(`{"name":"renamed.png"}`)
 	expectStatus(t, e.do(http.MethodPut, "/resource/"+icon.ID+"/", body, echo.MIMEApplicationJSON), http.StatusOK)
@@ -217,7 +219,7 @@ func TestThumbnailsOfAMovedResourceAreRemoved(t *testing.T) {
 // A request that waits for a thumbnail slot ends with the request
 func TestThumbnailWaitEndsWithTheRequest(t *testing.T) {
 	e := newRestTestEnv(t, withImages(t))
-	icon := findResourceByName(e.tm.Root(), "icon.png")
+	icon := wikitest.FindResource(e.tm.Root(), "icon.png")
 	for range cap(e.rs.thumbnailSlots) {
 		e.rs.thumbnailSlots <- struct{}{}
 	}
@@ -243,7 +245,7 @@ func TestThumbnailWaitEndsWithTheRequest(t *testing.T) {
 // A failed thumbnail does not keep its slot
 func TestThumbnailSlotIsReleasedAfterAFailure(t *testing.T) {
 	e := newRestTestEnv(t, withImages(t))
-	broken := &Resource{Path: filepath.Join(e.project, "does-not-exist.png")}
+	broken := &wiki.Resource{Path: filepath.Join(e.project, "does-not-exist.png")}
 	for range 2 * cap(e.rs.thumbnailSlots) {
 		if _, _, err := e.rs.renderThumbnail(context.Background(), broken, 64); err == nil {
 			t.Fatal("no error for a missing file")

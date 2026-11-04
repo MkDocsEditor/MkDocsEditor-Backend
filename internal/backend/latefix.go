@@ -17,7 +17,7 @@ func (s *SyncServer) movedTarget(sourcePath string, d destination) (movedReferen
 	if d.outside || !s.redirects.hasEntries() {
 		return movedReference{}, false
 	}
-	id := s.treeManager.idOfRelPath(d.path)
+	id := s.treeManager.IDOfRelPath(d.path)
 	item, _, ok := s.resolveRedirect(id, "")
 	if !ok {
 		return movedReference{}, false

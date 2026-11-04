@@ -15,6 +15,8 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/bcrypt"
@@ -25,7 +27,7 @@ import (
 type syncEnv struct {
 	t        *testing.T
 	project  string
-	tm       *TreeManager
+	tm       *wiki.TreeManager
 	ss       *SyncServer
 	rs       *RestService
 	http     *httptest.Server
@@ -41,7 +43,7 @@ var testPasswords = map[string]string{"alice": "alice-pw", "bob": "bob-pw", "car
 
 func newSyncEnv(t *testing.T) *syncEnv {
 	t.Helper()
-	project := newTestWiki(t)
+	project := wikitest.New(t)
 	cost := bcrypt.MinCost
 	hash := func(pw string) string {
 		h, err := bcrypt.GenerateFromPassword([]byte(pw), cost)
@@ -65,7 +67,7 @@ func newSyncEnv(t *testing.T) *syncEnv {
 
 func (e *syncEnv) start() {
 	e.t.Helper()
-	e.tm = NewTreeManager(configuration.CurrentConfig.MkDocs)
+	e.tm = wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
 	ss, err := NewSyncServer(e.tm, e.authn, e.stateDir, nil)
 	if err != nil {
 		e.t.Fatal(err)

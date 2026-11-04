@@ -1,4 +1,6 @@
-package backend
+// Package wiki is the file structure of a MkDocs project: the tree of sections, documents and
+// resources in the docs folder, and the file watcher that keeps it current.
+package wiki
 
 import (
 	"errors"
@@ -28,7 +30,7 @@ const (
 	// RootSectionID is the id of the root section of the tree
 	RootSectionID = "root"
 
-	markdownFileExtension = ".md"
+	MarkdownFileExtension = ".md"
 )
 
 var (
@@ -79,8 +81,8 @@ type (
 	}
 )
 
-// walk iterates over the section and all sections below it, parents first. A nil section is empty.
-func (s *Section) walk() iter.Seq[*Section] {
+// Walk iterates over the section and all sections below it, parents first. A nil section is empty.
+func (s *Section) Walk() iter.Seq[*Section] {
 	return func(yield func(*Section) bool) {
 		s.visit(yield)
 	}
@@ -130,6 +132,16 @@ func NewTreeManager(mkdocs configuration.MkDocsConfiguration) *TreeManager {
 	}
 	treeManager.CreateItemTree()
 	return treeManager
+}
+
+// LockFS serializes a change of the docs folder with the changes made through the TreeManager
+func (tm *TreeManager) LockFS() {
+	tm.fsLock.Lock()
+}
+
+// UnlockFS ends LockFS
+func (tm *TreeManager) UnlockFS() {
+	tm.fsLock.Unlock()
 }
 
 // RootPath returns the path of the docs folder
@@ -210,7 +222,7 @@ func (tm *TreeManager) populateItemTree(section *Section, path string, ignore fu
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		if strings.HasSuffix(info.Name(), markdownFileExtension) {
+		if strings.HasSuffix(info.Name(), MarkdownFileExtension) {
 			section.Documents = append(section.Documents, tm.createDocumentForTree(path, info))
 		} else {
 			section.Resources = append(section.Resources, tm.createResourceForTree(path, info))
@@ -220,8 +232,8 @@ func (tm *TreeManager) populateItemTree(section *Section, path string, ignore fu
 
 // setSectionIndexes sets the index document id of every section
 func setSectionIndexes(s *Section) {
-	for section := range s.walk() {
-		if d := sectionIndexDocument(section); d != nil {
+	for section := range s.Walk() {
+		if d := SectionIndexDocument(section); d != nil {
 			section.Index = d.ID
 		}
 	}
@@ -239,7 +251,7 @@ func (tm *TreeManager) relPath(absPath string) string {
 // newIgnoreMatcher returns a function that reports whether a path should be left out of the tree.
 // Hidden files and folders, the extra_css files of mkdocs.yml and the configured blacklist are ignored.
 func (tm *TreeManager) newIgnoreMatcher() func(path string) bool {
-	blocked := tm.blockedPaths()
+	blocked := tm.BlockedPaths()
 	return func(path string) bool {
 		if strings.HasPrefix(filepath.Base(path), ".") {
 			return true
@@ -252,8 +264,8 @@ func (tm *TreeManager) newIgnoreMatcher() func(path string) bool {
 	}
 }
 
-// blockedPaths are the paths that are no items: the blacklist and the extra_css files
-func (tm *TreeManager) blockedPaths() []string {
+// BlockedPaths are the paths that are no items: the blacklist and the extra_css files
+func (tm *TreeManager) BlockedPaths() []string {
 	blocked := slices.Clone(tm.mkdocs.Blacklist)
 	if extraCSS, err := readExtraCSS(tm.mkdocs.ConfigFile); err == nil {
 		blocked = append(blocked, extraCSS...)
@@ -274,8 +286,8 @@ func (tm *TreeManager) GenerateID(path string) string {
 	return createHash(path)
 }
 
-// idOfRelPath returns the item id of a path relative to the docs folder
-func (tm *TreeManager) idOfRelPath(rel string) string {
+// IDOfRelPath returns the item id of a path relative to the docs folder
+func (tm *TreeManager) IDOfRelPath(rel string) string {
 	return tm.GenerateID(filepath.Join(tm.rootPath, filepath.FromSlash(rel)))
 }
 
@@ -304,14 +316,14 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 
 	relPath := tm.relPath(documentPath)
 	var subURL strings.Builder
-	for element := range strings.SplitSeq(strings.TrimSuffix(relPath, markdownFileExtension), "/") {
+	for element := range strings.SplitSeq(strings.TrimSuffix(relPath, MarkdownFileExtension), "/") {
 		subURL.WriteString(url.PathEscape(element) + "/")
 	}
 
 	return &Document{
 		Type:     TypeDocument,
 		ID:       tm.GenerateID(documentPath),
-		Name:     strings.TrimSuffix(fileName, markdownFileExtension),
+		Name:     strings.TrimSuffix(fileName, MarkdownFileExtension),
 		Path:     documentPath,
 		RelPath:  relPath,
 		Filesize: f.Size(),
@@ -323,7 +335,7 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 // creates a resource object for storing in the tree
 func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileInfo) *Resource {
 	resourcePath := filepath.Join(parentFolderPath, f.Name())
-	mimeType := mimeTypeOf(f.Name())
+	mimeType := MimeTypeOf(f.Name())
 	return &Resource{
 		Type:      TypeResource,
 		ID:        tm.GenerateID(resourcePath),
@@ -333,14 +345,14 @@ func (tm *TreeManager) createResourceForTree(parentFolderPath string, f os.FileI
 		Filesize:  f.Size(),
 		ModTime:   f.ModTime(),
 		MimeType:  mimeType,
-		Kind:      resourceKind(mimeType),
-		Thumbnail: hasThumbnail(mimeType),
+		Kind:      ResourceKind(mimeType),
+		Thumbnail: HasThumbnail(mimeType),
 	}
 }
 
 // GetSection finds a section with the given id in the document tree
 func (tm *TreeManager) GetSection(id string) *Section {
-	for s := range tm.Root().walk() {
+	for s := range tm.Root().Walk() {
 		if s.ID == id {
 			return s
 		}
@@ -350,7 +362,7 @@ func (tm *TreeManager) GetSection(id string) *Section {
 
 // GetDocument finds a document with the given id in the document tree
 func (tm *TreeManager) GetDocument(id string) *Document {
-	for s := range tm.Root().walk() {
+	for s := range tm.Root().Walk() {
 		if i := slices.IndexFunc(s.Documents, func(d *Document) bool { return d.ID == id }); i >= 0 {
 			return s.Documents[i]
 		}
@@ -360,7 +372,7 @@ func (tm *TreeManager) GetDocument(id string) *Document {
 
 // GetResource finds a resource with the given id in the document tree
 func (tm *TreeManager) GetResource(id string) *Resource {
-	for s := range tm.Root().walk() {
+	for s := range tm.Root().Walk() {
 		if i := slices.IndexFunc(s.Resources, func(r *Resource) bool { return r.ID == id }); i >= 0 {
 			return s.Resources[i]
 		}
@@ -386,7 +398,7 @@ func ValidateName(name string) error {
 	return nil
 }
 
-func fileExists(filePath string) (bool, error) {
+func FileExists(filePath string) (bool, error) {
 	_, err := os.Stat(filePath)
 	if err == nil {
 		return true, nil
@@ -407,7 +419,7 @@ func (tm *TreeManager) newChildPath(parentSectionID string, fileName string) (st
 		return "", fmt.Errorf("%w: parent section %s", ErrNotFound, parentSectionID)
 	}
 	filePath := filepath.Join(parent.Path, fileName)
-	exists, err := fileExists(filePath)
+	exists, err := FileExists(filePath)
 	if err != nil {
 		return "", err
 	}
@@ -441,7 +453,7 @@ func (tm *TreeManager) CreateDocument(parentSectionID string, documentName strin
 	if err := ValidateName(documentName); err != nil {
 		return nil, err
 	}
-	documentPath, err := tm.newChildPath(parentSectionID, documentName+markdownFileExtension)
+	documentPath, err := tm.newChildPath(parentSectionID, documentName+MarkdownFileExtension)
 	if err != nil {
 		return nil, err
 	}
@@ -482,8 +494,8 @@ func (tm *TreeManager) CreateResource(parentSectionID string, resourceName strin
 	return tm.GetResource(tm.GenerateID(resourcePath)), nil
 }
 
-// itemPath returns the path of the item with the given id and type, or "" if there is none
-func (tm *TreeManager) itemPath(id string, itemType string) string {
+// ItemPath returns the path of the item with the given id and type, or "" if there is none
+func (tm *TreeManager) ItemPath(id string, itemType string) string {
 	switch itemType {
 	case TypeSection:
 		if s := tm.GetSection(id); s != nil {
@@ -510,7 +522,7 @@ func (tm *TreeManager) DeleteItem(id string, itemType string) (bool, error) {
 	if itemType == TypeSection && id == RootSectionID {
 		return false, fmt.Errorf("%w: the root section cannot be deleted", ErrInvalidName)
 	}
-	path := tm.itemPath(id, itemType)
+	path := tm.ItemPath(id, itemType)
 	if path == "" {
 		return false, nil
 	}
@@ -520,4 +532,18 @@ func (tm *TreeManager) DeleteItem(id string, itemType string) (bool, error) {
 	}
 	tm.CreateItemTree()
 	return true, nil
+}
+
+// SectionIndexDocument returns the index document of a section (index.md, else README.md), or nil
+func SectionIndexDocument(s *Section) *Document {
+	var readme *Document
+	for _, d := range s.Documents {
+		switch d.Name + MarkdownFileExtension {
+		case "index.md":
+			return d
+		case "README.md":
+			readme = d
+		}
+	}
+	return readme
 }
