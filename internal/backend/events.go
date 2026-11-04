@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/labstack/echo/v4"
 )
 
@@ -42,6 +43,7 @@ func (s *SyncServer) HandleEventsWebsocket(c echo.Context) error {
 		return nil
 	}
 	ws.SetReadLimit(maxEventMessageSize)
+	metrics.WebsocketConnections.WithLabelValues(metrics.ConnectionEvents).Inc()
 	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
 	go conn.writeLoop()
 	conn.runEvents()

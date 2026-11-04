@@ -1,0 +1,204 @@
+package backend
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/gorilla/websocket"
+	"github.com/labstack/echo/v4"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// unmatchedRoute is the route label of requests that match no route. The request path is never
+// a label: anyone could create new time series with it.
+const unmatchedRoute = "unmatched"
+
+// httpMetrics counts the requests by route pattern. It must run outside the middleware that
+// turns errors into responses, so it sees the final status.
+func (rs *RestService) httpMetrics(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		start := time.Now()
+		err := next(c)
+
+		req := c.Request()
+		route := c.Path()
+		if _, ok := rs.knownRoutes[route]; !ok {
+			route = unmatchedRoute
+		}
+		status := c.Response().Status
+		isWebsocket := websocket.IsWebSocketUpgrade(req)
+		if isWebsocket && status == http.StatusOK {
+			// a successful upgrade hijacks the connection and leaves the status untouched
+			status = http.StatusSwitchingProtocols
+		}
+		method := metricsMethod(req.Method)
+		metrics.HTTPRequests.WithLabelValues(method, route, strconv.Itoa(status)).Inc()
+		if !isWebsocket {
+			metrics.HTTPRequestDuration.WithLabelValues(method, route).Observe(time.Since(start).Seconds())
+		}
+		return err
+	}
+}
+
+// metricsMethod returns the method label. Clients can send any method name, so the ones the API
+// does not use are collected in one value.
+func metricsMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return "other"
+}
+
+// knownRoutesOf returns the route patterns of a server
+func knownRoutesOf(e *echo.Echo) map[string]struct{} {
+	known := map[string]struct{}{}
+	for _, r := range e.Routes() {
+		known[r.Path] = struct{}{}
+	}
+	return known
+}
+
+// syncStats is the current state of the sync server
+type syncStats struct {
+	loadedDocuments int
+	dirtyDocuments  int
+	writers         int
+	readers         int
+	onlineUsers     int
+	eventListeners  int
+}
+
+func (s *SyncServer) stats() syncStats {
+	var stats syncStats
+	users := map[string]struct{}{}
+	s.mu.Lock()
+	for _, session := range s.sessions {
+		session.mu.Lock()
+		stats.loadedDocuments++
+		if session.dirty {
+			stats.dirtyDocuments++
+		}
+		for c := range session.conns {
+			if c.shadow != nil {
+				stats.readers++
+			} else {
+				stats.writers++
+			}
+			users[c.user.ID] = struct{}{}
+		}
+		session.mu.Unlock()
+	}
+	s.mu.Unlock()
+	stats.onlineUsers = len(users)
+
+	s.eventsMu.Lock()
+	stats.eventListeners = len(s.eventConns)
+	s.eventsMu.Unlock()
+	return stats
+}
+
+// countTree returns the number of sections, documents and resources below a section, itself
+// included
+func countTree(section *Section) (sections int, documents int, resources int) {
+	if section == nil {
+		return 0, 0, 0
+	}
+	sections, documents, resources = 1, len(section.Documents), len(section.Resources)
+	for _, sub := range section.Subsections {
+		s, d, r := countTree(sub)
+		sections += s
+		documents += d
+		resources += r
+	}
+	return sections, documents, resources
+}
+
+// pendingStats returns the number of documents with uncommitted changes and the number of
+// those changes
+func (c *GitCommitter) pendingStats() (documents int, changes int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.pending {
+		documents++
+		for _, n := range e.Changes {
+			changes += n
+		}
+	}
+	return documents, changes
+}
+
+// MetricsCollector reports the current state of the backend at scrape time, so these values
+// cannot drift away from it
+type MetricsCollector struct {
+	sync *SyncServer
+	tree *TreeManager
+	// git is nil if git is disabled
+	git *GitCommitter
+
+	loadedDocuments *prometheus.Desc
+	dirtyDocuments  *prometheus.Desc
+	connections     *prometheus.Desc
+	onlineUsers     *prometheus.Desc
+	eventListeners  *prometheus.Desc
+	treeItems       *prometheus.Desc
+	gitPendingDocs  *prometheus.Desc
+	gitPendingEdits *prometheus.Desc
+}
+
+// NewMetricsCollector creates the collector. git may be nil.
+func NewMetricsCollector(syncServer *SyncServer, tree *TreeManager, git *GitCommitter) *MetricsCollector {
+	desc := func(name string, help string, labels ...string) *prometheus.Desc {
+		return prometheus.NewDesc(metrics.Namespace+"_"+name, help, labels, nil)
+	}
+	return &MetricsCollector{
+		sync:            syncServer,
+		tree:            tree,
+		git:             git,
+		loadedDocuments: desc("documents_loaded", "Documents loaded in memory."),
+		dirtyDocuments:  desc("documents_dirty", "Loaded documents with changes that are not on disk yet."),
+		connections:     desc("document_connections", "Open document websockets, by access (write, read).", "access"),
+		onlineUsers:     desc("users_online", "Distinct users with a document open."),
+		eventListeners:  desc("event_connections", "Open events websockets."),
+		treeItems:       desc("tree_items", "Items in the wiki, by type (section, document, resource).", "type"),
+		gitPendingDocs:  desc("git_pending_documents", "Documents with changes that are not committed yet."),
+		gitPendingEdits: desc("git_pending_changes", "Automerge changes that are not committed yet."),
+	}
+}
+
+// Describe implements prometheus.Collector
+func (m *MetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	for _, d := range []*prometheus.Desc{
+		m.loadedDocuments, m.dirtyDocuments, m.connections, m.onlineUsers, m.eventListeners,
+		m.treeItems, m.gitPendingDocs, m.gitPendingEdits,
+	} {
+		ch <- d
+	}
+}
+
+// Collect implements prometheus.Collector
+func (m *MetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	gauge := func(d *prometheus.Desc, value int, labels ...string) {
+		ch <- prometheus.MustNewConstMetric(d, prometheus.GaugeValue, float64(value), labels...)
+	}
+	stats := m.sync.stats()
+	gauge(m.loadedDocuments, stats.loadedDocuments)
+	gauge(m.dirtyDocuments, stats.dirtyDocuments)
+	gauge(m.connections, stats.writers, "write")
+	gauge(m.connections, stats.readers, "read")
+	gauge(m.onlineUsers, stats.onlineUsers)
+	gauge(m.eventListeners, stats.eventListeners)
+
+	sections, documents, resources := countTree(m.tree.Root())
+	gauge(m.treeItems, sections, "section")
+	gauge(m.treeItems, documents, "document")
+	gauge(m.treeItems, resources, "resource")
+
+	if m.git != nil {
+		pendingDocuments, pendingChanges := m.git.pendingStats()
+		gauge(m.gitPendingDocs, pendingDocuments)
+		gauge(m.gitPendingEdits, pendingChanges)
+	}
+}

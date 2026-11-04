@@ -106,6 +106,13 @@ in the repository stays untouched, and changes made on disk (for example by `git
 are never committed by it. `git.push: true` pushes after each commit. The repository may
 belong to another user (an NFS volume), git's ownership check is skipped for it.
 
+### Metrics
+
+With `server.metrics.enabled: true` the backend serves Prometheus metrics at `/metrics` on a
+port of its own (default 9413), and `server.metrics.eventLog: true` writes every Automerge
+sync event as a JSON line to stdout. The metrics, the events and a Grafana setup are described
+in [`docs/metrics.md`](docs/metrics.md).
+
 ### Docker
 
 Run the service using Docker and mount the configuration file and the wiki folder:

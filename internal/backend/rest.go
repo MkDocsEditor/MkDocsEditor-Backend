@@ -63,6 +63,8 @@ type RestService struct {
 	sync           *SyncServer
 	git            *GitCommitter
 	refs           *ReferenceIndex
+	// knownRoutes are the route patterns, the only values of the metrics label "route"
+	knownRoutes map[string]struct{}
 	// thumbnailSlots limits concurrent image decoding
 	thumbnailSlots chan struct{}
 }
@@ -151,6 +153,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	// Root level middleware
 	echoRest.Pre(middleware.AddTrailingSlash())
 
+	echoRest.Use(rs.httpMetrics)
 	echoRest.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "0",
 		ContentTypeNosniff:    "nosniff",
@@ -188,6 +191,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	rs.registerAccountRoutes(echoRest)
 	rs.registerAdminRoutes(echoRest)
 	rs.registerContentRoutes(echoRest)
+	rs.knownRoutes = knownRoutesOf(echoRest)
 
 	return echoRest
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 )
 
 const gitPendingFile = "git-pending.json"
@@ -253,19 +254,27 @@ func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string,
 }
 
 func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string, body string) (string, error) {
+	start := time.Now()
 	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body)
+	metrics.GitCommitDuration.Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.GitCommits.WithLabelValues(metrics.ResultError).Inc()
 		log.Printf("Unable to commit %s: %v", strings.Join(paths, ", "), err)
 		return "", err
 	}
 	if hash == "" {
+		metrics.GitCommits.WithLabelValues(metrics.ResultEmpty).Inc()
 		return "", nil
 	}
+	metrics.GitCommits.WithLabelValues(metrics.ResultOK).Inc()
 	log.Printf("Committed %q by %s", subject, author)
 	if c.opts.Push {
 		if err = c.repo.Push(c.opts.Remote, c.opts.Branch); err != nil {
 			// the commit stays, the next push takes it along
 			log.Printf("Unable to push: %v", err)
+			metrics.GitPushes.WithLabelValues(metrics.ResultError).Inc()
+		} else {
+			metrics.GitPushes.WithLabelValues(metrics.ResultOK).Inc()
 		}
 	}
 	return hash, nil

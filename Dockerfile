@@ -36,7 +36,8 @@ WORKDIR /app
 COPY --from=build /out/mkdocsrest /app/main
 
 USER 1000:1000
-EXPOSE 7413
+# 7413 is the API, 9413 the metrics (only with server.metrics.enabled)
+EXPOSE 7413 9413
 
 # The configuration is read from /app/mkdocsrest.yaml (mount it there).
 CMD ["/app/main"]
