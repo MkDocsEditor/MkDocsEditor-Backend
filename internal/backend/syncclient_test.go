@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -29,7 +30,7 @@ type syncEnv struct {
 	t        *testing.T
 	project  string
 	tm       *wiki.TreeManager
-	ss       *SyncServer
+	ss       *collab.SyncServer
 	rs       *RestService
 	http     *httptest.Server
 	authn    *auth.Service
@@ -69,7 +70,7 @@ func newSyncEnv(t *testing.T) *syncEnv {
 func (e *syncEnv) start() {
 	e.t.Helper()
 	e.tm = wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
-	ss, err := NewSyncServer(e.tm, e.authn, e.stateDir, nil)
+	ss, err := collab.NewSyncServer(e.tm, e.authn, e.stateDir, nil)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -260,7 +261,7 @@ func (c *testClient) send(m any) {
 func (c *testClient) process(m map[string]any) {
 	c.messages = append(c.messages, m)
 	switch m["type"] {
-	case MsgInitialContent:
+	case collab.MsgInitialContent:
 		epoch := m["epoch"].(string)
 		c.readOnly = m["readOnly"].(bool)
 		if c.doc == nil || epoch != c.epoch {
@@ -282,25 +283,25 @@ func (c *testClient) process(m map[string]any) {
 		}
 		c.syncState = automerge.NewSyncState(c.doc)
 		c.flush()
-	case MsgSyncRequest:
+	case collab.MsgSyncRequest:
 		raw, _ := base64.StdEncoding.DecodeString(m["syncMessage"].(string))
 		if _, err := c.syncState.ReceiveMessage(raw); err != nil {
 			c.failure = "receive: " + err.Error()
 			return
 		}
 		c.flush()
-	case MsgPresence:
+	case collab.MsgPresence:
 		c.presences[m["clientId"].(string)] = m
-	case MsgPresenceSnapshot:
+	case collab.MsgPresenceSnapshot:
 		for _, p := range m["peers"].([]any) {
 			pm := p.(map[string]any)
 			c.presences[pm["clientId"].(string)] = pm
 		}
-	case MsgPresenceLeave:
+	case collab.MsgPresenceLeave:
 		delete(c.presences, m["clientId"].(string))
-	case MsgActor:
+	case collab.MsgActor:
 		c.actors[m["actorId"].(string)] = m["username"].(string)
-	case MsgError:
+	case collab.MsgError:
 		c.errors = append(c.errors, m["code"].(string))
 	}
 }
@@ -315,7 +316,7 @@ func (c *testClient) flush() {
 		if !valid {
 			return
 		}
-		_ = c.ws.WriteJSON(map[string]any{"type": MsgSyncRequest, "documentId": "", "syncMessage": base64.StdEncoding.EncodeToString(msg.Bytes())})
+		_ = c.ws.WriteJSON(map[string]any{"type": collab.MsgSyncRequest, "documentId": "", "syncMessage": base64.StdEncoding.EncodeToString(msg.Bytes())})
 	}
 }
 
@@ -399,7 +400,7 @@ func (c *testClient) text() string {
 }
 
 func (c *testClient) textLocked() string {
-	s, err := contentText(c.doc)
+	s, err := collab.ContentText(c.doc)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -411,7 +412,7 @@ func (c *testClient) edit(f func(text *automerge.Text) error) {
 	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := f(c.doc.Path(contentKey).Text()); err != nil {
+	if err := f(c.doc.Path(collab.ContentKey).Text()); err != nil {
 		c.t.Fatal(err)
 	}
 	if _, err := c.doc.Commit("edit"); err != nil {

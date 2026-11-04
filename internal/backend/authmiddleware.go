@@ -497,3 +497,11 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 	c.Logger().Errorf("auth: %v", err)
 	return apiError(c, http.StatusInternalServerError, CodeInternal, "internal error", nil)
 }
+
+// sessionIDFromContext returns the id of the session that authenticated a request, or ""
+func sessionIDFromContext(c echo.Context) string {
+	if sess := SessionFromContext(c); sess != nil {
+		return sess.ID
+	}
+	return ""
+}

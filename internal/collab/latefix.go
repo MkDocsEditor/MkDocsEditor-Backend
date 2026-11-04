@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"log"
@@ -9,22 +9,22 @@ import (
 
 // movedReference describes where a broken reference's old path went
 type movedReference struct {
-	item        *references.ItemRef
-	destination string
+	Item        *references.ItemRef
+	Destination string
 }
 
-// movedTarget returns the item a broken destination's path was moved to, and the destination
+// MovedTarget returns the item a broken destination's path was moved to, and the destination
 // that points there from the document at sourcePath, see docs/references.md section 7
-func (s *SyncServer) movedTarget(sourcePath string, d references.Destination) (movedReference, bool) {
+func (s *SyncServer) MovedTarget(sourcePath string, d references.Destination) (movedReference, bool) {
 	if d.Outside || !s.redirects.hasEntries() {
 		return movedReference{}, false
 	}
 	id := s.treeManager.IDOfRelPath(d.Path)
-	item, _, ok := s.resolveRedirect(id, "")
+	item, _, ok := s.ResolveRedirect(id, "")
 	if !ok {
 		return movedReference{}, false
 	}
-	return movedReference{item: item, destination: references.RewriteDestination(d, sourcePath, item.Path)}, true
+	return movedReference{Item: item, Destination: references.RewriteDestination(d, sourcePath, item.Path)}, true
 }
 
 // lateFixEdits finds the broken references of a text whose path is the old path of a moved item
@@ -45,11 +45,11 @@ func (s *SyncServer) lateFixEdits(text string, sourcePath string) []references.T
 		if lookup.Resolve(d.Path) != nil {
 			continue
 		}
-		moved, ok := s.movedTarget(sourcePath, d)
+		moved, ok := s.MovedTarget(sourcePath, d)
 		if !ok {
 			continue
 		}
-		edits = append(edits, references.TextEdit{Start: r.Start, End: r.End, Replacement: r.EscapeReplacement(moved.destination), Line: r.Line})
+		edits = append(edits, references.TextEdit{Start: r.Start, End: r.End, Replacement: r.EscapeReplacement(moved.Destination), Line: r.Line})
 	}
 	sort.Slice(edits, func(i, j int) bool { return edits[i].Start < edits[j].Start })
 	return edits
@@ -62,7 +62,7 @@ func (ds *docSession) applyReferenceFixesLocked(text string, edits []references.
 	if err != nil {
 		return err
 	}
-	if err = references.SpliceEdits(fork.Path(contentKey).Text(), text, edits); err != nil {
+	if err = references.SpliceEdits(fork.Path(ContentKey).Text(), text, edits); err != nil {
 		return err
 	}
 	if _, err = fork.Commit("update references to moved items"); err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
@@ -64,7 +65,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	conf := configuration.CurrentConfig
 	treeManager := wiki.NewTreeManager(conf.MkDocs)
 
-	if err := backend.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
+	if err := collab.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
 		return fmt.Errorf("invalid state directory: %w", err)
 	}
 	if _, err := backend.ParseTrustedProxies(conf.Server.TrustedProxies); err != nil {
@@ -76,12 +77,12 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = authenticator.Close() }()
 
-	syncServer, err := backend.NewSyncServer(treeManager, authenticator, conf.MkDocs.StateDir, conf.Server.CORS.AllowedOrigins)
+	syncServer, err := collab.NewSyncServer(treeManager, authenticator, conf.MkDocs.StateDir, conf.Server.CORS.AllowedOrigins)
 	if err != nil {
 		return fmt.Errorf("unable to open the state directory: %w", err)
 	}
 	defer syncServer.Close()
-	if err = backend.ExcludeFromGit(conf.MkDocs.ProjectPath, conf.MkDocs.StateDir); err != nil {
+	if err = collab.ExcludeFromGit(conf.MkDocs.ProjectPath, conf.MkDocs.StateDir); err != nil {
 		log.Printf("Unable to add the state directory to .git/info/exclude: %v", err)
 	}
 
@@ -171,7 +172,7 @@ func startMetricsServer(conf configuration.Configuration) (*metrics.Server, erro
 }
 
 // startGitCommitter starts committing changes if git is enabled. It returns nil if not.
-func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *backend.SyncServer) (*gitstore.Committer, error) {
+func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *collab.SyncServer) (*gitstore.Committer, error) {
 	if !conf.Git.Enabled {
 		return nil, nil
 	}

@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"encoding/hex"

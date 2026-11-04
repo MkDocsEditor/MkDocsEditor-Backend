@@ -10,6 +10,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth/passkeytest"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 )
 
@@ -22,7 +23,7 @@ func TestServerInfo(t *testing.T) {
 	expect(t, r, http.StatusOK, "")
 	var info ServerInfoResponse
 	r.json(t, &info)
-	if info.Name != "wiki.example.com" || info.ProtocolVersion != ProtocolVersion || info.Version == "" ||
+	if info.Name != "wiki.example.com" || info.ProtocolVersion != collab.ProtocolVersion || info.Version == "" ||
 		info.BackendURL == nil || *info.BackendURL != "https://api.example.com" ||
 		info.WikiURL == nil || *info.WikiURL != "https://wiki.example.com" ||
 		info.WebClientURL == nil || *info.WebClientURL != testWebOrigin ||

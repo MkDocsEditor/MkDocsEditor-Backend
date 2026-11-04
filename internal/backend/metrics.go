@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -63,45 +64,6 @@ func knownRoutesOf(e *echo.Echo) map[string]struct{} {
 	return known
 }
 
-// syncStats is the current state of the sync server
-type syncStats struct {
-	loadedDocuments int
-	dirtyDocuments  int
-	writers         int
-	readers         int
-	onlineUsers     int
-	eventListeners  int
-}
-
-func (s *SyncServer) stats() syncStats {
-	var stats syncStats
-	users := map[string]struct{}{}
-	s.mu.Lock()
-	for _, session := range s.sessions {
-		session.mu.Lock()
-		stats.loadedDocuments++
-		if session.dirty {
-			stats.dirtyDocuments++
-		}
-		for c := range session.conns {
-			if c.shadow != nil {
-				stats.readers++
-			} else {
-				stats.writers++
-			}
-			users[c.user.ID] = struct{}{}
-		}
-		session.mu.Unlock()
-	}
-	s.mu.Unlock()
-	stats.onlineUsers = len(users)
-
-	s.eventsMu.Lock()
-	stats.eventListeners = len(s.eventConns)
-	s.eventsMu.Unlock()
-	return stats
-}
-
 // countTree returns the number of sections, documents and resources below a section, itself
 // included
 func countTree(section *wiki.Section) (sections int, documents int, resources int) {
@@ -121,7 +83,7 @@ func countTree(section *wiki.Section) (sections int, documents int, resources in
 // MetricsCollector reports the current state of the backend at scrape time, so these values
 // cannot drift away from it
 type MetricsCollector struct {
-	sync *SyncServer
+	sync *collab.SyncServer
 	tree *wiki.TreeManager
 	// git is nil if git is disabled
 	git *gitstore.Committer
@@ -137,7 +99,7 @@ type MetricsCollector struct {
 }
 
 // NewMetricsCollector creates the collector. git may be nil.
-func NewMetricsCollector(syncServer *SyncServer, tree *wiki.TreeManager, git *gitstore.Committer) *MetricsCollector {
+func NewMetricsCollector(syncServer *collab.SyncServer, tree *wiki.TreeManager, git *gitstore.Committer) *MetricsCollector {
 	desc := func(name string, help string, labels ...string) *prometheus.Desc {
 		return prometheus.NewDesc(metrics.Namespace+"_"+name, help, labels, nil)
 	}
@@ -171,13 +133,13 @@ func (m *MetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	gauge := func(d *prometheus.Desc, value int, labels ...string) {
 		ch <- prometheus.MustNewConstMetric(d, prometheus.GaugeValue, float64(value), labels...)
 	}
-	stats := m.sync.stats()
-	gauge(m.loadedDocuments, stats.loadedDocuments)
-	gauge(m.dirtyDocuments, stats.dirtyDocuments)
-	gauge(m.connections, stats.writers, "write")
-	gauge(m.connections, stats.readers, "read")
-	gauge(m.onlineUsers, stats.onlineUsers)
-	gauge(m.eventListeners, stats.eventListeners)
+	stats := m.sync.Stats()
+	gauge(m.loadedDocuments, stats.LoadedDocuments)
+	gauge(m.dirtyDocuments, stats.DirtyDocuments)
+	gauge(m.connections, stats.Writers, "write")
+	gauge(m.connections, stats.Readers, "read")
+	gauge(m.onlineUsers, stats.OnlineUsers)
+	gauge(m.eventListeners, stats.EventListeners)
 
 	sections, documents, resources := countTree(m.tree.Root())
 	gauge(m.treeItems, sections, "section")

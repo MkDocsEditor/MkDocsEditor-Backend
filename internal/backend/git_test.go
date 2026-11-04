@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 )
 
@@ -21,7 +22,7 @@ func newGitEnv(t *testing.T, opts gitstore.CommitterOptions) *syncEnv {
 	e := newSyncEnv(t)
 	e.stop()
 	e.git0("init", "-q", "-b", "master")
-	if err := ExcludeFromGit(e.project, e.stateDir); err != nil {
+	if err := collab.ExcludeFromGit(e.project, e.stateDir); err != nil {
 		t.Fatal(err)
 	}
 	e.git0("add", "-A")

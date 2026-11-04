@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"encoding/json"
@@ -141,14 +141,14 @@ func (rs *RedirectStore) Resolve(id string, epoch string, r redirectResolver) (r
 	return resolved{}, false
 }
 
-// resolveRedirect returns the current item of an old id. With epoch set, only a document whose
+// ResolveRedirect returns the current item of an old id. With epoch set, only a document whose
 // Automerge state has that epoch matches.
-func (s *SyncServer) resolveRedirect(id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
-	return s.resolveRedirectIn(references.NewTreeLookup(s.treeManager.Root()), id, epoch)
+func (s *SyncServer) ResolveRedirect(id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
+	return s.ResolveRedirectIn(references.NewTreeLookup(s.treeManager.Root()), id, epoch)
 }
 
-// resolveRedirectIn is resolveRedirect on an existing lookup of the tree
-func (s *SyncServer) resolveRedirectIn(lookup *references.TreeLookup, id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
+// ResolveRedirectIn is resolveRedirect on an existing lookup of the tree
+func (s *SyncServer) ResolveRedirectIn(lookup *references.TreeLookup, id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
 	itemAt := func(itemType string, p string) *references.ItemRef {
 		switch itemType {
 		case wiki.TypeDocument:
@@ -193,11 +193,11 @@ func (s *SyncServer) documentRedirect(documentID string, epoch string) string {
 	d := s.treeManager.GetDocument(documentID)
 	if d == nil {
 		if epoch != "" {
-			if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
+			if item, _, ok := s.ResolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
 				return item.ID
 			}
 		}
-		if item, _, ok := s.resolveRedirect(documentID, ""); ok && item.Type == wiki.TypeDocument {
+		if item, _, ok := s.ResolveRedirect(documentID, ""); ok && item.Type == wiki.TypeDocument {
 			return item.ID
 		}
 		return ""
@@ -206,7 +206,7 @@ func (s *SyncServer) documentRedirect(documentID string, epoch string) string {
 		return ""
 	}
 	// the client holds another lineage: the document that moved away from this path
-	if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
+	if item, _, ok := s.ResolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
 		return item.ID
 	}
 	return ""

@@ -1,23 +1,20 @@
-package backend
+package collab
 
 import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
-	"github.com/labstack/echo/v4"
 )
 
 // Reasons of rejected moves (details.reason), see docs/references.md section 11
@@ -83,39 +80,45 @@ type (
 		Type  string      `json:"type"`
 		Moves []MovedItem `json:"moves"`
 	}
-
-	// MovedResponse is the answer of GET /moved/{id}/
-	MovedResponse struct {
-		OldID   string              `json:"oldId"`
-		Type    string              `json:"type"`
-		Item    *references.ItemRef `json:"item"`
-		MovedAt time.Time           `json:"movedAt"`
-	}
-
-	// MovedListResponse is the answer of GET /moved/?id=…&id=…
-	MovedListResponse struct {
-		Moved []*MovedResponse `json:"moved"`
-	}
 )
 
-// maxMovedLookupIDs is the limit of ids in one GET /moved/ request. At 20 digits per id the
-// request line stays below the 8 KiB that common reverse proxies allow.
-const maxMovedLookupIDs = 200
+// MoveErrorKind says why a move was rejected
+type MoveErrorKind int
 
-// moveError is a rejected move with its answer
-type moveError struct {
-	status  int
-	code    string
-	message string
-	details map[string]any
+const (
+	// MoveInvalid is a move that makes no sense
+	MoveInvalid MoveErrorKind = iota
+	// MoveNotFound is a move of an item or into a section that does not exist
+	MoveNotFound
+	// MoveConflict is a move onto an existing item
+	MoveConflict
+)
+
+// MoveError is a rejected move
+type MoveError struct {
+	Kind    MoveErrorKind
+	Message string
+	Details map[string]any
 }
 
-func (e *moveError) Error() string {
-	return e.message
+func (e *MoveError) Error() string {
+	return e.Message
 }
 
-func badMove(reason string, message string) *moveError {
-	return &moveError{status: http.StatusBadRequest, code: CodeBadRequest, message: message, details: map[string]any{"reason": reason}}
+func badMove(reason string, message string) *MoveError {
+	return &MoveError{Kind: MoveInvalid, Message: message, Details: map[string]any{"reason": reason}}
+}
+
+// CompletedMove tells what a move did, for whoever commits and audits it
+type CompletedMove struct {
+	ItemType string
+	OldRel   string
+	NewRel   string
+	// Rename is true if the item stayed in its section
+	Rename bool
+	User   *auth.User
+	// ChangedPaths are the documents whose references were rewritten, with their new paths
+	ChangedPaths []string
 }
 
 // moveOp is a validated move
@@ -139,62 +142,10 @@ func (op *moveOp) mapPath(p string) string {
 	return p
 }
 
-// POST /move/
-func (rs *RestService) postMove(c echo.Context) error {
-	req := new(MoveRequest)
-	if err := c.Bind(req); err != nil {
-		return apiError(c, http.StatusBadRequest, CodeBadRequest, "invalid JSON", nil)
-	}
-	result, err := rs.performMove(c, req)
-	if err != nil {
-		return rs.moveFailed(c, req.ID, err)
-	}
-	return c.JSONPretty(http.StatusOK, result, jsonIndent)
-}
-
-// moveFailed answers a failed move
-func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
-	var me *moveError
-	switch {
-	case errors.As(err, &me):
-		if me.status == http.StatusNotFound {
-			return rs.ReturnNotFound(c, id)
-		}
-		return apiError(c, me.status, me.code, me.message, me.details)
-	case errors.Is(err, wiki.ErrNotFound):
-		return rs.ReturnNotFound(c, id)
-	}
-	log.Printf("Move of %s failed: %v", id, err)
-	return apiError(c, http.StatusInternalServerError, CodeInternal, "the move failed and was undone", nil)
-}
-
-// renameViaMove renames an item in place with reference rewriting and answers the renamed
-// item, like the rename endpoints always did
-func (rs *RestService) renameViaMove(c echo.Context, itemType string, name string) error {
-	id := c.Param(urlParamID)
-	lookup := references.NewTreeLookup(rs.treeManager.Root())
-	item := lookup.Item(id)
-	if item == nil || item.Type != itemType {
-		return rs.ReturnNotFound(c, id)
-	}
-	currentName := path.Base(item.Path)
-	if itemType == wiki.TypeDocument {
-		currentName = strings.TrimSuffix(currentName, wiki.MarkdownFileExtension)
-	}
-	if name == currentName {
-		return rs.describeItem(itemType)(c)
-	}
-	result, err := rs.performMove(c, &MoveRequest{Type: itemType, ID: id, Name: name})
-	if err != nil {
-		return rs.moveFailed(c, id, err)
-	}
-	return c.JSONPretty(http.StatusOK, result.Item, jsonIndent)
-}
-
-// performMove validates and runs a move, see docs/references.md section 5
-func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResult, error) {
-	s := rs.sync
-	tm := rs.treeManager
+// Move validates and runs a move, see docs/references.md section 5. A move that is not a dry run
+// returns what it did, so the caller can commit and audit it.
+func (s *SyncServer) Move(req *MoveRequest, user *auth.User) (*MoveResult, *CompletedMove, error) {
+	tm := s.treeManager
 
 	// lock order as everywhere: the sync server, then the docs folder
 	s.mu.Lock()
@@ -210,11 +161,11 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 	defer unlock()
 
 	lookup := references.NewTreeLookup(tm.Root())
-	op, err := rs.validateMove(lookup, req)
+	op, err := s.validateMove(lookup, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	op.user = UserFromContext(c)
+	op.user = user
 
 	result := &MoveResult{
 		DryRun:    op.dryRun,
@@ -223,14 +174,14 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 		NewID:     tm.GenerateID(op.newAbs),
 		OldPath:   op.oldRel,
 		NewPath:   op.newRel,
-		Moved:     rs.movedItems(lookup, op),
+		Moved:     s.movedItems(lookup, op),
 		Documents: []DocumentChange{},
 		Config:    []references.ConfigEdit{},
 	}
 
 	changes, err := s.applyMoveLocked(op, lookup, result)
 	if err != nil || op.dryRun {
-		return result, err
+		return result, nil, err
 	}
 	newLookup := references.NewTreeLookup(tm.Root())
 	switch op.itemType {
@@ -244,14 +195,16 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 	unlock()
 
 	s.broadcastEvent(&ItemsMovedMessage{Type: MsgItemsMoved, Moves: result.Moved})
-	result.Commit = rs.commitMove(op, changes, len(result.Config) > 0)
-	rs.auditMove(c, op, result)
-	return result, nil
+	completed := &CompletedMove{ItemType: op.itemType, OldRel: op.oldRel, NewRel: op.newRel, Rename: op.rename, User: op.user}
+	for _, pd := range changes {
+		completed.ChangedPaths = append(completed.ChangedPaths, pd.newRel)
+	}
+	return result, completed, nil
 }
 
 // validateMove checks a move request against the tree
-func (rs *RestService) validateMove(lookup *references.TreeLookup, req *MoveRequest) (*moveOp, error) {
-	tm := rs.treeManager
+func (s *SyncServer) validateMove(lookup *references.TreeLookup, req *MoveRequest) (*moveOp, error) {
+	tm := s.treeManager
 	switch req.Type {
 	case wiki.TypeSection, wiki.TypeDocument, wiki.TypeResource:
 	default:
@@ -262,7 +215,7 @@ func (rs *RestService) validateMove(lookup *references.TreeLookup, req *MoveRequ
 	}
 	item := lookup.Item(req.ID)
 	if item == nil || item.Type != req.Type {
-		return nil, &moveError{status: http.StatusNotFound}
+		return nil, &MoveError{Kind: MoveNotFound}
 	}
 	oldRel, currentName := item.Path, item.Name
 
@@ -274,7 +227,7 @@ func (rs *RestService) validateMove(lookup *references.TreeLookup, req *MoveRequ
 	if req.Parent != "" {
 		parent := tm.GetSection(req.Parent)
 		if parent == nil {
-			return nil, &moveError{status: http.StatusNotFound, message: "unknown target section " + req.Parent}
+			return nil, &MoveError{Kind: MoveNotFound, Message: "unknown target section " + req.Parent}
 		}
 		parentRel = parent.RelPath
 	}
@@ -296,7 +249,7 @@ func (rs *RestService) validateMove(lookup *references.TreeLookup, req *MoveRequ
 		return nil, badMove(MoveReasonIntoItself, "a section cannot be moved into itself or a section below it")
 	}
 	blocked := tm.BlockedPaths()
-	for _, moved := range rs.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
+	for _, moved := range s.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
 		if slices.Contains(blocked, moved.NewPath) {
 			return nil, badMove(MoveReasonBlacklisted, moved.NewPath+" is on the blacklist or an extra_css file")
 		}
@@ -309,8 +262,8 @@ func (rs *RestService) validateMove(lookup *references.TreeLookup, req *MoveRequ
 	if exists, err := wiki.FileExists(newAbs); err != nil {
 		return nil, err
 	} else if exists && !sameFile(oldAbs, newAbs) {
-		return nil, &moveError{status: http.StatusConflict, code: CodeConflict, message: newRel + " already exists",
-			details: map[string]any{"reason": MoveReasonExists, "path": newRel}}
+		return nil, &MoveError{Kind: MoveConflict, Message: newRel + " already exists",
+			Details: map[string]any{"reason": MoveReasonExists, "path": newRel}}
 	}
 
 	return &moveOp{
@@ -338,14 +291,14 @@ func sameFile(a, b string) bool {
 }
 
 // movedItems lists the item and, for a section, everything inside it, sorted by old path
-func (rs *RestService) movedItems(lookup *references.TreeLookup, op *moveOp) []MovedItem {
+func (s *SyncServer) movedItems(lookup *references.TreeLookup, op *moveOp) []MovedItem {
 	var out []MovedItem
 	add := func(itemType string, rel string) {
 		newRel := op.mapPath(rel)
 		out = append(out, MovedItem{
 			Type:    itemType,
-			OldID:   rs.treeManager.IDOfRelPath(rel),
-			NewID:   rs.treeManager.IDOfRelPath(newRel),
+			OldID:   s.treeManager.IDOfRelPath(rel),
+			NewID:   s.treeManager.IDOfRelPath(newRel),
 			OldPath: rel,
 			NewPath: newRel,
 		})
@@ -631,10 +584,10 @@ func (s *SyncServer) prepareRewrite(pd *plannedDocument, op *moveOp) (*automerge
 	if err != nil {
 		return nil, err
 	}
-	if err = references.SpliceEdits(fork.Path(contentKey).Text(), pd.text, pd.edits); err != nil {
+	if err = references.SpliceEdits(fork.Path(ContentKey).Text(), pd.text, pd.edits); err != nil {
 		return nil, err
 	}
-	got, err := contentText(fork)
+	got, err := ContentText(fork)
 	if err != nil {
 		return nil, err
 	}
@@ -703,58 +656,4 @@ func (s *SyncServer) redirectEntries(op *moveOp, moved []MovedItem) []RedirectEn
 		entries = append(entries, e)
 	}
 	return entries
-}
-
-// commitMove commits the move with the rewritten documents and mkdocs.yml
-func (rs *RestService) commitMove(op *moveOp, changed []*plannedDocument, configChanged bool) string {
-	if rs.git == nil {
-		return ""
-	}
-	verb := "Move"
-	if op.rename {
-		verb = "Rename"
-	}
-	paths := []string{op.oldRel, op.newRel}
-	var listed []string
-	for _, pd := range changed {
-		paths = append(paths, pd.newRel)
-		listed = append(listed, pd.newRel)
-	}
-	sort.Strings(listed)
-	if configChanged {
-		if rel, err := filepath.Rel(rs.treeManager.RootPath(), rs.treeManager.ConfigFile()); err == nil {
-			paths = append(paths, filepath.ToSlash(rel))
-			listed = append(listed, filepath.Base(rel))
-		}
-	}
-	body := ""
-	if len(listed) > 0 {
-		noun := "documents"
-		if len(changed) == 1 {
-			noun = "document"
-		}
-		body = fmt.Sprintf("Update references in %d %s:\n- %s", len(changed), noun, strings.Join(listed, "\n- "))
-	}
-	return rs.git.CommitTreeChangeWithBody(op.user, fmt.Sprintf("%s %s to %s", verb, op.oldRel, op.newRel), body, paths...)
-}
-
-// auditMove writes the audit log entry of a move
-func (rs *RestService) auditMove(c echo.Context, op *moveOp, result *MoveResult) {
-	eventType := auth.AuditItemMoved
-	if op.rename {
-		eventType = auth.AuditItemRenamed
-	}
-	actorID := ""
-	if op.user != nil {
-		actorID = op.user.ID
-	}
-	info := requestInfo(c)
-	rs.authenticator.Audit(auth.AuditEvent{Type: eventType, ActorID: actorID, IP: info.IP, UserAgent: info.UserAgent,
-		Details: map[string]any{
-			"type":      op.itemType,
-			"oldPath":   op.oldRel,
-			"newPath":   op.newRel,
-			"items":     len(result.Moved),
-			"documents": len(result.Documents),
-		}})
 }

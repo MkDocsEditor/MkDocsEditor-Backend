@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"unicode/utf8"
@@ -9,9 +9,9 @@ import (
 
 var dmp = diffmatchpatch.New()
 
-// spliceDiff changes text from oldText to newText with the smallest splices diff-match-patch finds.
+// SpliceDiff changes text from oldText to newText with the smallest splices diff-match-patch finds.
 // Positions are Unicode code points, as automerge-go expects. text must currently equal oldText.
-func spliceDiff(text *automerge.Text, oldText string, newText string) error {
+func SpliceDiff(text *automerge.Text, oldText string, newText string) error {
 	if oldText == newText {
 		return nil
 	}

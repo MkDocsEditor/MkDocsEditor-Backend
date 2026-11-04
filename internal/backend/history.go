@@ -233,37 +233,3 @@ func (rs *RestService) restoreDocumentRevision(c echo.Context) error {
 	rs.commitTree(c, "Restore %s to "+shortRevision(revision), d.Path)
 	return c.NoContent(http.StatusNoContent)
 }
-
-// ReplaceText changes the text of a document to text, as splices of a new server actor, so
-// connected clients merge it like any other change. The change counts for user in git.
-func (s *SyncServer) ReplaceText(d *wiki.Document, text string, user *auth.User, message string) error {
-	return s.withSession(d, func(ds *docSession) error {
-		current, err := ds.text()
-		if err != nil {
-			return err
-		}
-		if current == text {
-			return nil
-		}
-		fork, err := ds.forkForServerChangeLocked(ActorUserServer)
-		if err != nil {
-			return err
-		}
-		if err = spliceDiff(fork.Path(contentKey).Text(), current, text); err != nil {
-			return err
-		}
-		if _, err = fork.Commit(message + " by " + user.Username); err != nil {
-			return err
-		}
-		if _, err = ds.doc.Merge(fork); err != nil {
-			return err
-		}
-		ds.meta.LastChange = time.Now().UTC()
-		if s.changeRecorder != nil {
-			s.changeRecorder.RecordChanges(ds.meta.Path, map[string]int{user.ID: 1})
-		}
-		ds.broadcastSyncLocked()
-		ds.scheduleFlushLocked()
-		return nil
-	})
-}

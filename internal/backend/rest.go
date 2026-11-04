@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
@@ -63,7 +64,7 @@ type RestService struct {
 	trustedProxies []*net.IPNet
 	authenticator  *auth.Service
 	treeManager    *wiki.TreeManager
-	sync           *SyncServer
+	sync           *collab.SyncServer
 	git            *gitstore.Committer
 	refs           *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
@@ -75,7 +76,7 @@ type RestService struct {
 func NewRestService(
 	server configuration.ServerConfiguration,
 	treeManager *wiki.TreeManager,
-	syncServer *SyncServer,
+	syncServer *collab.SyncServer,
 	authenticator *auth.Service,
 ) *RestService {
 	trusted, err := ParseTrustedProxies(server.TrustedProxies)
@@ -490,7 +491,7 @@ func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
 			success, err = rs.treeManager.DeleteItem(id, itemType)
 			return err
 		})
-		if errors.Is(err, ErrDocumentInUse) {
+		if errors.Is(err, collab.ErrDocumentInUse) {
 			return apiError(c, http.StatusConflict, CodeConflict, err.Error()+" (use ?force=true to delete anyway)", nil)
 		}
 		if err != nil {
@@ -577,7 +578,7 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 		Message: "No item with id '" + id + "' found",
 	}
 	if references.NewTreeLookup(rs.treeManager.Root()).Item(id) == nil {
-		if item, _, ok := rs.sync.resolveRedirect(id, ""); ok {
+		if item, _, ok := rs.sync.ResolveRedirect(id, ""); ok {
 			result.Details = map[string]any{"movedTo": item}
 		}
 	}
@@ -623,7 +624,7 @@ func (rs *RestService) movedItem(lookup *references.TreeLookup, id string) *Move
 	if lookup.Item(id) != nil {
 		return nil
 	}
-	item, entry, ok := rs.sync.resolveRedirectIn(lookup, id, "")
+	item, entry, ok := rs.sync.ResolveRedirectIn(lookup, id, "")
 	if !ok {
 		return nil
 	}
@@ -650,9 +651,13 @@ func (rs *RestService) getActors(c echo.Context) error {
 }
 
 func (rs *RestService) handleEventsWebsocket(c echo.Context) error {
-	return rs.sync.HandleEventsWebsocket(c)
+	return rs.sync.HandleEventsWebsocket(c.Response(), c.Request(), UserFromContext(c), sessionIDFromContext(c))
 }
 
 func (rs *RestService) handleWebsocket(c echo.Context) error {
-	return rs.sync.HandleWebsocket(c, c.Param(urlParamID))
+	err := rs.sync.HandleWebsocket(c.Response(), c.Request(), UserFromContext(c), sessionIDFromContext(c), c.Param(urlParamID))
+	if errors.Is(err, wiki.ErrNotFound) {
+		return echo.ErrNotFound
+	}
+	return err
 }

@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"encoding/base64"
@@ -11,12 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 )
 
-const contentKey = "content"
+const ContentKey = "content"
 
 // ErrNotUTF8 is returned for files that cannot be edited because they are not valid UTF-8
 var ErrNotUTF8 = errors.New("the file is not valid UTF-8")
@@ -55,7 +56,7 @@ func (s *SyncServer) newDocument(text string) (*automerge.Doc, error) {
 	if err = doc.SetActorID(actor); err != nil {
 		return nil, err
 	}
-	if err = doc.Path(contentKey).Set(automerge.NewText(text)); err != nil {
+	if err = doc.Path(ContentKey).Set(automerge.NewText(text)); err != nil {
 		return nil, err
 	}
 	if _, err = doc.Commit("import"); err != nil {
@@ -110,7 +111,7 @@ func (s *SyncServer) openSession(relPath string, absPath string, docID string) (
 			session.diskBaseHeads, err = parseHeads(meta.DiskBaseHeads)
 		}
 		if err == nil {
-			session.diskBaseText, err = textAt(session.doc, session.diskBaseHeads)
+			session.diskBaseText, err = TextAt(session.doc, session.diskBaseHeads)
 		}
 	}
 	if err != nil && meta != nil {
@@ -173,8 +174,8 @@ func formatHeads(heads []automerge.ChangeHash) []string {
 	return out
 }
 
-// textAt returns the content text of the document as of the given heads
-func textAt(doc *automerge.Doc, heads []automerge.ChangeHash) (string, error) {
+// TextAt returns the content text of the document as of the given heads
+func TextAt(doc *automerge.Doc, heads []automerge.ChangeHash) (string, error) {
 	if len(heads) == 0 {
 		return "", errors.New("no heads")
 	}
@@ -182,24 +183,24 @@ func textAt(doc *automerge.Doc, heads []automerge.ChangeHash) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return contentText(fork)
+	return ContentText(fork)
 }
 
-// contentText returns the content text of a document
-func contentText(doc *automerge.Doc) (string, error) {
-	v, err := doc.Path(contentKey).Get()
+// ContentText returns the content text of a document
+func ContentText(doc *automerge.Doc) (string, error) {
+	v, err := doc.Path(ContentKey).Get()
 	if err != nil {
 		return "", err
 	}
 	if v.Kind() != automerge.KindText {
-		return "", fmt.Errorf("%s is a %v, not text", contentKey, v.Kind())
+		return "", fmt.Errorf("%s is a %v, not text", ContentKey, v.Kind())
 	}
 	return v.Text().Get()
 }
 
 // text returns the current content text
 func (ds *docSession) text() (string, error) {
-	return contentText(ds.doc)
+	return ContentText(ds.doc)
 }
 
 // ingestExternalLocked merges a new file content into the document as a change of the disk actor,
@@ -223,7 +224,7 @@ func (ds *docSession) ingestExternalLocked(fileText string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err = spliceDiff(fork.Path(contentKey).Text(), ds.diskBaseText, fileText); err != nil {
+	if err = SpliceDiff(fork.Path(ContentKey).Text(), ds.diskBaseText, fileText); err != nil {
 		return err
 	}
 	if _, err = fork.Commit("external change"); err != nil {
@@ -412,4 +413,38 @@ func (ds *docSession) countChangesLocked(changes []*automerge.Change) {
 
 func encodeBase64(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+// ReplaceText changes the text of a document to text, as splices of a new server actor, so
+// connected clients merge it like any other change. The change counts for user in git.
+func (s *SyncServer) ReplaceText(d *wiki.Document, text string, user *auth.User, message string) error {
+	return s.withSession(d, func(ds *docSession) error {
+		current, err := ds.text()
+		if err != nil {
+			return err
+		}
+		if current == text {
+			return nil
+		}
+		fork, err := ds.forkForServerChangeLocked(ActorUserServer)
+		if err != nil {
+			return err
+		}
+		if err = SpliceDiff(fork.Path(ContentKey).Text(), current, text); err != nil {
+			return err
+		}
+		if _, err = fork.Commit(message + " by " + user.Username); err != nil {
+			return err
+		}
+		if _, err = ds.doc.Merge(fork); err != nil {
+			return err
+		}
+		ds.meta.LastChange = time.Now().UTC()
+		if s.changeRecorder != nil {
+			s.changeRecorder.RecordChanges(ds.meta.Path, map[string]int{user.ID: 1})
+		}
+		ds.broadcastSyncLocked()
+		ds.scheduleFlushLocked()
+		return nil
+	})
 }

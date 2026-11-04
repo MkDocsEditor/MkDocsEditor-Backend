@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/gorilla/websocket"
@@ -528,7 +529,7 @@ func expectOnline(t *testing.T, ws *websocket.Conn) {
 	t.Helper()
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var m map[string]any
-	if err := ws.ReadJSON(&m); err != nil || m["type"] != MsgOnline {
+	if err := ws.ReadJSON(&m); err != nil || m["type"] != collab.MsgOnline {
 		t.Fatalf("first message %v, %v", m, err)
 	}
 }
@@ -551,7 +552,7 @@ func TestAccountWebsocketAuth(t *testing.T) {
 	// a foreign page cannot use the cookie
 	h = http.Header{"Origin": {"https://evil.example.com"}, "Cookie": {admin.cookie.String()}}
 	if ws, err = e.dialEvents(h, nil); err == nil {
-		if _, code := readUntilClose(t, ws, 5*time.Second); code != CloseUnauthorized {
+		if _, code := readUntilClose(t, ws, 5*time.Second); code != collab.CloseUnauthorized {
 			t.Errorf("foreign origin: close code %d", code)
 		}
 	}
@@ -568,7 +569,7 @@ func TestAccountWebsocketAuth(t *testing.T) {
 	var sessions []*auth.Session
 	r.json(t, &sessions)
 	expect(t, app.do(http.MethodDelete, "/account/sessions/"+sessions[0].ID+"/", nil), http.StatusNoContent, "")
-	if _, code := readUntilClose(t, ws, 5*time.Second); code != CloseUnauthorized {
+	if _, code := readUntilClose(t, ws, 5*time.Second); code != collab.CloseUnauthorized {
 		t.Errorf("after revoke: close code %d", code)
 	}
 
@@ -582,7 +583,7 @@ func TestAccountWebsocketAuth(t *testing.T) {
 	}
 	expectOnline(t, ws)
 	expect(t, admin.do(http.MethodPost, "/auth/logout/", nil), http.StatusNoContent, "")
-	if _, code := readUntilClose(t, ws, 5*time.Second); code != CloseUnauthorized {
+	if _, code := readUntilClose(t, ws, 5*time.Second); code != collab.CloseUnauthorized {
 		t.Errorf("after logout: close code %d", code)
 	}
 }
