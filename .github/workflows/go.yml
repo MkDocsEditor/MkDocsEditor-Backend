@@ -25,16 +25,31 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go (go.mod)
+        id: go-mod
         if: matrix.go == 'go.mod'
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Set up Go (stable)
+        id: go-stable
         if: matrix.go == 'stable'
         uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache: false
+
+      # Not the setup-go cache: its key is shared with the other jobs and whichever finishes first
+      # saves it, so it rarely holds the -race objects this job compiles.
+      - name: Cache the Go modules and the race build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-mod.outputs.go-version || steps.go-stable.outputs.go-version }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-mod.outputs.go-version || steps.go-stable.outputs.go-version }}-
 
       - name: Check go.mod is tidy
         run: |
@@ -124,34 +139,95 @@ jobs:
       - name: Run the interop test against the backend
         run: ./interop/run.sh
 
-  generate:
-    name: Generate cross-platform builds
-    runs-on: ubuntu-latest
-    needs: [ test, lint, interop ]
-    permissions:
-      contents: write
+  build:
+    name: Build (linux-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # automerge-go links a Rust static library through cgo, so each binary is built natively.
+        # The binaries link glibc dynamically, so both runners stay on the same Ubuntu release:
+        # it sets the oldest glibc the released binaries run on.
+        include:
+          - arch: amd64
+            runner: ubuntu-26.04
+          - arch: arm64
+            runner: ubuntu-26.04-arm
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v7
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
 
-      # automerge-go links a Rust static library through cgo, so cross compiling needs a C cross compiler
-      - name: Install the arm64 C cross compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      # Not the setup-go cache: its key is shared with the other jobs and whichever finishes first
+      # saves it, so it never holds the -trimpath objects this job compiles.
+      - name: Cache the Go modules and the release build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ matrix.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-build-${{ matrix.arch }}-${{ steps.go.outputs.go-version }}-
 
       - name: Build
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then VERSION="dev"; fi
           LDFLAGS="-w -s -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Version=${VERSION} -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Commit=${GITHUB_SHA::7} -X github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o ./dist/mkdocs-backend-linux-amd64 .
-          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc go build -trimpath -ldflags "${LDFLAGS}" -o ./dist/mkdocs-backend-linux-arm64 .
-          file ./dist/*
-          ./dist/mkdocs-backend-linux-amd64 --version
+          BINARY="./dist/mkdocs-backend-linux-${ARCH}"
+          CGO_ENABLED=1 GOOS=linux GOARCH="${ARCH}" go build -trimpath -ldflags "${LDFLAGS}" -o "${BINARY}" .
+          file "${BINARY}"
+          ldd --version | head -1
+          echo "newest glibc symbol: $(objdump -T "${BINARY}" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)"
+          "${BINARY}" --version
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: mkdocs-backend-linux-${{ matrix.arch }}
+          path: dist/mkdocs-backend-linux-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # A required status check. A job skipped because of a failed need counts as passed, so this one
+  # always runs and fails by itself, otherwise a failed build would not block the merge.
+  generate:
+    name: Generate cross-platform builds
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    needs: [ test, lint, interop, build ]
+    permissions:
+      contents: write
+    steps:
+      - name: Check that the tests and the builds passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "${RESULTS}"
+          for result in ${RESULTS}; do
+            [ "${result}" = "success" ]
+          done
+
+      - name: Checkout the repository
+        uses: actions/checkout@v7
+
+      - name: Download the binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: mkdocs-backend-linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Show the binaries
+        run: file dist/mkdocs-backend-linux-amd64 dist/mkdocs-backend-linux-arm64
 
       - name: Release
         uses: softprops/action-gh-release@v3
