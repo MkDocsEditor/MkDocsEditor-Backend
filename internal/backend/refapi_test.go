@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 )
@@ -80,7 +81,7 @@ func TestDocumentReferences(t *testing.T) {
 		t.Fatalf("got %+v", result)
 	}
 	setup, rezepte, logo, broken := result.References[0], result.References[1], result.References[2], result.References[3]
-	if setup.Kind != RefKindLink || setup.Line != 3 || setup.Column != 17 || setup.Destination != "guide/setup.md#install" ||
+	if setup.Kind != references.RefKindLink || setup.Line != 3 || setup.Column != 17 || setup.Destination != "guide/setup.md#install" ||
 		setup.Anchor != "install" || setup.Status != RefStatusOK || setup.Target.Path != "guide/setup.md" {
 		t.Errorf("setup: %+v %+v", setup, setup.Target)
 	}
@@ -88,10 +89,10 @@ func TestDocumentReferences(t *testing.T) {
 	if rezepte.Target == nil || rezepte.Target.Type != wiki.TypeDocument || rezepte.Target.Path != "rezepte/index.md" {
 		t.Errorf("rezepte: %+v", rezepte)
 	}
-	if logo.Kind != RefKindImage || logo.Target.Type != wiki.TypeResource || logo.Target.Name != "logo.png" {
+	if logo.Kind != references.RefKindImage || logo.Target.Type != wiki.TypeResource || logo.Target.Name != "logo.png" {
 		t.Errorf("logo: %+v", logo)
 	}
-	if broken.Status != RefStatusBroken || broken.Target != nil || broken.Reason != BrokenNotFound || broken.Path != "fehlt.md" {
+	if broken.Status != RefStatusBroken || broken.Target != nil || broken.Reason != references.BrokenNotFound || broken.Path != "fehlt.md" {
 		t.Errorf("broken: %+v", broken)
 	}
 
@@ -119,10 +120,10 @@ func TestBacklinks(t *testing.T) {
 	if result.Item.Path != "img/logo.png" || len(result.Backlinks) != 2 {
 		t.Fatalf("got %+v", result)
 	}
-	if b := result.Backlinks[0]; b.Source.Path != "index.md" || b.Kind != RefKindImage || b.Line != 5 || b.Internal {
+	if b := result.Backlinks[0]; b.Source.Path != "index.md" || b.Kind != references.RefKindImage || b.Line != 5 || b.Internal {
 		t.Errorf("first: %+v", b)
 	}
-	if b := result.Backlinks[1]; b.Source.Path != "rezepte/Käsekuchen.md" || b.Kind != RefKindDefinition || b.Destination != "../img/logo.png" {
+	if b := result.Backlinks[1]; b.Source.Path != "rezepte/Käsekuchen.md" || b.Kind != references.RefKindDefinition || b.Destination != "../img/logo.png" {
 		t.Errorf("second: %+v", b)
 	}
 
@@ -159,10 +160,10 @@ func TestBrokenReferencesAndUnusedResources(t *testing.T) {
 	if len(broken.Broken) != 2 {
 		t.Fatalf("got %+v", broken.Broken)
 	}
-	if b := broken.Broken[0]; b.Source.Path != "guide/setup.md" || b.Reason != BrokenOutsideDocs || b.Destination != "../../x.md" {
+	if b := broken.Broken[0]; b.Source.Path != "guide/setup.md" || b.Reason != references.BrokenOutsideDocs || b.Destination != "../../x.md" {
 		t.Errorf("first: %+v %+v", b.Source, b.Reference)
 	}
-	if b := broken.Broken[1]; b.Source.Path != "index.md" || b.Reason != BrokenNotFound || b.Line != 6 {
+	if b := broken.Broken[1]; b.Source.Path != "index.md" || b.Reason != references.BrokenNotFound || b.Line != 6 {
 		t.Errorf("second: %+v %+v", b.Source, b.Reference)
 	}
 

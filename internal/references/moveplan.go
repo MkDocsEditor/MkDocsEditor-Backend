@@ -1,4 +1,4 @@
-package backend
+package references
 
 import (
 	"iter"
@@ -12,13 +12,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// textEdit replaces text[start:end] (byte offsets) with replacement
-type textEdit struct {
-	start       int
-	end         int
-	replacement string
-	// line is the 1-based line of start
-	line int
+// TextEdit replaces text[start:end] (byte offsets) with replacement
+type TextEdit struct {
+	Start       int
+	End         int
+	Replacement string
+	// Line is the 1-based line of start
+	Line int
 }
 
 // LineEdit is a changed line, before and after a move
@@ -36,86 +36,86 @@ type ConfigEdit struct {
 	After  string `json:"after"`
 }
 
-// referenceEdits computes the edits of the references of a document text for a move, see
+// ReferenceEdits computes the edits of the references of a document text for a move, see
 // docs/references.md section 6. oldSource and newSource are the document's paths before and
 // after the move, lookup is the tree before the move, mapPath maps a path through the move.
-func referenceEdits(text string, oldSource string, newSource string, lookup *treeLookup, mapPath func(string) string) []textEdit {
-	var edits []textEdit
-	for _, r := range parseReferences(text) {
-		raw := r.destinationText()
-		d, ok := parseDestination(oldSource, raw)
-		if !ok || d.outside || lookup.resolve(d.path) == nil {
+func ReferenceEdits(text string, oldSource string, newSource string, lookup *TreeLookup, mapPath func(string) string) []TextEdit {
+	var edits []TextEdit
+	for _, r := range ParseReferences(text) {
+		raw := r.DestinationText()
+		d, ok := ParseDestination(oldSource, raw)
+		if !ok || d.Outside || lookup.Resolve(d.Path) == nil {
 			// external, same-document and broken references stay as they are
 			continue
 		}
-		newTarget := mapPath(d.path)
-		if newSource == oldSource && newTarget == d.path {
+		newTarget := mapPath(d.Path)
+		if newSource == oldSource && newTarget == d.Path {
 			continue
 		}
 		// still pointing to the same place from the new location?
-		if same, ok := parseDestination(newSource, raw); ok && !same.outside && same.path == newTarget {
+		if same, ok := ParseDestination(newSource, raw); ok && !same.Outside && same.Path == newTarget {
 			continue
 		}
-		replacement := r.escapeReplacement(rewriteDestination(d, newSource, newTarget))
-		edits = append(edits, textEdit{start: r.Start, end: r.End, replacement: replacement, line: r.Line})
+		replacement := r.EscapeReplacement(RewriteDestination(d, newSource, newTarget))
+		edits = append(edits, TextEdit{Start: r.Start, End: r.End, Replacement: replacement, Line: r.Line})
 	}
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	sort.Slice(edits, func(i, j int) bool { return edits[i].Start < edits[j].Start })
 	return edits
 }
 
-// applyEdits returns the text with the edits applied. Edits are sorted and do not overlap.
-func applyEdits(text string, edits []textEdit) string {
+// ApplyEdits returns the text with the edits applied. Edits are sorted and do not overlap.
+func ApplyEdits(text string, edits []TextEdit) string {
 	var b strings.Builder
 	last := 0
 	for _, e := range edits {
-		b.WriteString(text[last:e.start])
-		b.WriteString(e.replacement)
-		last = e.end
+		b.WriteString(text[last:e.Start])
+		b.WriteString(e.Replacement)
+		last = e.End
 	}
 	b.WriteString(text[last:])
 	return b.String()
 }
 
-// lineEdits describes the changed lines of a text, with line numbers of the text before
-func lineEdits(text string, edits []textEdit) []LineEdit {
+// LineEdits describes the changed lines of a text, with line numbers of the text before
+func LineEdits(text string, edits []TextEdit) []LineEdit {
 	var out []LineEdit
 	for i := 0; i < len(edits); {
-		lineStart := strings.LastIndexByte(text[:edits[i].start], '\n') + 1
+		lineStart := strings.LastIndexByte(text[:edits[i].Start], '\n') + 1
 		lineEnd := len(text)
-		if n := strings.IndexByte(text[edits[i].start:], '\n'); n >= 0 {
-			lineEnd = edits[i].start + n
+		if n := strings.IndexByte(text[edits[i].Start:], '\n'); n >= 0 {
+			lineEnd = edits[i].Start + n
 		}
 		j := i
-		for j < len(edits) && edits[j].start < lineEnd {
+		for j < len(edits) && edits[j].Start < lineEnd {
 			j++
 		}
 		line := text[lineStart:lineEnd]
-		shifted := make([]textEdit, 0, j-i)
+		shifted := make([]TextEdit, 0, j-i)
 		for _, e := range edits[i:j] {
-			shifted = append(shifted, textEdit{start: e.start - lineStart, end: e.end - lineStart, replacement: e.replacement})
+			shifted = append(shifted, TextEdit{Start: e.Start - lineStart, End: e.End - lineStart, Replacement: e.Replacement})
 		}
 		out = append(out, LineEdit{
-			Line:   edits[i].line,
+			Line:   edits[i].Line,
 			Before: strings.TrimSuffix(line, "\r"),
-			After:  strings.TrimSuffix(applyEdits(line, shifted), "\r"),
+			After:  strings.TrimSuffix(ApplyEdits(line, shifted), "\r"),
 		})
 		i = j
 	}
 	return out
 }
 
-// spliceEdits applies the edits to an Automerge text whose content is text, as the smallest
+// SpliceEdits applies the edits to an Automerge text whose content is text, as the smallest
 // splices: only the part of each destination that differs is replaced, so concurrent offline
 // edits next to it merge cleanly.
-func spliceEdits(t *automerge.Text, text string, edits []textEdit) error {
+func SpliceEdits(t *automerge.Text, text string, edits []TextEdit) error {
 	for _, e := range slices.Backward(edits) {
 
-		old := text[e.start:e.end]
-		prefix := commonPrefix(old, e.replacement)
-		suffix := commonSuffix(old[prefix:], e.replacement[prefix:])
-		start := utf8.RuneCountInString(text[:e.start+prefix])
+		old := text[e.Start:e.End]
+		prefix := commonPrefix(old, e.Replacement)
+		suffix := commonSuffix(old[prefix:], e.Replacement[prefix:])
+		start := utf8.RuneCountInString(text[:e.Start+prefix])
 		deleted := utf8.RuneCountInString(old[prefix : len(old)-suffix])
-		inserted := e.replacement[prefix : len(e.replacement)-suffix]
+		inserted := e.Replacement[prefix : len(e.Replacement)-suffix]
 		if deleted > 0 {
 			if err := t.Delete(start, deleted); err != nil {
 				return err
@@ -161,10 +161,10 @@ func commonSuffix(a, b string) int {
 // plainYAMLPath matches paths that can stay unquoted in YAML
 var plainYAMLPath = regexp.MustCompile(`^[\p{L}\p{N}_./(][\p{L}\p{N} _./()+,=@~&%-]*$`)
 
-// configEdits computes the changes of mkdocs.yml for a move: the paths in nav, theme.logo,
+// ConfigEdits computes the changes of mkdocs.yml for a move: the paths in nav, theme.logo,
 // theme.favicon and extra_javascript. Only the scalars change, the rest of the file (comments,
 // formatting, tags) stays as it is.
-func configEdits(content string, fileName string, mapPath func(string) string) (string, []ConfigEdit) {
+func ConfigEdits(content string, fileName string, mapPath func(string) string) (string, []ConfigEdit) {
 	var root yaml.Node
 	if err := yaml.Unmarshal([]byte(content), &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
 		return content, nil
@@ -175,7 +175,7 @@ func configEdits(content string, fileName string, mapPath func(string) string) (
 			lineStarts = append(lineStarts, i+1)
 		}
 	}
-	var edits []textEdit
+	var edits []TextEdit
 	for _, n := range configPathNodes(root.Content[0]) {
 		if e, ok := configNodeEdit(content, lineStarts, n, mapPath); ok {
 			edits = append(edits, e)
@@ -184,12 +184,12 @@ func configEdits(content string, fileName string, mapPath func(string) string) (
 	if len(edits) == 0 {
 		return content, nil
 	}
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	sort.Slice(edits, func(i, j int) bool { return edits[i].Start < edits[j].Start })
 	var out []ConfigEdit
-	for _, le := range lineEdits(content, edits) {
+	for _, le := range LineEdits(content, edits) {
 		out = append(out, ConfigEdit{File: fileName, Line: le.Line, Before: le.Before, After: le.After})
 	}
-	return applyEdits(content, edits), out
+	return ApplyEdits(content, edits), out
 }
 
 // mappingPairs iterates over the keys and values of a mapping node
@@ -263,23 +263,23 @@ func appendExtraJavascriptNode(nodes []*yaml.Node, n *yaml.Node) []*yaml.Node {
 }
 
 // configNodeEdit computes the edit of a scalar of mkdocs.yml, if its path changes
-func configNodeEdit(content string, lineStarts []int, n *yaml.Node, mapPath func(string) string) (textEdit, bool) {
+func configNodeEdit(content string, lineStarts []int, n *yaml.Node, mapPath func(string) string) (TextEdit, bool) {
 	if n.Tag != "!!str" || n.Value == "" || urlSchemePattern.MatchString(n.Value) {
-		return textEdit{}, false
+		return TextEdit{}, false
 	}
 	relative := strings.TrimPrefix(n.Value, "/")
 	mapped := mapPath(relative)
 	if mapped == relative || n.Line < 1 || n.Line > len(lineStarts) {
-		return textEdit{}, false
+		return TextEdit{}, false
 	}
 	if relative != n.Value {
 		mapped = "/" + mapped
 	}
 	start, end, ok := scalarSpan(content, lineStarts[n.Line-1], n)
 	if !ok {
-		return textEdit{}, false
+		return TextEdit{}, false
 	}
-	return textEdit{start: start, end: end, replacement: yamlScalar(mapped, n.Style), line: n.Line}, true
+	return TextEdit{Start: start, End: end, Replacement: yamlScalar(mapped, n.Style), Line: n.Line}, true
 }
 
 // scalarSpan finds the bytes of a scalar node (with its quotes) in content

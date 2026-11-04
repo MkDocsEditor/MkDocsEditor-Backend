@@ -1,4 +1,6 @@
-package backend
+// Package references finds the links between documents and resources in markdown, keeps an index
+// of them and plans the text edits that follow a move. See docs/references.md.
+package references
 
 import (
 	"errors"
@@ -29,113 +31,113 @@ type ItemRef struct {
 	Name string `json:"name"`
 }
 
-// treeLookup finds the items of a tree snapshot by their path relative to the docs folder
-type treeLookup struct {
+// TreeLookup finds the items of a tree snapshot by their path relative to the docs folder
+type TreeLookup struct {
 	root      *wiki.Section
-	documents map[string]*wiki.Document
-	resources map[string]*wiki.Resource
-	sections  map[string]*wiki.Section
-	// documentList is sorted by path
-	documentList []*wiki.Document
+	Documents map[string]*wiki.Document
+	Resources map[string]*wiki.Resource
+	Sections  map[string]*wiki.Section
+	// DocumentList is sorted by path
+	DocumentList []*wiki.Document
 }
 
-func newTreeLookup(root *wiki.Section) *treeLookup {
-	l := &treeLookup{
+func NewTreeLookup(root *wiki.Section) *TreeLookup {
+	l := &TreeLookup{
 		root:      root,
-		documents: map[string]*wiki.Document{},
-		resources: map[string]*wiki.Resource{},
-		sections:  map[string]*wiki.Section{},
+		Documents: map[string]*wiki.Document{},
+		Resources: map[string]*wiki.Resource{},
+		Sections:  map[string]*wiki.Section{},
 	}
 	for s := range root.Walk() {
-		l.sections[s.RelPath] = s
+		l.Sections[s.RelPath] = s
 		for _, d := range s.Documents {
-			l.documents[d.RelPath] = d
-			l.documentList = append(l.documentList, d)
+			l.Documents[d.RelPath] = d
+			l.DocumentList = append(l.DocumentList, d)
 		}
 		for _, r := range s.Resources {
-			l.resources[r.RelPath] = r
+			l.Resources[r.RelPath] = r
 		}
 	}
-	sort.Slice(l.documentList, func(i, j int) bool { return l.documentList[i].RelPath < l.documentList[j].RelPath })
+	sort.Slice(l.DocumentList, func(i, j int) bool { return l.DocumentList[i].RelPath < l.DocumentList[j].RelPath })
 	return l
 }
 
-// resolve returns the item a resolved path points to, see docs/references.md section 3
-func (l *treeLookup) resolve(p string) *ItemRef {
-	if d := l.documents[p]; d != nil {
-		return documentRef(d)
+// Resolve returns the item a resolved path points to, see docs/references.md section 3
+func (l *TreeLookup) Resolve(p string) *ItemRef {
+	if d := l.Documents[p]; d != nil {
+		return DocumentRef(d)
 	}
-	if r := l.resources[p]; r != nil {
-		return resourceRef(r)
+	if r := l.Resources[p]; r != nil {
+		return ResourceRef(r)
 	}
-	if s := l.sections[p]; s != nil {
+	if s := l.Sections[p]; s != nil {
 		if index := wiki.SectionIndexDocument(s); index != nil {
-			return documentRef(index)
+			return DocumentRef(index)
 		}
-		return sectionRef(s)
+		return SectionRef(s)
 	}
 	return nil
 }
 
-// item finds an item of any type by id
-func (l *treeLookup) item(id string) *ItemRef {
+// Item finds an item of any type by id
+func (l *TreeLookup) Item(id string) *ItemRef {
 	if id == wiki.RootSectionID {
-		return sectionRef(l.root)
+		return SectionRef(l.root)
 	}
-	for _, d := range l.documents {
+	for _, d := range l.Documents {
 		if d.ID == id {
-			return documentRef(d)
+			return DocumentRef(d)
 		}
 	}
-	for _, r := range l.resources {
+	for _, r := range l.Resources {
 		if r.ID == id {
-			return resourceRef(r)
+			return ResourceRef(r)
 		}
 	}
-	for _, s := range l.sections {
+	for _, s := range l.Sections {
 		if s.ID == id {
-			return sectionRef(s)
+			return SectionRef(s)
 		}
 	}
 	return nil
 }
 
-func documentRef(d *wiki.Document) *ItemRef {
+func DocumentRef(d *wiki.Document) *ItemRef {
 	return &ItemRef{Type: wiki.TypeDocument, ID: d.ID, Path: d.RelPath, Name: d.Name}
 }
 
-func resourceRef(r *wiki.Resource) *ItemRef {
+func ResourceRef(r *wiki.Resource) *ItemRef {
 	return &ItemRef{Type: wiki.TypeResource, ID: r.ID, Path: r.RelPath, Name: r.Name}
 }
 
-func sectionRef(s *wiki.Section) *ItemRef {
+func SectionRef(s *wiki.Section) *ItemRef {
 	return &ItemRef{Type: wiki.TypeSection, ID: s.ID, Path: s.RelPath, Name: s.Name}
 }
 
-// resolvedRef is a parsed reference of a document, resolved against the tree
-type resolvedRef struct {
+// ResolvedRef is a parsed reference of a document, resolved against the tree
+type ResolvedRef struct {
 	parsedRef
 	Source *wiki.Document
-	Dest   destination
+	Dest   Destination
 	// Target is the item, nil for broken references
 	Target *ItemRef
 	Reason string
 }
 
 // resolveReferences parses and resolves the references of a document text
-func resolveReferences(l *treeLookup, source *wiki.Document, refs []parsedRef) []resolvedRef {
-	out := make([]resolvedRef, 0, len(refs))
+func resolveReferences(l *TreeLookup, source *wiki.Document, refs []parsedRef) []ResolvedRef {
+	out := make([]ResolvedRef, 0, len(refs))
 	for _, r := range refs {
-		d, ok := parseDestination(source.RelPath, r.destinationText())
+		d, ok := ParseDestination(source.RelPath, r.DestinationText())
 		if !ok {
 			continue
 		}
-		rr := resolvedRef{parsedRef: r, Source: source, Dest: d}
+		rr := ResolvedRef{parsedRef: r, Source: source, Dest: d}
 		switch {
-		case d.outside:
+		case d.Outside:
 			rr.Reason = BrokenOutsideDocs
 		default:
-			rr.Target = l.resolve(d.path)
+			rr.Target = l.Resolve(d.Path)
 			if rr.Target == nil {
 				rr.Reason = BrokenNotFound
 			}
@@ -145,11 +147,17 @@ func resolveReferences(l *treeLookup, source *wiki.Document, refs []parsedRef) [
 	return out
 }
 
+// LiveTexts gives the current text of the documents that are being edited
+type LiveTexts interface {
+	// CurrentText returns the live text of a document. ok is false if it is not loaded.
+	CurrentText(d *wiki.Document) (text string, ok bool)
+}
+
 // ReferenceIndex caches the parsed references of every document, see docs/references.md
 // section 4. It is only a cache for the read endpoints: moves parse the current texts.
 type ReferenceIndex struct {
 	tm   *wiki.TreeManager
-	sync *SyncServer
+	sync LiveTexts
 
 	mu    sync.Mutex
 	cache map[string]*indexedDocument
@@ -157,11 +165,11 @@ type ReferenceIndex struct {
 
 type indexedDocument struct {
 	key  string
-	refs []parsedRef
+	Refs []parsedRef
 }
 
 // NewReferenceIndex creates the index
-func NewReferenceIndex(tm *wiki.TreeManager, syncServer *SyncServer) *ReferenceIndex {
+func NewReferenceIndex(tm *wiki.TreeManager, syncServer LiveTexts) *ReferenceIndex {
 	return &ReferenceIndex{tm: tm, sync: syncServer, cache: map[string]*indexedDocument{}}
 }
 
@@ -174,28 +182,28 @@ func (ri *ReferenceIndex) Warm() {
 
 // indexSnapshot is the resolved references of all documents for one tree snapshot
 type indexSnapshot struct {
-	lookup *treeLookup
+	lookup *TreeLookup
 	// configFile is the path of mkdocs.yml
 	configFile string
-	// refs by source document path, in text order
-	refs map[string][]resolvedRef
+	// Refs by source document path, in text order
+	Refs map[string][]ResolvedRef
 }
 
 // Snapshot returns the current references of all documents, resolved against the current tree
 func (ri *ReferenceIndex) Snapshot() *indexSnapshot {
-	lookup := newTreeLookup(ri.tm.Root())
-	snap := &indexSnapshot{lookup: lookup, configFile: ri.tm.ConfigFile(), refs: make(map[string][]resolvedRef, len(lookup.documentList))}
+	lookup := NewTreeLookup(ri.tm.Root())
+	snap := &indexSnapshot{lookup: lookup, configFile: ri.tm.ConfigFile(), Refs: make(map[string][]ResolvedRef, len(lookup.DocumentList))}
 
 	ri.mu.Lock()
 	defer ri.mu.Unlock()
-	seen := make(map[string]bool, len(lookup.documentList))
-	for _, d := range lookup.documentList {
+	seen := make(map[string]bool, len(lookup.DocumentList))
+	for _, d := range lookup.DocumentList {
 		seen[d.RelPath] = true
 		refs, ok := ri.documentRefsLocked(d)
 		if !ok {
 			continue
 		}
-		snap.refs[d.RelPath] = resolveReferences(lookup, d, refs)
+		snap.Refs[d.RelPath] = resolveReferences(lookup, d, refs)
 	}
 	for p := range ri.cache {
 		if !seen[p] {
@@ -216,7 +224,7 @@ func (ri *ReferenceIndex) documentRefsLocked(d *wiki.Document) ([]parsedRef, boo
 		key = "disk:" + strconv.FormatInt(d.Filesize, 10) + ":" + strconv.FormatInt(d.ModTime.UnixNano(), 10)
 	}
 	if cached := ri.cache[d.RelPath]; cached != nil && cached.key == key {
-		return cached.refs, true
+		return cached.Refs, true
 	}
 	if !live {
 		data, err := os.ReadFile(d.Path)
@@ -228,24 +236,24 @@ func (ri *ReferenceIndex) documentRefsLocked(d *wiki.Document) ([]parsedRef, boo
 		}
 		text = string(data)
 	}
-	refs := parseReferences(text)
-	ri.cache[d.RelPath] = &indexedDocument{key: key, refs: refs}
+	refs := ParseReferences(text)
+	ri.cache[d.RelPath] = &indexedDocument{key: key, Refs: refs}
 	return refs, true
 }
 
-// all returns every resolved reference, sorted by source path, line and column
-func (s *indexSnapshot) all() []resolvedRef {
-	var out []resolvedRef
-	for _, d := range s.lookup.documentList {
-		out = append(out, s.refs[d.RelPath]...)
+// All returns every resolved reference, sorted by source path, line and column
+func (s *indexSnapshot) All() []ResolvedRef {
+	var out []ResolvedRef
+	for _, d := range s.lookup.DocumentList {
+		out = append(out, s.Refs[d.RelPath]...)
 	}
 	return out
 }
 
-// backlinks returns the references whose target matches
-func (s *indexSnapshot) backlinks(match func(target *ItemRef) bool) []resolvedRef {
-	var out []resolvedRef
-	for _, r := range s.all() {
+// Backlinks returns the references whose target matches
+func (s *indexSnapshot) Backlinks(match func(target *ItemRef) bool) []ResolvedRef {
+	var out []ResolvedRef
+	for _, r := range s.All() {
 		if r.Target != nil && match(r.Target) {
 			out = append(out, r)
 		}
@@ -277,16 +285,16 @@ func usedByConfig(configFile string) map[string]bool {
 	return used
 }
 
-// unusedResources returns the resources no reference and no value in mkdocs.yml points to
-func (s *indexSnapshot) unusedResources() []*wiki.Resource {
+// UnusedResources returns the resources no reference and no value in mkdocs.yml points to
+func (s *indexSnapshot) UnusedResources() []*wiki.Resource {
 	used := usedByConfig(s.configFile)
-	for _, r := range s.all() {
+	for _, r := range s.All() {
 		if r.Target != nil && r.Target.Type == wiki.TypeResource {
 			used[r.Target.Path] = true
 		}
 	}
 	var out []*wiki.Resource
-	for p, r := range s.lookup.resources {
+	for p, r := range s.lookup.Resources {
 		if !used[p] {
 			out = append(out, r)
 		}

@@ -3,64 +3,66 @@ package backend
 import (
 	"log"
 	"sort"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 )
 
 // movedReference describes where a broken reference's old path went
 type movedReference struct {
-	item        *ItemRef
+	item        *references.ItemRef
 	destination string
 }
 
 // movedTarget returns the item a broken destination's path was moved to, and the destination
 // that points there from the document at sourcePath, see docs/references.md section 7
-func (s *SyncServer) movedTarget(sourcePath string, d destination) (movedReference, bool) {
-	if d.outside || !s.redirects.hasEntries() {
+func (s *SyncServer) movedTarget(sourcePath string, d references.Destination) (movedReference, bool) {
+	if d.Outside || !s.redirects.hasEntries() {
 		return movedReference{}, false
 	}
-	id := s.treeManager.IDOfRelPath(d.path)
+	id := s.treeManager.IDOfRelPath(d.Path)
 	item, _, ok := s.resolveRedirect(id, "")
 	if !ok {
 		return movedReference{}, false
 	}
-	return movedReference{item: item, destination: rewriteDestination(d, sourcePath, item.Path)}, true
+	return movedReference{item: item, destination: references.RewriteDestination(d, sourcePath, item.Path)}, true
 }
 
 // lateFixEdits finds the broken references of a text whose path is the old path of a moved item
-func (s *SyncServer) lateFixEdits(text string, sourcePath string) []textEdit {
+func (s *SyncServer) lateFixEdits(text string, sourcePath string) []references.TextEdit {
 	if !s.redirects.hasEntries() {
 		return nil
 	}
-	var lookup *treeLookup
-	var edits []textEdit
-	for _, r := range parseReferences(text) {
-		d, ok := parseDestination(sourcePath, r.destinationText())
-		if !ok || d.outside {
+	var lookup *references.TreeLookup
+	var edits []references.TextEdit
+	for _, r := range references.ParseReferences(text) {
+		d, ok := references.ParseDestination(sourcePath, r.DestinationText())
+		if !ok || d.Outside {
 			continue
 		}
 		if lookup == nil {
-			lookup = newTreeLookup(s.treeManager.Root())
+			lookup = references.NewTreeLookup(s.treeManager.Root())
 		}
-		if lookup.resolve(d.path) != nil {
+		if lookup.Resolve(d.Path) != nil {
 			continue
 		}
 		moved, ok := s.movedTarget(sourcePath, d)
 		if !ok {
 			continue
 		}
-		edits = append(edits, textEdit{start: r.Start, end: r.End, replacement: r.escapeReplacement(moved.destination), line: r.Line})
+		edits = append(edits, references.TextEdit{Start: r.Start, End: r.End, Replacement: r.EscapeReplacement(moved.destination), Line: r.Line})
 	}
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	sort.Slice(edits, func(i, j int) bool { return edits[i].Start < edits[j].Start })
 	return edits
 }
 
 // applyReferenceFixesLocked merges the edits into the document as a change of a server actor.
 // Caller holds mu.
-func (ds *docSession) applyReferenceFixesLocked(text string, edits []textEdit) error {
+func (ds *docSession) applyReferenceFixesLocked(text string, edits []references.TextEdit) error {
 	fork, err := ds.forkForServerChangeLocked(ActorUserServer)
 	if err != nil {
 		return err
 	}
-	if err = spliceEdits(fork.Path(contentKey).Text(), text, edits); err != nil {
+	if err = references.SpliceEdits(fork.Path(contentKey).Text(), text, edits); err != nil {
 		return err
 	}
 	if _, err = fork.Commit("update references to moved items"); err != nil {

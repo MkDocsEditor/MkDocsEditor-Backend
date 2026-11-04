@@ -1,4 +1,4 @@
-package backend
+package references
 
 import (
 	"reflect"
@@ -33,7 +33,7 @@ func TestParseReferences(t *testing.T) {
 		"[^1]: [fußnote](fn.md)\n" +
 		"[Klammern](datei_(1).md) [spitz](<a b.md>) [name](t.md 'x') [paren](p.md (y))\n" +
 		"Umlaute: [Käse](Käse.md)\n"
-	refs := parseReferences(text)
+	refs := ParseReferences(text)
 
 	type ref struct {
 		Kind string
@@ -87,7 +87,7 @@ func TestParseReferencesRawSpaces(t *testing.T) {
 		"[![b](b c.png)](d e.md) danach": "b c.png",
 	}
 	for text, want := range cases {
-		refs := parseReferences(text)
+		refs := ParseReferences(text)
 		if len(refs) == 0 || refs[0].Raw != want {
 			t.Errorf("%q: got %+v, want %q", text, refs, want)
 			continue
@@ -96,13 +96,13 @@ func TestParseReferencesRawSpaces(t *testing.T) {
 			t.Errorf("%q: offsets point to %q", text, text[refs[0].Start:refs[0].End])
 		}
 	}
-	if refs := parseReferences("[a](a b.md"); len(refs) != 0 {
+	if refs := ParseReferences("[a](a b.md"); len(refs) != 0 {
 		t.Errorf("unclosed destination: got %+v", refs)
 	}
 }
 
 func TestParseReferencesCRLF(t *testing.T) {
-	refs := parseReferences("[a](a.md)\r\n[b]: b.md\r\n")
+	refs := ParseReferences("[a](a.md)\r\n[b]: b.md\r\n")
 	if len(refs) != 2 || refs[0].Raw != "a.md" || refs[1].Raw != "b.md" {
 		t.Errorf("got %+v", refs)
 	}

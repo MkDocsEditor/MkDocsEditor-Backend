@@ -1,4 +1,4 @@
-package backend
+package references
 
 import (
 	"encoding/json"
@@ -37,7 +37,7 @@ func TestLinkPathVectors(t *testing.T) {
 		if v.Expected == "" || v.Expected[0] == '#' {
 			continue
 		}
-		d, ok := parseDestination(v.From, v.Expected)
+		d, ok := ParseDestination(v.From, v.Expected)
 		if !ok {
 			t.Errorf("%s: %q is not a reference", v.Name, v.Expected)
 			continue
@@ -46,8 +46,8 @@ func TestLinkPathVectors(t *testing.T) {
 		if v.Target.Type == wiki.TypeSection && v.Target.Index != "" {
 			want = v.Target.Index
 		}
-		if d.path != want || d.outside {
-			t.Errorf("%s: %q resolves to %q (outside %v), want %q", v.Name, v.Expected, d.path, d.outside, want)
+		if d.Path != want || d.Outside {
+			t.Errorf("%s: %q resolves to %q (outside %v), want %q", v.Name, v.Expected, d.Path, d.Outside, want)
 		}
 	}
 }
@@ -80,7 +80,7 @@ func TestParseDestination(t *testing.T) {
 		{"index.md", "./a:b.md", true, "a:b.md", "", false, false},
 	}
 	for _, tt := range tests {
-		d, ok := parseDestination(tt.from, tt.raw)
+		d, ok := ParseDestination(tt.from, tt.raw)
 		if ok != tt.ok {
 			t.Errorf("%q from %q: ok = %v, want %v", tt.raw, tt.from, ok, tt.ok)
 			continue
@@ -88,8 +88,8 @@ func TestParseDestination(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if d.path != tt.path || d.anchor != tt.anchor || d.outside != tt.outside || d.folder != tt.folder {
-			t.Errorf("%q from %q: got path %q anchor %q outside %v folder %v", tt.raw, tt.from, d.path, d.anchor, d.outside, d.folder)
+		if d.Path != tt.path || d.Anchor != tt.anchor || d.Outside != tt.outside || d.folder != tt.folder {
+			t.Errorf("%q from %q: got path %q anchor %q outside %v folder %v", tt.raw, tt.from, d.Path, d.Anchor, d.Outside, d.folder)
 		}
 	}
 }
@@ -118,11 +118,11 @@ func TestRewriteDestination(t *testing.T) {
 		{"new segments use the algorithm", "x.md", "img/Strand%20(2).png", "x.md", "Bilder (alt)/Strand (2).png", "Bilder%20%28alt%29/Strand%20(2).png"},
 	}
 	for _, tt := range tests {
-		d, ok := parseDestination(tt.from, tt.raw)
+		d, ok := ParseDestination(tt.from, tt.raw)
 		if !ok {
 			t.Fatalf("%s: %q is not a reference", tt.name, tt.raw)
 		}
-		if got := rewriteDestination(d, tt.newFrom, tt.newTarget); got != tt.want {
+		if got := RewriteDestination(d, tt.newFrom, tt.newTarget); got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
 		}
 	}

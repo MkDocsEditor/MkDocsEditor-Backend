@@ -17,6 +17,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -63,7 +64,7 @@ type RestService struct {
 	treeManager    *wiki.TreeManager
 	sync           *SyncServer
 	git            *GitCommitter
-	refs           *ReferenceIndex
+	refs           *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
 	knownRoutes map[string]struct{}
 	// thumbnailSlots limits concurrent image decoding
@@ -87,7 +88,7 @@ func NewRestService(
 		authenticator:  authenticator,
 		allowedOrigins: server.CORS.AllowedOrigins,
 		trustedProxies: trusted,
-		refs:           NewReferenceIndex(treeManager, syncServer),
+		refs:           references.NewReferenceIndex(treeManager, syncServer),
 		thumbnailSlots: make(chan struct{}, maxConcurrentThumbnails),
 	}
 	treeManager.AddTreeChangeListener(func(_, newTree *wiki.Section) { rs.pruneThumbnails(newTree) })
@@ -574,7 +575,7 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 		Code:    CodeNotFound,
 		Message: "No item with id '" + id + "' found",
 	}
-	if newTreeLookup(rs.treeManager.Root()).item(id) == nil {
+	if references.NewTreeLookup(rs.treeManager.Root()).Item(id) == nil {
 		if item, _, ok := rs.sync.resolveRedirect(id, ""); ok {
 			result.Details = map[string]any{"movedTo": item}
 		}
@@ -585,7 +586,7 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 // GET /moved/:id/: where the item with an old id is now
 func (rs *RestService) getMoved(c echo.Context) error {
 	id := c.Param(urlParamID)
-	moved := rs.movedItem(newTreeLookup(rs.treeManager.Root()), id)
+	moved := rs.movedItem(references.NewTreeLookup(rs.treeManager.Root()), id)
 	if moved == nil {
 		return apiError(c, http.StatusNotFound, CodeNotFound, "No moved item with id '"+id+"'", nil)
 	}
@@ -600,7 +601,7 @@ func (rs *RestService) getMovedList(c echo.Context) error {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "too many ids", map[string]any{
 			"reason": "too-many-ids", "maxIds": maxMovedLookupIDs})
 	}
-	lookup := newTreeLookup(rs.treeManager.Root())
+	lookup := references.NewTreeLookup(rs.treeManager.Root())
 	result := &MovedListResponse{Moved: []*MovedResponse{}}
 	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -617,8 +618,8 @@ func (rs *RestService) getMovedList(c echo.Context) error {
 
 // movedItem returns where the item with an old id is now, or nil if the id names an existing
 // item or has no redirect to an existing item
-func (rs *RestService) movedItem(lookup *treeLookup, id string) *MovedResponse {
-	if lookup.item(id) != nil {
+func (rs *RestService) movedItem(lookup *references.TreeLookup, id string) *MovedResponse {
+	if lookup.Item(id) != nil {
 		return nil
 	}
 	item, entry, ok := rs.sync.resolveRedirectIn(lookup, id, "")

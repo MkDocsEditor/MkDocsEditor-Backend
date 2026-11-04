@@ -1,4 +1,4 @@
-package backend
+package references
 
 import (
 	"html"
@@ -37,9 +37,9 @@ var (
 	htmlAttrPattern   = regexp.MustCompile(`(?i)[\s/](href|src)[ \t]*=[ \t]*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
 )
 
-// parseReferences finds the links, images, reference definitions and HTML references of a
+// ParseReferences finds the links, images, reference definitions and HTML references of a
 // markdown text. Code blocks, code spans, HTML comments and a front matter block are skipped.
-func parseReferences(text string) []parsedRef {
+func ParseReferences(text string) []parsedRef {
 	p := refParser{text: text}
 	p.run()
 	return p.refs
@@ -341,17 +341,17 @@ func skipSpaces(s string, i int) int {
 	return i
 }
 
-// destinationText returns the destination as a path, with the entities of an HTML attribute resolved
-func (r parsedRef) destinationText() string {
+// DestinationText returns the destination as a path, with the entities of an HTML attribute resolved
+func (r parsedRef) DestinationText() string {
 	if r.HTML {
 		return html.UnescapeString(r.Raw)
 	}
 	return r.Raw
 }
 
-// escapeReplacement prepares a new destination for the text: an attribute that escaped "&" keeps
+// EscapeReplacement prepares a new destination for the text: an attribute that escaped "&" keeps
 // doing so
-func (r parsedRef) escapeReplacement(replacement string) string {
+func (r parsedRef) EscapeReplacement(replacement string) string {
 	if r.HTML && strings.Contains(r.Raw, "&amp;") {
 		return strings.ReplaceAll(replacement, "&", "&amp;")
 	}
