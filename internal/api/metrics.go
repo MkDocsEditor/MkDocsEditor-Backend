@@ -18,10 +18,20 @@ import (
 // a label: anyone could create new time series with it.
 const unmatchedRoute = "unmatched"
 
-// httpMetrics counts the requests by route pattern. It must run outside the middleware that
-// turns errors into responses, so it sees the final status.
+// isAliveCheck reports whether the request is a check of GET /alive/, which a readiness probe
+// sends every few seconds. Logs and request metrics leave these out: they would drown the requests
+// of real clients.
+func isAliveCheck(c echo.Context) bool {
+	return c.Request().Method == http.MethodGet && c.Path() == EndpointPathAlive
+}
+
+// httpMetrics counts the requests by route pattern, except for checks of GET /alive/. It must run
+// outside the middleware that turns errors into responses, so it sees the final status.
 func (rs *RestService) httpMetrics(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		if isAliveCheck(c) {
+			return next(c)
+		}
 		start := time.Now()
 		err := next(c)
 

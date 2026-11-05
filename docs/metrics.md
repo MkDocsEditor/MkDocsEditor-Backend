@@ -76,6 +76,9 @@ the route `unmatched`, and an unknown HTTP method is `other`, so clients cannot 
 series. A websocket counts in `http_requests_total` when it closes, with status 101 if the upgrade
 succeeded.
 
+`GET /alive/` is not in the HTTP metrics and not in the request log, because a readiness probe calls
+it every few seconds.
+
 ## Sync event log
 
 With `eventLog: true`, each event is one JSON line on stdout. The normal log goes to stderr.
