@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -276,11 +277,40 @@ func lastPositionFor(c *testClient, accountID string) map[string]any {
 	return nil
 }
 
+const (
+	instancePhone   = "0123456789abcdef0123456789abcdef"
+	instanceBrowser = "fedcba9876543210fedcba9876543210"
+)
+
+func connectInstance(t *testing.T, e *syncEnv, user string, id string, instance string, hello ...map[string]any) *testClient {
+	t.Helper()
+	c := newTestClient(t, e, user)
+	h := map[string]any{"instanceId": instance}
+	if len(hello) > 0 {
+		h = hello[0]
+		h["instanceId"] = instance
+	}
+	c.connect(id, connectOptions{hello: h})
+	return c
+}
+
+func ghostOf(c *testClient, instance string) map[string]any {
+	c.t.Helper()
+	c.waitFor("the snapshot", func() bool { return c.lastPositions != nil })
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, g := range c.ghosts {
+		if m := g.(map[string]any); m["instanceId"] == instance {
+			return m
+		}
+	}
+	return nil
+}
+
 func TestSyncGhost(t *testing.T) {
 	e := newSyncEnv(t)
 	id := e.docID("guide/setup.md")
 	alice := e.authn.UserByUsername("alice").ID
-	bobID := e.authn.UserByUsername("bob").ID
 	sel := []map[string]string{{"anchor": "cursor-1", "head": "cursor-1"}}
 	view := map[string]string{"top": "cursor-2", "bottom": "cursor-3"}
 
@@ -295,71 +325,147 @@ func TestSyncGhost(t *testing.T) {
 		t.Errorf("leave without a position = %v", m)
 	}
 
-	// only the last connection of an account leaves a ghost
-	a1 := newTestClient(t, e, "alice")
-	a1.connect(id)
-	a2 := newTestClient(t, e, "alice")
-	a2.connect(id)
-	a1.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel, "viewport": view})
-	watcher.waitFor("the selection", func() bool {
-		for _, p := range watcher.presences {
-			if p["viewport"] != nil {
-				return true
-			}
-		}
-		return false
-	})
-	a1.disconnect()
-	if m := lastLeave(watcher, 2); m["ghostMs"] != nil {
-		t.Errorf("leave of the first connection = %v", m)
-	}
-	a2.disconnect()
-	m := lastLeave(watcher, 3)
-	if m["accountId"] != alice || m["ghostMs"] != float64(60000) || m["viewport"] == nil || len(m["selections"].([]any)) != 1 {
-		t.Errorf("leave of the last connection = %v", m)
+	a := connectInstance(t, e, "alice", id, instancePhone, map[string]any{"instanceColor": "#2b8a3e"})
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel, "viewport": view})
+	waitPresence(watcher, "the position", selectionAnchor("cursor-1"))
+	a.disconnect()
+	m := lastLeave(watcher, 2)
+	if m["accountId"] != alice || m["instanceId"] != instancePhone || m["ghostMs"] != float64(60000) || m["viewport"] == nil ||
+		len(m["selections"].([]any)) != 1 || m["instanceColor"] != "#2b8a3e" || m["deviceName"] == nil {
+		t.Errorf("leave = %v", m)
 	}
 
-	// a joiner gets the rest of the ghost
+	// a joiner gets the rest of the ghost, and lastPositions has no ghost any more
 	joiner := newTestClient(t, e, "bob")
 	joiner.connect(id)
-	p := lastPositionFor(joiner, alice)
-	if p == nil {
-		t.Fatal("no position")
+	g := ghostOf(joiner, instancePhone)
+	if g == nil {
+		t.Fatal("no ghost")
 	}
-	if ms, ok := p["ghostMs"].(float64); !ok || ms <= 0 || ms > 60000 || p["viewport"] == nil {
+	if ms, ok := g["ghostMs"].(float64); !ok || ms <= 0 || ms > 60000 || g["viewport"] == nil || g["accountId"] != alice ||
+		g["username"] != "alice" || g["instanceColor"] != "#2b8a3e" || g["deviceName"] == nil || g["color"] == nil {
+		t.Errorf("ghost = %v", g)
+	}
+	if p := lastPositionFor(joiner, alice); p == nil || p["ghostMs"] != nil {
 		t.Errorf("position = %v", p)
 	}
-	if p := lastPositionFor(joiner, bobID); p != nil {
-		t.Errorf("position of bob = %v", p)
+
+	// coming back ends the ghost for everybody, and the client itself finds none
+	back := connectInstance(t, e, "alice", id, instancePhone)
+	if ghostOf(back, instancePhone) != nil {
+		t.Error("the returning instance has its own ghost")
+	}
+	waitPresence(watcher, "the returning instance", func(m map[string]any) bool { return m["instanceId"] == instancePhone })
+	late := newTestClient(t, e, "bob")
+	late.connect(id)
+	if g := ghostOf(late, instancePhone); g != nil {
+		t.Errorf("ghost after the return = %v", g)
 	}
 
-	// coming back ends the ghost, and the old position still counts for the next leave
-	back := newTestClient(t, e, "alice")
-	back.connect(id)
-	eventually(t, "the ghost ended", func() bool {
-		late := newTestClient(t, e, "bob")
-		late.connect(id)
-		defer late.disconnect()
-		p := lastPositionFor(late, alice)
-		return p != nil && p["ghostMs"] == nil
-	})
-	count := func() int {
-		watcher.mu.Lock()
-		defer watcher.mu.Unlock()
-		return len(watcher.leaves)
-	}
-	before := count()
+	// back without a position: no ghost at the old spot
+	before := leaveCount(watcher)
 	back.disconnect()
-	eventually(t, "the ghost is back", func() bool {
-		watcher.mu.Lock()
-		defer watcher.mu.Unlock()
-		for _, l := range watcher.leaves[before:] {
-			if l["accountId"] == alice && l["ghostMs"] != nil {
-				return true
+	if m := lastLeave(watcher, before+1); m["ghostMs"] != nil {
+		t.Errorf("leave without a new position = %v", m)
+	}
+}
+
+// Every instance behaves the same: another tab or device of the account also gets the ghost, at
+// the position of the instance that left
+func TestSyncGhostForOwnAccount(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+
+	// these share an auth session, like two tabs of one browser
+	browser := connectInstance(t, e, "alice", id, instanceBrowser)
+	phone := connectInstance(t, e, "alice", id, instancePhone)
+	third := newTestClient(t, e, "alice")
+	third.connect(id)
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id,
+		"selections": []map[string]string{{"anchor": "phone-1", "head": "phone-1"}},
+		"viewport":   map[string]string{"top": "phone-2", "bottom": "phone-3"}})
+	waitPresence(browser, "the position of the phone", viewportTop("phone-2"))
+	// the app goes to the background and clears its position
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "viewport": nil})
+	browser.waitFor("the cleared position", func() bool {
+		for _, m := range browser.presences {
+			if viewportTop("phone-2")(m) {
+				return false
 			}
 		}
-		return false
+		return true
 	})
+	// a follower publishes where it is, which must not move the ghost of the phone
+	browser.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{},
+		"viewport": map[string]string{"top": "follower-1", "bottom": "follower-2"}})
+	waitPresence(phone, "the position of the follower", viewportTop("follower-1"))
+
+	phone.disconnect()
+	for _, c := range []*testClient{browser, third} {
+		m := lastLeave(c, 1)
+		viewport, _ := m["viewport"].(map[string]any)
+		selections, _ := m["selections"].([]any)
+		if m["accountId"] != alice || m["ghostMs"] != float64(60000) || viewport["top"] != "phone-2" ||
+			len(selections) != 1 || selections[0].(map[string]any)["anchor"] != "phone-1" {
+			t.Errorf("leave for %v = %v", c.you["clientId"], m)
+		}
+	}
+
+	// the other instance gets the presence of the returning one
+	back := connectInstance(t, e, "alice", id, instancePhone)
+	waitPresence(browser, "the phone is back", func(m map[string]any) bool { return m["instanceId"] == instancePhone })
+	if ghostOf(back, instanceBrowser) != nil {
+		t.Error("a ghost of a connected instance")
+	}
+}
+
+// A join link opened right after the sender left finds the ghost of the sender's other instance
+func TestSyncGhostOfOwnOtherInstanceOnJoin(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	phone := connectInstance(t, e, "alice", id, instancePhone)
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	waitPresence(watcher, "the position", selectionAnchor("c"))
+	phone.disconnect()
+	lastLeave(watcher, 1)
+
+	browser := connectInstance(t, e, "alice", id, instanceBrowser)
+	if g := ghostOf(browser, instancePhone); g == nil || g["ghostMs"] == nil {
+		t.Errorf("ghost for the other instance = %v", g)
+	}
+	reloaded := connectInstance(t, e, "alice", id, instancePhone)
+	if g := ghostOf(reloaded, instancePhone); g != nil {
+		t.Errorf("own ghost after a reload = %v", g)
+	}
+}
+
+// A ghost survives the document unloading, and the server restarting
+func TestSyncGhostSurvivesUnload(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := connectInstance(t, e, "alice", id, instancePhone)
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	a.flush()
+	eventually(t, "the position is known", func() bool {
+		meta := collabStoreMeta(t, e, "guide/setup.md")
+		return meta != nil
+	})
+	time.Sleep(50 * time.Millisecond)
+	a.disconnect()
+	eventually(t, "the ghost is saved", func() bool {
+		meta := collabStoreMeta(t, e, "guide/setup.md")
+		return meta != nil && len(meta.Ghosts) == 1
+	})
+	e.restart()
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	if g := ghostOf(b, instancePhone); g == nil {
+		t.Error("no ghost after a restart")
+	}
 }
 
 func TestSyncGhostExpires(t *testing.T) {
@@ -368,8 +474,7 @@ func TestSyncGhostExpires(t *testing.T) {
 	id := e.docID("guide/setup.md")
 	alice := e.authn.UserByUsername("alice").ID
 
-	a := newTestClient(t, e, "alice")
-	a.connect(id)
+	a := connectInstance(t, e, "alice", id, instancePhone)
 	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
 	time.Sleep(50 * time.Millisecond)
 	a.disconnect()
@@ -377,21 +482,124 @@ func TestSyncGhostExpires(t *testing.T) {
 
 	b := newTestClient(t, e, "bob")
 	b.connect(id)
-	if p := lastPositionFor(b, alice); p == nil || p["ghostMs"] != nil {
-		t.Errorf("position after the ghost = %v", p)
+	if g := ghostOf(b, instancePhone); g != nil {
+		t.Errorf("ghost after the lifetime = %v", g)
 	}
+	if p := lastPositionFor(b, alice); p == nil {
+		t.Error("the last position is gone with the ghost")
+	}
+}
 
-	// back after the ghost, without a new position: no ghost at the old spot
-	again := newTestClient(t, e, "alice")
-	again.connect(id)
-	again.disconnect()
-	eventually(t, "the second leave", func() bool {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		return len(b.leaves) == 1
+// A second connection of an instance, like a half-open socket after a reconnect, leaves no ghost
+func TestSyncNoGhostWithAnotherConnectionOfTheInstance(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	old := connectInstance(t, e, "alice", id, instancePhone)
+	old.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	waitPresence(watcher, "the position", selectionAnchor("c"))
+	connectInstance(t, e, "alice", id, instancePhone)
+	old.disconnect()
+	if m := lastLeave(watcher, 1); m["ghostMs"] != nil || m["instanceId"] != instancePhone {
+		t.Errorf("leave = %v", m)
+	}
+}
+
+func TestSyncInstanceFields(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+
+	// without an instance id the client id is used, and the client name is the device name
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	plain := newTestClient(t, e, "alice")
+	plain.connect(id, connectOptions{useTicket: true})
+	if plain.you["instanceId"] != plain.you["clientId"] {
+		t.Errorf("you = %v", plain.you)
+	}
+	waitPresence(watcher, "the client id as instance", func(m map[string]any) bool {
+		return m["instanceId"] == plain.you["clientId"] && m["deviceName"] == "test"
 	})
-	if m := lastLeave(b, 1); m["ghostMs"] != nil {
-		t.Errorf("leave without a new position = %v", m)
+
+	// the name of the auth session comes first
+	login, err := e.authn.LoginPassword("alice", testPasswords["alice"], auth.SessionParams{Type: auth.SessionBearer, DeviceName: "Pixel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := newTestClient(t, e, "alice")
+	named.authorization = "Bearer " + login.Token
+	named.connect(id, connectOptions{hello: map[string]any{"instanceId": instancePhone, "instanceColor": "#2b8a3e"}})
+	if named.you["instanceId"] != instancePhone {
+		t.Errorf("you = %v", named.you)
+	}
+	waitPresence(watcher, "the instance", func(m map[string]any) bool {
+		return m["instanceId"] == instancePhone && m["deviceName"] == "Pixel" && m["instanceColor"] == "#2b8a3e"
+	})
+
+	// the color: absent keeps it, a value sets it, null clears it, and color stays the account's
+	userColor := e.authn.UserByUsername("alice").Color
+	presence := func(color any, set bool) {
+		m := map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}}
+		if set {
+			m["instanceColor"] = color
+		}
+		named.send(m)
+	}
+	hasColor := func(want any) func(map[string]any) bool {
+		return func(m map[string]any) bool {
+			return m["instanceId"] == instancePhone && m["instanceColor"] == want && m["color"] == userColor
+		}
+	}
+	presence(nil, false)
+	presence("#ABCDEF", true)
+	waitPresence(watcher, "the new color", hasColor("#ABCDEF"))
+	presence(nil, false)
+	waitPresence(watcher, "the kept color", hasColor("#ABCDEF"))
+	presence(nil, true)
+	waitPresence(watcher, "the cleared color", hasColor(nil))
+	if got := e.authn.UserByUsername("alice").Color; got != userColor {
+		t.Errorf("the account color changed to %s", got)
+	}
+	for _, bad := range []any{"red", "#12345", "", 5} {
+		presence(bad, true)
+	}
+	named.waitFor("the errors", func() bool { return len(named.errors) == 4 })
+
+	// the format is checked in hello
+	for name, hello := range map[string]map[string]any{
+		"short":     {"instanceId": "abc"},
+		"uppercase": {"instanceId": strings.ToUpper(instancePhone)},
+		"color":     {"instanceId": instancePhone, "instanceColor": "green"},
+	} {
+		c := newTestClient(t, e, "alice")
+		if err := c.dial(id, connectOptions{hello: hello}); err == nil {
+			if code := c.waitClosed(); code != collab.CloseProtocolError {
+				t.Errorf("%s: close code %d", name, code)
+			}
+		}
+	}
+}
+
+// An instance id in use by another account is not taken, so nobody can end the ghost of someone else
+func TestSyncInstanceOfAnotherAccount(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := connectInstance(t, e, "alice", id, instancePhone)
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	other := connectInstance(t, e, "bob", id, instancePhone)
+	if other.you["instanceId"] != other.you["clientId"] {
+		t.Errorf("connected instance taken: %v", other.you)
+	}
+	waitPresence(other, "the position", selectionAnchor("c"))
+	a.disconnect()
+	lastLeave(other, 1)
+	thief := connectInstance(t, e, "carol", id, instancePhone)
+	if thief.you["instanceId"] != thief.you["clientId"] {
+		t.Errorf("ghost instance taken: %v", thief.you)
+	}
+	if g := ghostOf(thief, instancePhone); g == nil {
+		t.Error("the ghost of another account ended")
 	}
 }
 
@@ -1125,4 +1333,36 @@ func TestAuthorshipSnapshotFollowsTheDocument(t *testing.T) {
 	if authorshipFile(t, e, "") == "" || authorshipFile(t, e, "deleted") != "" {
 		t.Error("the snapshot was not restored")
 	}
+}
+
+func viewportTop(top string) func(map[string]any) bool {
+	return func(m map[string]any) bool {
+		v, _ := m["viewport"].(map[string]any)
+		return v["top"] == top
+	}
+}
+
+func selectionAnchor(anchor string) func(map[string]any) bool {
+	return func(m map[string]any) bool {
+		s, _ := m["selections"].([]any)
+		return len(s) > 0 && s[0].(map[string]any)["anchor"] == anchor
+	}
+}
+
+func waitPresence(c *testClient, what string, match func(map[string]any) bool) {
+	c.t.Helper()
+	c.waitFor(what, func() bool {
+		for _, m := range c.presences {
+			if match(m) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func leaveCount(c *testClient) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.leaves)
 }

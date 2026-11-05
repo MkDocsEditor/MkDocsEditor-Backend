@@ -596,7 +596,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 		return
 	}
 	delete(session.conns, conn)
-	leave := session.accountLeftLocked(conn, time.Now())
+	leave := session.instanceLeftLocked(conn, time.Now())
 	session.savePositionsLocked()
 	s.logSyncEvent(SyncEvent{
 		Kind: SyncEventLeft, Path: session.meta.Path, User: conn.user.Username, ClientID: conn.clientID,
@@ -659,6 +659,15 @@ type wsConn struct {
 	selections json.RawMessage
 	viewport   json.RawMessage
 	warnedRO   bool
+	// instanceID identifies the client instance, see resolveInstanceLocked. deviceName is what
+	// others see as its device, instanceColor is a color that client chose for this instance.
+	instanceID    string
+	deviceName    string
+	instanceColor string
+	// ownSelections and ownViewport are the last non-empty ones, for the ghost of this
+	// connection. Unlike LastPosition, other connections of the account do not overwrite them.
+	ownSelections json.RawMessage
+	ownViewport   json.RawMessage
 }
 
 type outgoingMessage struct {
@@ -857,10 +866,30 @@ func (c *wsConn) run(documentID string) {
 	}
 	c.actorID = hello.ActorID
 	c.clientName = shortClientName(hello.Client)
+	if !validInstanceID(hello.InstanceID) {
+		c.fail(CloseProtocolError, ErrCodeBadRequest, "instanceId must be 32 lowercase hex characters")
+		return
+	}
+	if !validInstanceColor(hello.InstanceColor) {
+		c.fail(CloseProtocolError, ErrCodeBadRequest, "instanceColor must be #rrggbb")
+		return
+	}
+	c.instanceID, c.instanceColor = hello.InstanceID, hello.InstanceColor
+	c.deviceName = c.resolveDeviceName()
 
 	if c.openDocument(documentID, hello) {
 		c.readLoop()
 	}
+}
+
+// resolveDeviceName returns the name of the auth session, or else the client name of the hello
+func (c *wsConn) resolveDeviceName() string {
+	if c.sessionID != "" {
+		if sess, err := c.server.authenticator.SessionByID(c.sessionID); err == nil && sess.DeviceName != "" {
+			return shortClientName(sess.DeviceName)
+		}
+	}
+	return c.clientName
 }
 
 // openDocument joins the session of the document, or tells the client where the document went.
@@ -928,7 +957,12 @@ func (c *wsConn) handleMessage(data []byte) bool {
 			c.sendError(ErrCodeBadRequest, "invalid presence")
 			return true
 		}
-		c.handlePresence(m.Selections, view)
+		color, ok := parseInstanceColor(data)
+		if !ok {
+			c.sendError(ErrCodeBadRequest, "invalid presence")
+			return true
+		}
+		c.handlePresence(m.Selections, view, color)
 	}
 	// heartbeats only keep the connection alive, unknown types are ignored for forward compatibility
 	return true
@@ -953,6 +987,8 @@ func (c *wsConn) attachLocked(session *docSession) error {
 	}
 	c.syncState = automerge.NewSyncState(syncDoc)
 	c.selections = json.RawMessage("[]")
+	now := time.Now()
+	session.resolveInstanceLocked(c, now)
 
 	c.send(&InitialContentMessage{
 		Type:          MsgInitialContent,
@@ -964,12 +1000,11 @@ func (c *wsConn) attachLocked(session *docSession) error {
 		You:           c.userInfo(),
 		Actors:        c.server.Actors(),
 	})
-	session.accountJoinedLocked(c.user.ID, time.Now())
 	peers := make([]PresenceMessage, 0, len(session.conns))
 	for other := range session.conns {
 		peers = append(peers, other.presenceLocked())
 	}
-	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked()})
+	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked(), Ghosts: session.ghostsLocked(now)})
 	session.conns[c] = struct{}{}
 	session.announceActorLocked(c.actorID, c.user.ID, c)
 	session.broadcastLocked(c.presenceLocked(), c)
@@ -978,22 +1013,25 @@ func (c *wsConn) attachLocked(session *docSession) error {
 }
 
 func (c *wsConn) userInfo() UserInfo {
-	return UserInfo{ClientID: c.clientID, AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Role: c.user.Role, Color: c.user.Color}
+	return UserInfo{ClientID: c.clientID, InstanceID: c.instanceID, AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Role: c.user.Role, Color: c.user.Color}
 }
 
 func (c *wsConn) presenceLocked() PresenceMessage {
 	return PresenceMessage{
-		Type:         MsgPresence,
-		DocumentID:   c.session.docID,
-		ClientID:     c.clientID,
-		AccountID:    c.user.ID,
-		Username:     c.user.Username,
-		DisplayName:  c.user.DisplayName,
-		Color:        c.user.Color,
-		ActorID:      c.actorID,
-		LastActiveAt: c.lastActive.UTC().Format(time.RFC3339Nano),
-		Selections:   c.selections,
-		Viewport:     c.viewport,
+		Type:          MsgPresence,
+		DocumentID:    c.session.docID,
+		ClientID:      c.clientID,
+		AccountID:     c.user.ID,
+		Username:      c.user.Username,
+		DisplayName:   c.user.DisplayName,
+		Color:         c.user.Color,
+		ActorID:       c.actorID,
+		InstanceID:    c.instanceID,
+		DeviceName:    c.deviceName,
+		InstanceColor: c.instanceColor,
+		LastActiveAt:  c.lastActive.UTC().Format(time.RFC3339Nano),
+		Selections:    c.selections,
+		Viewport:      c.viewport,
 	}
 }
 
@@ -1149,7 +1187,7 @@ func sameHeads(a, b []automerge.ChangeHash) bool {
 	return true
 }
 
-func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage) {
+func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage, color *string) {
 	metrics.PresenceMessages.Inc()
 	session := c.session
 	session.mu.Lock()
@@ -1161,6 +1199,15 @@ func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage
 		c.viewport = nil
 	case view != nil:
 		c.viewport = view
+	}
+	if color != nil {
+		c.instanceColor = *color
+	}
+	if len(selections) <= maxLastPositionSize && hasSelections(selections) {
+		c.ownSelections = selections
+	}
+	if view != nil && !bytes.Equal(view, jsonNull) && len(view) <= maxLastPositionSize {
+		c.ownViewport = view
 	}
 	session.rememberPositionLocked(c.user.ID, selections, view, c.lastActive)
 	session.broadcastLocked(c.presenceLocked(), c)

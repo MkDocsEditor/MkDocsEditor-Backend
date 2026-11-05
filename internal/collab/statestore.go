@@ -43,6 +43,19 @@ type DocumentMeta struct {
 	// LastPositions holds where accounts last were in this document, by account id.
 	// Cursors are only valid in their epoch, and a new epoch has a new meta.
 	LastPositions map[string]LastPosition `json:"lastPositions,omitempty"`
+	// Ghosts are the client instances that left recently, by instance id. They are saved because
+	// a document unloads when its last connection leaves.
+	Ghosts map[string]InstanceGhost `json:"ghosts,omitempty"`
+}
+
+// InstanceGhost is where a client instance was when it left
+type InstanceGhost struct {
+	AccountID     string          `json:"accountId"`
+	DeviceName    string          `json:"deviceName,omitempty"`
+	InstanceColor string          `json:"instanceColor,omitempty"`
+	Selections    json.RawMessage `json:"selections"`
+	Viewport      json.RawMessage `json:"viewport,omitempty"`
+	LeftAt        time.Time       `json:"leftAt"`
 }
 
 // LastPosition is the last non-empty selections and the last viewport of an account in a document
@@ -50,8 +63,6 @@ type LastPosition struct {
 	Selections json.RawMessage `json:"selections"`
 	Viewport   json.RawMessage `json:"viewport,omitempty"`
 	Time       time.Time       `json:"time"`
-	// LeftAt is when the last connection of the account left. It is zero while one is connected.
-	LeftAt time.Time `json:"leftAt,omitzero"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.
@@ -329,6 +340,7 @@ func copyMeta(m *DocumentMeta) *DocumentMeta {
 	c := *m
 	c.DiskBaseHeads = append([]string(nil), m.DiskBaseHeads...)
 	c.LastPositions = maps.Clone(m.LastPositions)
+	c.Ghosts = maps.Clone(m.Ghosts)
 	return &c
 }
 
