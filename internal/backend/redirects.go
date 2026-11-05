@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 const redirectsFile = "redirects.json"
@@ -72,7 +74,7 @@ func (rs *RedirectStore) Append(entries ...RedirectEntry) error {
 	if err != nil {
 		return err
 	}
-	if err = WriteFile(rs.file, data); err != nil {
+	if err = wiki.WriteFile(rs.file, data); err != nil {
 		return err
 	}
 	for i := len(rs.entries); i < len(all); i++ {
@@ -148,15 +150,15 @@ func (s *SyncServer) resolveRedirect(id string, epoch string) (*ItemRef, Redirec
 func (s *SyncServer) resolveRedirectIn(lookup *treeLookup, id string, epoch string) (*ItemRef, RedirectEntry, bool) {
 	itemAt := func(itemType string, p string) *ItemRef {
 		switch itemType {
-		case TypeDocument:
+		case wiki.TypeDocument:
 			if d := lookup.documents[p]; d != nil {
 				return documentRef(d)
 			}
-		case TypeResource:
+		case wiki.TypeResource:
 			if r := lookup.resources[p]; r != nil {
 				return resourceRef(r)
 			}
-		case TypeSection:
+		case wiki.TypeSection:
 			if sec := lookup.sections[p]; sec != nil {
 				return sectionRef(sec)
 			}
@@ -190,11 +192,11 @@ func (s *SyncServer) documentRedirect(documentID string, epoch string) string {
 	d := s.treeManager.GetDocument(documentID)
 	if d == nil {
 		if epoch != "" {
-			if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == TypeDocument {
+			if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
 				return item.ID
 			}
 		}
-		if item, _, ok := s.resolveRedirect(documentID, ""); ok && item.Type == TypeDocument {
+		if item, _, ok := s.resolveRedirect(documentID, ""); ok && item.Type == wiki.TypeDocument {
 			return item.ID
 		}
 		return ""
@@ -203,14 +205,14 @@ func (s *SyncServer) documentRedirect(documentID string, epoch string) string {
 		return ""
 	}
 	// the client holds another lineage: the document that moved away from this path
-	if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == TypeDocument {
+	if item, _, ok := s.resolveRedirect(documentID, epoch); ok && item.Type == wiki.TypeDocument {
 		return item.ID
 	}
 	return ""
 }
 
 // documentEpoch returns the epoch of a document's Automerge state, or "" if it has none
-func (s *SyncServer) documentEpoch(d *Document) string {
+func (s *SyncServer) documentEpoch(d *wiki.Document) string {
 	rel, err := s.relPath(d.Path)
 	if err != nil {
 		return ""

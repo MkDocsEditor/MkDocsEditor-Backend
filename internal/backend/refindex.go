@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/OneOfOne/xxhash"
 	"gopkg.in/yaml.v3"
 )
@@ -30,22 +31,22 @@ type ItemRef struct {
 
 // treeLookup finds the items of a tree snapshot by their path relative to the docs folder
 type treeLookup struct {
-	root      *Section
-	documents map[string]*Document
-	resources map[string]*Resource
-	sections  map[string]*Section
+	root      *wiki.Section
+	documents map[string]*wiki.Document
+	resources map[string]*wiki.Resource
+	sections  map[string]*wiki.Section
 	// documentList is sorted by path
-	documentList []*Document
+	documentList []*wiki.Document
 }
 
-func newTreeLookup(root *Section) *treeLookup {
+func newTreeLookup(root *wiki.Section) *treeLookup {
 	l := &treeLookup{
 		root:      root,
-		documents: map[string]*Document{},
-		resources: map[string]*Resource{},
-		sections:  map[string]*Section{},
+		documents: map[string]*wiki.Document{},
+		resources: map[string]*wiki.Resource{},
+		sections:  map[string]*wiki.Section{},
 	}
-	for s := range root.walk() {
+	for s := range root.Walk() {
 		l.sections[s.RelPath] = s
 		for _, d := range s.Documents {
 			l.documents[d.RelPath] = d
@@ -68,7 +69,7 @@ func (l *treeLookup) resolve(p string) *ItemRef {
 		return resourceRef(r)
 	}
 	if s := l.sections[p]; s != nil {
-		if index := sectionIndexDocument(s); index != nil {
+		if index := wiki.SectionIndexDocument(s); index != nil {
 			return documentRef(index)
 		}
 		return sectionRef(s)
@@ -76,23 +77,9 @@ func (l *treeLookup) resolve(p string) *ItemRef {
 	return nil
 }
 
-// sectionIndexDocument returns the index document of a section (index.md, else README.md), or nil
-func sectionIndexDocument(s *Section) *Document {
-	var readme *Document
-	for _, d := range s.Documents {
-		switch d.Name + markdownFileExtension {
-		case "index.md":
-			return d
-		case "README.md":
-			readme = d
-		}
-	}
-	return readme
-}
-
 // item finds an item of any type by id
 func (l *treeLookup) item(id string) *ItemRef {
-	if id == RootSectionID {
+	if id == wiki.RootSectionID {
 		return sectionRef(l.root)
 	}
 	for _, d := range l.documents {
@@ -113,22 +100,22 @@ func (l *treeLookup) item(id string) *ItemRef {
 	return nil
 }
 
-func documentRef(d *Document) *ItemRef {
-	return &ItemRef{Type: TypeDocument, ID: d.ID, Path: d.RelPath, Name: d.Name}
+func documentRef(d *wiki.Document) *ItemRef {
+	return &ItemRef{Type: wiki.TypeDocument, ID: d.ID, Path: d.RelPath, Name: d.Name}
 }
 
-func resourceRef(r *Resource) *ItemRef {
-	return &ItemRef{Type: TypeResource, ID: r.ID, Path: r.RelPath, Name: r.Name}
+func resourceRef(r *wiki.Resource) *ItemRef {
+	return &ItemRef{Type: wiki.TypeResource, ID: r.ID, Path: r.RelPath, Name: r.Name}
 }
 
-func sectionRef(s *Section) *ItemRef {
-	return &ItemRef{Type: TypeSection, ID: s.ID, Path: s.RelPath, Name: s.Name}
+func sectionRef(s *wiki.Section) *ItemRef {
+	return &ItemRef{Type: wiki.TypeSection, ID: s.ID, Path: s.RelPath, Name: s.Name}
 }
 
 // resolvedRef is a parsed reference of a document, resolved against the tree
 type resolvedRef struct {
 	parsedRef
-	Source *Document
+	Source *wiki.Document
 	Dest   destination
 	// Target is the item, nil for broken references
 	Target *ItemRef
@@ -136,7 +123,7 @@ type resolvedRef struct {
 }
 
 // resolveReferences parses and resolves the references of a document text
-func resolveReferences(l *treeLookup, source *Document, refs []parsedRef) []resolvedRef {
+func resolveReferences(l *treeLookup, source *wiki.Document, refs []parsedRef) []resolvedRef {
 	out := make([]resolvedRef, 0, len(refs))
 	for _, r := range refs {
 		d, ok := parseDestination(source.RelPath, r.destinationText())
@@ -161,7 +148,7 @@ func resolveReferences(l *treeLookup, source *Document, refs []parsedRef) []reso
 // ReferenceIndex caches the parsed references of every document, see docs/references.md
 // section 4. It is only a cache for the read endpoints: moves parse the current texts.
 type ReferenceIndex struct {
-	tm   *TreeManager
+	tm   *wiki.TreeManager
 	sync *SyncServer
 
 	mu    sync.Mutex
@@ -174,7 +161,7 @@ type indexedDocument struct {
 }
 
 // NewReferenceIndex creates the index
-func NewReferenceIndex(tm *TreeManager, syncServer *SyncServer) *ReferenceIndex {
+func NewReferenceIndex(tm *wiki.TreeManager, syncServer *SyncServer) *ReferenceIndex {
 	return &ReferenceIndex{tm: tm, sync: syncServer, cache: map[string]*indexedDocument{}}
 }
 
@@ -220,7 +207,7 @@ func (ri *ReferenceIndex) Snapshot() *indexSnapshot {
 
 // documentRefsLocked returns the parsed references of a document, from the cache if its text
 // did not change. Open documents are read from their live text. Caller holds mu.
-func (ri *ReferenceIndex) documentRefsLocked(d *Document) ([]parsedRef, bool) {
+func (ri *ReferenceIndex) documentRefsLocked(d *wiki.Document) ([]parsedRef, bool) {
 	var key string
 	text, live := ri.sync.CurrentText(d)
 	if live {
@@ -291,14 +278,14 @@ func usedByConfig(configFile string) map[string]bool {
 }
 
 // unusedResources returns the resources no reference and no value in mkdocs.yml points to
-func (s *indexSnapshot) unusedResources() []*Resource {
+func (s *indexSnapshot) unusedResources() []*wiki.Resource {
 	used := usedByConfig(s.configFile)
 	for _, r := range s.all() {
-		if r.Target != nil && r.Target.Type == TypeResource {
+		if r.Target != nil && r.Target.Type == wiki.TypeResource {
 			used[r.Target.Path] = true
 		}
 	}
-	var out []*Resource
+	var out []*wiki.Resource
 	for p, r := range s.lookup.resources {
 		if !used[p] {
 			out = append(out, r)

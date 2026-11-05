@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	automerge "github.com/automerge/automerge-go"
 )
 
@@ -500,8 +502,8 @@ func TestSyncConcurrentClients(t *testing.T) {
 }
 
 func TestStateDirInsideDocsIsRefused(t *testing.T) {
-	project := newTestWiki(t)
-	tm := NewTreeManager(configuration.CurrentConfig.MkDocs)
+	project := wikitest.New(t)
+	tm := wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
 	if _, err := NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
 		t.Error("state dir inside docs accepted")
 	}

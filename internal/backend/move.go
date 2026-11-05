@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/labstack/echo/v4"
 )
@@ -131,7 +132,7 @@ type moveOp struct {
 }
 
 func (op *moveOp) mapPath(p string) string {
-	if m, ok := movePath(p, op.oldRel, op.newRel); ok {
+	if m, ok := wiki.MovePath(p, op.oldRel, op.newRel); ok {
 		return m
 	}
 	return p
@@ -159,7 +160,7 @@ func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
 			return rs.ReturnNotFound(c, id)
 		}
 		return apiError(c, me.status, me.code, me.message, me.details)
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, wiki.ErrNotFound):
 		return rs.ReturnNotFound(c, id)
 	}
 	log.Printf("Move of %s failed: %v", id, err)
@@ -176,8 +177,8 @@ func (rs *RestService) renameViaMove(c echo.Context, itemType string, name strin
 		return rs.ReturnNotFound(c, id)
 	}
 	currentName := path.Base(item.Path)
-	if itemType == TypeDocument {
-		currentName = strings.TrimSuffix(currentName, markdownFileExtension)
+	if itemType == wiki.TypeDocument {
+		currentName = strings.TrimSuffix(currentName, wiki.MarkdownFileExtension)
 	}
 	if name == currentName {
 		return rs.describeItem(itemType)(c)
@@ -199,12 +200,12 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 	locked := true
 	unlock := func() {
 		if locked {
-			tm.fsLock.Unlock()
+			tm.UnlockFS()
 			s.mu.Unlock()
 			locked = false
 		}
 	}
-	tm.fsLock.Lock()
+	tm.LockFS()
 	defer unlock()
 
 	lookup := newTreeLookup(tm.Root())
@@ -232,11 +233,11 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 	}
 	newLookup := newTreeLookup(tm.Root())
 	switch op.itemType {
-	case TypeSection:
+	case wiki.TypeSection:
 		result.Item = newLookup.sections[op.newRel]
-	case TypeDocument:
+	case wiki.TypeDocument:
 		result.Item = newLookup.documents[op.newRel]
-	case TypeResource:
+	case wiki.TypeResource:
 		result.Item = newLookup.resources[op.newRel]
 	}
 	unlock()
@@ -251,11 +252,11 @@ func (rs *RestService) performMove(c echo.Context, req *MoveRequest) (*MoveResul
 func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*moveOp, error) {
 	tm := rs.treeManager
 	switch req.Type {
-	case TypeSection, TypeDocument, TypeResource:
+	case wiki.TypeSection, wiki.TypeDocument, wiki.TypeResource:
 	default:
 		return nil, badMove(MoveReasonInvalidType, "type must be section, document or resource")
 	}
-	if req.Type == TypeSection && req.ID == RootSectionID {
+	if req.Type == wiki.TypeSection && req.ID == wiki.RootSectionID {
 		return nil, badMove(MoveReasonRoot, "the root section cannot be moved")
 	}
 	item := lookup.item(req.ID)
@@ -281,19 +282,19 @@ func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*move
 	if req.Name != "" {
 		name = req.Name
 	}
-	if err := ValidateName(name); err != nil {
+	if err := wiki.ValidateName(name); err != nil {
 		return nil, badMove(MoveReasonInvalidName, err.Error())
 	}
 	fileName := name
-	if req.Type == TypeDocument {
-		fileName += markdownFileExtension
+	if req.Type == wiki.TypeDocument {
+		fileName += wiki.MarkdownFileExtension
 	}
 	newRel := path.Join(parentRel, fileName)
 
-	if req.Type == TypeSection && isInside(parentRel, oldRel) {
+	if req.Type == wiki.TypeSection && wiki.IsInside(parentRel, oldRel) {
 		return nil, badMove(MoveReasonIntoItself, "a section cannot be moved into itself or a section below it")
 	}
-	blocked := tm.blockedPaths()
+	blocked := tm.BlockedPaths()
 	for _, moved := range rs.movedItems(lookup, &moveOp{itemType: req.Type, oldRel: oldRel, newRel: newRel}) {
 		if slices.Contains(blocked, moved.NewPath) {
 			return nil, badMove(MoveReasonBlacklisted, moved.NewPath+" is on the blacklist or an extra_css file")
@@ -304,7 +305,7 @@ func (rs *RestService) validateMove(lookup *treeLookup, req *MoveRequest) (*move
 	}
 	newAbs := filepath.Join(tm.RootPath(), filepath.FromSlash(newRel))
 	oldAbs := filepath.Join(tm.RootPath(), filepath.FromSlash(oldRel))
-	if exists, err := fileExists(newAbs); err != nil {
+	if exists, err := wiki.FileExists(newAbs); err != nil {
 		return nil, err
 	} else if exists && !sameFile(oldAbs, newAbs) {
 		return nil, &moveError{status: http.StatusConflict, code: CodeConflict, message: newRel + " already exists",
@@ -342,29 +343,29 @@ func (rs *RestService) movedItems(lookup *treeLookup, op *moveOp) []MovedItem {
 		newRel := op.mapPath(rel)
 		out = append(out, MovedItem{
 			Type:    itemType,
-			OldID:   rs.treeManager.idOfRelPath(rel),
-			NewID:   rs.treeManager.idOfRelPath(newRel),
+			OldID:   rs.treeManager.IDOfRelPath(rel),
+			NewID:   rs.treeManager.IDOfRelPath(newRel),
 			OldPath: rel,
 			NewPath: newRel,
 		})
 	}
-	if op.itemType != TypeSection {
+	if op.itemType != wiki.TypeSection {
 		add(op.itemType, op.oldRel)
 		return out
 	}
 	for p := range lookup.sections {
-		if isInside(p, op.oldRel) {
-			add(TypeSection, p)
+		if wiki.IsInside(p, op.oldRel) {
+			add(wiki.TypeSection, p)
 		}
 	}
 	for p := range lookup.documents {
-		if isInside(p, op.oldRel) {
-			add(TypeDocument, p)
+		if wiki.IsInside(p, op.oldRel) {
+			add(wiki.TypeDocument, p)
 		}
 	}
 	for p := range lookup.resources {
-		if isInside(p, op.oldRel) {
-			add(TypeResource, p)
+		if wiki.IsInside(p, op.oldRel) {
+			add(wiki.TypeResource, p)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].OldPath < out[j].OldPath })
@@ -373,7 +374,7 @@ func (rs *RestService) movedItems(lookup *treeLookup, op *moveOp) []MovedItem {
 
 // plannedDocument is a document whose references change
 type plannedDocument struct {
-	doc     *Document
+	doc     *wiki.Document
 	oldRel  string
 	newRel  string
 	session *docSession
@@ -495,7 +496,7 @@ func (s *SyncServer) moveSessions(op *moveOp, planned []*plannedDocument) ([]*pl
 		sessions = append(sessions, pd)
 	}
 	for p, session := range s.sessions {
-		if isInside(p, op.oldRel) && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
+		if wiki.IsInside(p, op.oldRel) && !slices.ContainsFunc(sessions, func(pd *plannedDocument) bool { return pd.session == session }) {
 			sessions = append(sessions, &plannedDocument{oldRel: p, newRel: op.mapPath(p), session: session})
 		}
 	}
@@ -554,14 +555,14 @@ func (s *SyncServer) moveOnDisk(op *moveOp, config *moveConfig, moved []MovedIte
 	}
 	configChanges := len(config.edits) > 0
 	if configChanges {
-		if err := WriteFile(config.file, []byte(config.after)); err != nil {
+		if err := wiki.WriteFile(config.file, []byte(config.after)); err != nil {
 			undoState()
 			return err
 		}
 	}
 	if err := s.redirects.Append(s.redirectEntries(op, moved)...); err != nil {
 		if configChanges {
-			if werr := WriteFile(config.file, config.before); werr != nil {
+			if werr := wiki.WriteFile(config.file, config.before); werr != nil {
 				log.Printf("Unable to restore %s: %v", config.file, werr)
 			}
 		}
@@ -692,7 +693,7 @@ func (s *SyncServer) redirectEntries(op *moveOp, moved []MovedItem) []RedirectEn
 	entries := make([]RedirectEntry, 0, len(moved))
 	for _, m := range moved {
 		e := RedirectEntry{Time: now, Type: m.Type, OldPath: m.OldPath, NewPath: m.NewPath, AccountID: accountID}
-		if m.Type == TypeDocument {
+		if m.Type == wiki.TypeDocument {
 			// the state has already moved with the file
 			if meta := s.store.Meta(m.NewPath); meta != nil {
 				e.UUID, e.Epoch = meta.UUID, meta.Epoch

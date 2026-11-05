@@ -13,6 +13,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 const gitPendingFile = "git-pending.json"
@@ -183,7 +184,7 @@ func (c *GitCommitter) takePending(paths ...string) map[string]int {
 	total := map[string]int{}
 	for p, e := range c.pending {
 		for _, q := range paths {
-			if isInside(p, q) {
+			if wiki.IsInside(p, q) {
 				for user, n := range e.Changes {
 					total[user] += n
 				}
@@ -353,7 +354,7 @@ func (c *GitCommitter) saveIfDirty() {
 	}
 	data, err := json.MarshalIndent(c.pending, "", "  ")
 	if err == nil {
-		err = WriteFile(c.statePath, data)
+		err = wiki.WriteFile(c.statePath, data)
 	}
 	if err != nil {
 		log.Printf("Unable to save %s: %v", c.statePath, err)

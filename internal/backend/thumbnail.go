@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/OneOfOne/xxhash"
 	"github.com/labstack/echo/v4"
 	xdraw "golang.org/x/image/draw"
@@ -39,14 +40,6 @@ var thumbnailSizes = []int{64, 128, 256, 512, 1024}
 
 // errNoThumbnail is returned for files that get no thumbnail
 var errNoThumbnail = errors.New("no thumbnail for this file")
-
-// thumbnailMimeTypes are the image types that get thumbnails
-var thumbnailMimeTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
-
-// hasThumbnail reports whether GET /resource/{id}/thumbnail/ works for a MIME type
-func hasThumbnail(mimeType string) bool {
-	return thumbnailMimeTypes[mimeType]
-}
 
 // thumbnailSize rounds a requested size up to one of the thumbnail sizes
 func thumbnailSize(param string) (int, error) {
@@ -76,7 +69,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 	if err != nil {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), map[string]any{"field": "size"})
 	}
-	if !hasThumbnail(r.MimeType) {
+	if !wiki.HasThumbnail(r.MimeType) {
 		return apiError(c, http.StatusNotFound, CodeNotFound, errNoThumbnail.Error(), nil)
 	}
 	key := thumbnailKey(r, size)
@@ -105,7 +98,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 		return rs.ReturnError(c, err)
 	}
 	if err = os.MkdirAll(dir, 0o750); err == nil {
-		err = WriteFile(filepath.Join(dir, key+ext), data)
+		err = wiki.WriteFile(filepath.Join(dir, key+ext), data)
 	}
 	if err != nil {
 		// serving it matters more than caching it
@@ -116,7 +109,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 
 // renderThumbnail makes a thumbnail in one of the limited slots. It gives up waiting for a slot
 // when ctx ends.
-func (rs *RestService) renderThumbnail(ctx context.Context, r *Resource, size int) ([]byte, string, error) {
+func (rs *RestService) renderThumbnail(ctx context.Context, r *wiki.Resource, size int) ([]byte, string, error) {
 	select {
 	case rs.thumbnailSlots <- struct{}{}:
 	case <-ctx.Done():
@@ -128,7 +121,7 @@ func (rs *RestService) renderThumbnail(ctx context.Context, r *Resource, size in
 
 // thumbnailKey is the name of a cached thumbnail, without the extension. It changes with the
 // path and the content of the resource.
-func thumbnailKey(r *Resource, size int) string {
+func thumbnailKey(r *wiki.Resource, size int) string {
 	return strconv.FormatUint(xxhash.ChecksumString64(fmt.Sprintf("%s|%d|%d|%d", r.RelPath, size, r.Filesize, r.ModTime.UnixNano())), 16)
 }
 
@@ -139,7 +132,7 @@ func (rs *RestService) thumbnailDir() string {
 // pruneThumbnails removes the cached thumbnails that belong to no current version of a resource
 // in the tree: the resource was deleted, moved or changed. Hidden files are temporary files of
 // thumbnails that are being written.
-func (rs *RestService) pruneThumbnails(root *Section) {
+func (rs *RestService) pruneThumbnails(root *wiki.Section) {
 	entries, err := os.ReadDir(rs.thumbnailDir())
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -148,9 +141,9 @@ func (rs *RestService) pruneThumbnails(root *Section) {
 		return
 	}
 	keep := map[string]bool{}
-	for s := range root.walk() {
+	for s := range root.Walk() {
 		for _, r := range s.Resources {
-			if hasThumbnail(r.MimeType) {
+			if wiki.HasThumbnail(r.MimeType) {
 				for _, size := range thumbnailSizes {
 					keep[thumbnailKey(r, size)] = true
 				}

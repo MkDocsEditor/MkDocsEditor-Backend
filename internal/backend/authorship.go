@@ -3,6 +3,7 @@ package backend
 import (
 	"unicode/utf8"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
@@ -143,7 +144,7 @@ func appendRun(runs []authorRun, r authorRun) []authorRun {
 // Authorship returns the per-character authorship of a document. The document is loaded
 // (and its file content merged) if needed. While the document is loaded, the replay state is
 // kept and only advanced by new changes.
-func (s *SyncServer) Authorship(d *Document) (*Authorship, error) {
+func (s *SyncServer) Authorship(d *wiki.Document) (*Authorship, error) {
 	var result *Authorship
 	var fork *automerge.Doc
 	err := s.withSession(d, func(session *docSession) error {

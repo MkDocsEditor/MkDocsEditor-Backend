@@ -1,4 +1,4 @@
-package backend
+package wiki
 
 import (
 	"io/fs"

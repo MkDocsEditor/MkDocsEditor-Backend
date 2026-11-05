@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 // LinkTarget is the input of the link path algorithm, see docs/references.md section 8
@@ -37,7 +39,7 @@ type linkEncoding struct {
 
 func linkPath(fromPath string, target LinkTarget, anchor string, enc linkEncoding) string {
 	targetPath, folder := target.Path, false
-	if target.Type == TypeSection {
+	if target.Type == wiki.TypeSection {
 		if target.Index != "" {
 			targetPath = target.Index
 		} else {

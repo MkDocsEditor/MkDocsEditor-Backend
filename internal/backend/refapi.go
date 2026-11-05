@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v4"
 )
 
@@ -68,7 +69,7 @@ type (
 
 	// UnusedResources is the answer of GET /references/unused-resources/
 	UnusedResources struct {
-		Resources []*Resource `json:"resources"`
+		Resources []*wiki.Resource `json:"resources"`
 	}
 
 	// LinkResult is the answer of GET /link/
@@ -122,7 +123,7 @@ func (rs *RestService) getDocumentBacklinks(c echo.Context) error {
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
-	return rs.backlinks(c, documentRef(d), "", func(t *ItemRef) bool { return t.Type == TypeDocument && t.ID == d.ID })
+	return rs.backlinks(c, documentRef(d), "", func(t *ItemRef) bool { return t.Type == wiki.TypeDocument && t.ID == d.ID })
 }
 
 // GET /resource/:id/backlinks/
@@ -132,7 +133,7 @@ func (rs *RestService) getResourceBacklinks(c echo.Context) error {
 	if r == nil {
 		return rs.ReturnNotFound(c, id)
 	}
-	return rs.backlinks(c, resourceRef(r), "", func(t *ItemRef) bool { return t.Type == TypeResource && t.ID == r.ID })
+	return rs.backlinks(c, resourceRef(r), "", func(t *ItemRef) bool { return t.Type == wiki.TypeResource && t.ID == r.ID })
 }
 
 // GET /section/:id/backlinks/: references to the section and everything inside it
@@ -142,16 +143,7 @@ func (rs *RestService) getSectionBacklinks(c echo.Context) error {
 	if s == nil {
 		return rs.ReturnNotFound(c, id)
 	}
-	return rs.backlinks(c, sectionRef(s), s.RelPath, func(t *ItemRef) bool { return isInside(t.Path, s.RelPath) })
-}
-
-// isInside reports whether p is the path dir or below it ("" is the docs folder)
-func isInside(p string, dir string) bool {
-	if dir == "" {
-		return true
-	}
-	_, ok := movePath(p, dir, dir)
-	return ok
+	return rs.backlinks(c, sectionRef(s), s.RelPath, func(t *ItemRef) bool { return wiki.IsInside(t.Path, s.RelPath) })
 }
 
 // backlinks answers the references whose target matches. Sources inside section (a path,
@@ -168,7 +160,7 @@ func (rs *RestService) backlinks(c echo.Context, item *ItemRef, section string, 
 			Destination: r.Raw,
 			Anchor:      r.Dest.anchor,
 			Target:      r.Target,
-			Internal:    item.Type == TypeSection && isInside(r.Source.RelPath, section),
+			Internal:    item.Type == wiki.TypeSection && wiki.IsInside(r.Source.RelPath, section),
 		})
 	}
 	return c.JSONPretty(http.StatusOK, result, jsonIndent)
@@ -191,7 +183,7 @@ func (rs *RestService) getUnusedResources(c echo.Context) error {
 	snap := rs.refs.Snapshot()
 	result := &UnusedResources{Resources: snap.unusedResources()}
 	if result.Resources == nil {
-		result.Resources = []*Resource{}
+		result.Resources = []*wiki.Resource{}
 	}
 	return c.JSONPretty(http.StatusOK, result, jsonIndent)
 }
@@ -213,14 +205,14 @@ func (rs *RestService) getLink(c echo.Context) error {
 	}
 	lt := LinkTarget{Type: target.Type, Path: target.Path}
 	text := target.Name
-	if target.Type == TypeSection {
-		if index := sectionIndexDocument(lookup.sections[target.Path]); index != nil {
+	if target.Type == wiki.TypeSection {
+		if index := wiki.SectionIndexDocument(lookup.sections[target.Path]); index != nil {
 			lt.Index = index.RelPath
 		}
 	}
 	dest := LinkPath(from.RelPath, lt, c.QueryParam("anchor"))
 	markdown := "[" + escapeLinkText(text) + "](" + dest + ")"
-	if r := lookup.resources[target.Path]; r != nil && r.Kind == ResourceKindImage {
+	if r := lookup.resources[target.Path]; r != nil && r.Kind == wiki.ResourceKindImage {
 		markdown = "![" + escapeLinkText(strings.TrimSuffix(r.Name, path.Ext(r.Name))) + "](" + dest + ")"
 	}
 	return c.JSONPretty(http.StatusOK, &LinkResult{Destination: dest, Markdown: markdown, Target: target}, jsonIndent)

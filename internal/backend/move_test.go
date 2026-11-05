@@ -9,16 +9,18 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	automerge "github.com/automerge/automerge-go"
 )
 
 func TestReferenceEditsKeepTheMarkup(t *testing.T) {
-	root := &Section{Type: TypeSection, ID: RootSectionID, Documents: []*Document{}, Subsections: []*Section{}, Resources: []*Resource{}}
-	guide := &Section{Type: TypeSection, ID: "g", Name: "guide", RelPath: "guide", Documents: []*Document{}, Subsections: []*Section{}, Resources: []*Resource{}}
+	root := &wiki.Section{Type: wiki.TypeSection, ID: wiki.RootSectionID, Documents: []*wiki.Document{}, Subsections: []*wiki.Section{}, Resources: []*wiki.Resource{}}
+	guide := &wiki.Section{Type: wiki.TypeSection, ID: "g", Name: "guide", RelPath: "guide", Documents: []*wiki.Document{}, Subsections: []*wiki.Section{}, Resources: []*wiki.Resource{}}
 	root.Subsections = append(root.Subsections, guide)
-	root.Documents = append(root.Documents, &Document{RelPath: "index.md", Name: "index"})
-	guide.Documents = append(guide.Documents, &Document{RelPath: "guide/setup.md", Name: "setup"})
-	guide.Resources = append(guide.Resources, &Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
+	root.Documents = append(root.Documents, &wiki.Document{RelPath: "index.md", Name: "index"})
+	guide.Documents = append(guide.Documents, &wiki.Document{RelPath: "guide/setup.md", Name: "setup"})
+	guide.Resources = append(guide.Resources, &wiki.Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
 	lookup := newTreeLookup(root)
 	op := &moveOp{oldRel: "guide", newRel: "Anleitungen/guide"}
 
@@ -131,15 +133,15 @@ func (e *restTestEnv) read(rel string) string {
 
 func TestMoveSection(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: RootSectionID, Name: "Handbuch"})
+	rec := e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: wiki.RootSectionID, Name: "Handbuch"})
 	expectStatus(t, rec, http.StatusOK)
-	handbuch := decode[Section](t, rec)
-	guide := findSectionByName(e.tm.Root(), "guide")
+	handbuch := decode[wiki.Section](t, rec)
+	guide := wikitest.FindSection(e.tm.Root(), "guide")
 	oldSetupID := e.docID("guide/setup.md")
 	configBefore, _ := os.ReadFile(filepath.Join(e.project, "mkdocs.yml"))
 
 	// the preview changes nothing
-	preview, _ := e.move(MoveRequest{Type: TypeSection, ID: guide.ID, Parent: handbuch.ID, DryRun: true}, http.StatusOK)
+	preview, _ := e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID, DryRun: true}, http.StatusOK)
 	if !preview.DryRun || preview.Item != nil || preview.OldPath != "guide" || preview.NewPath != "Handbuch/guide" || preview.NewID != e.docID("Handbuch/guide") {
 		t.Errorf("preview: %+v", preview)
 	}
@@ -169,7 +171,7 @@ func TestMoveSection(t *testing.T) {
 		t.Error("the preview changed mkdocs.yml")
 	}
 
-	result, _ := e.move(MoveRequest{Type: TypeSection, ID: guide.ID, Parent: handbuch.ID}, http.StatusOK)
+	result, _ := e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID}, http.StatusOK)
 	if result.DryRun || result.Item == nil || len(result.Documents) != 2 || len(result.Config) != 1 {
 		t.Fatalf("result: %+v", result)
 	}
@@ -203,14 +205,14 @@ func TestMoveSection(t *testing.T) {
 	}
 	var movedResp MovedResponse
 	e.getJSON("/moved/"+oldSetupID+"/", &movedResp)
-	if movedResp.OldID != oldSetupID || movedResp.Type != TypeDocument || movedResp.Item.ID != e.docID("Handbuch/guide/setup.md") || movedResp.MovedAt.IsZero() {
+	if movedResp.OldID != oldSetupID || movedResp.Type != wiki.TypeDocument || movedResp.Item.ID != e.docID("Handbuch/guide/setup.md") || movedResp.MovedAt.IsZero() {
 		t.Errorf("moved: %+v", movedResp)
 	}
 	expectStatus(t, e.do(http.MethodGet, "/moved/"+e.docID("index.md")+"/", nil, ""), http.StatusNotFound)
 	expectStatus(t, e.do(http.MethodGet, "/moved/unknown/", nil, ""), http.StatusNotFound)
 
 	// a second move of the section: the old id follows the chain
-	e.move(MoveRequest{Type: TypeSection, ID: result.NewID, Parent: RootSectionID, Name: "Anleitung"}, http.StatusOK)
+	e.move(MoveRequest{Type: wiki.TypeSection, ID: result.NewID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
 	e.getJSON("/moved/"+oldSetupID+"/", &movedResp)
 	if movedResp.Item.Path != "Anleitung/setup.md" {
 		t.Errorf("after the second move: %+v", movedResp.Item)
@@ -222,12 +224,12 @@ func TestMoveSection(t *testing.T) {
 
 func TestMovedList(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t), withTestUsers(t))
-	guide := findSectionByName(e.tm.Root(), "guide")
+	guide := wikitest.FindSection(e.tm.Root(), "guide")
 	oldSetupID := e.docID("guide/setup.md")
 	indexID := e.docID("index.md")
 
 	e.user, e.pass = "anna", "pw-anna"
-	e.move(MoveRequest{Type: TypeSection, ID: guide.ID, Parent: RootSectionID, Name: "Anleitung"}, http.StatusOK)
+	e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
 	newSetupID := e.docID("Anleitung/setup.md")
 
 	// readers may look up too; current, unknown and repeated ids are left out or answered once
@@ -238,10 +240,10 @@ func TestMovedList(t *testing.T) {
 		t.Fatalf("moved: %+v", list.Moved)
 	}
 	document, section := list.Moved[0], list.Moved[1]
-	if document.OldID != oldSetupID || document.Type != TypeDocument || document.Item.ID != newSetupID || document.MovedAt.IsZero() {
+	if document.OldID != oldSetupID || document.Type != wiki.TypeDocument || document.Item.ID != newSetupID || document.MovedAt.IsZero() {
 		t.Errorf("document: %+v", document)
 	}
-	if section.OldID != guide.ID || section.Type != TypeSection {
+	if section.OldID != guide.ID || section.Type != wiki.TypeSection {
 		t.Errorf("section: %+v", section)
 	}
 
@@ -279,10 +281,10 @@ func TestMovedList(t *testing.T) {
 func TestMoveValidation(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
 	root := e.tm.Root()
-	guide := findSectionByName(root, "guide")
-	rezepte := findSectionByName(root, "rezepte")
-	sub := decode[Section](t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: guide.ID, Name: "sub"}))
-	logo := findResourceByName(root, "logo.png")
+	guide := wikitest.FindSection(root, "guide")
+	rezepte := wikitest.FindSection(root, "rezepte")
+	sub := decode[wiki.Section](t, e.doJSON(http.MethodPost, "/section/", NewItemRequest{Parent: guide.ID, Name: "sub"}))
+	logo := wikitest.FindResource(root, "logo.png")
 
 	reason := func(body map[string]any) any {
 		details, _ := body["details"].(map[string]any)
@@ -294,18 +296,18 @@ func TestMoveValidation(t *testing.T) {
 		status int
 		reason string
 	}{
-		{"root", MoveRequest{Type: TypeSection, ID: RootSectionID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonRoot},
-		{"into itself", MoveRequest{Type: TypeSection, ID: guide.ID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonIntoItself},
-		{"into a subsection", MoveRequest{Type: TypeSection, ID: guide.ID, Parent: sub.ID}, http.StatusBadRequest, MoveReasonIntoItself},
-		{"no change", MoveRequest{Type: TypeDocument, ID: e.docID("index.md"), Parent: RootSectionID}, http.StatusBadRequest, MoveReasonNoChange},
-		{"invalid name", MoveRequest{Type: TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, MoveReasonInvalidName},
-		{"hidden name", MoveRequest{Type: TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, MoveReasonInvalidName},
-		{"blacklisted", MoveRequest{Type: TypeSection, ID: sub.ID, Parent: RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, MoveReasonBlacklisted},
-		{"extra_css", MoveRequest{Type: TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
+		{"root", MoveRequest{Type: wiki.TypeSection, ID: wiki.RootSectionID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonRoot},
+		{"into itself", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonIntoItself},
+		{"into a subsection", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: sub.ID}, http.StatusBadRequest, MoveReasonIntoItself},
+		{"no change", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: wiki.RootSectionID}, http.StatusBadRequest, MoveReasonNoChange},
+		{"invalid name", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, MoveReasonInvalidName},
+		{"hidden name", MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, MoveReasonInvalidName},
+		{"blacklisted", MoveRequest{Type: wiki.TypeSection, ID: sub.ID, Parent: wiki.RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, MoveReasonBlacklisted},
+		{"extra_css", MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
 		{"invalid type", MoveRequest{Type: "folder", ID: guide.ID}, http.StatusBadRequest, MoveReasonInvalidType},
-		{"exists", MoveRequest{Type: TypeDocument, ID: e.docID("rezepte/index.md"), Parent: RootSectionID}, http.StatusConflict, MoveReasonExists},
-		{"unknown item", MoveRequest{Type: TypeDocument, ID: "nope", Parent: RootSectionID}, http.StatusNotFound, ""},
-		{"unknown parent", MoveRequest{Type: TypeDocument, ID: e.docID("index.md"), Parent: "nope"}, http.StatusNotFound, ""},
+		{"exists", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("rezepte/index.md"), Parent: wiki.RootSectionID}, http.StatusConflict, MoveReasonExists},
+		{"unknown item", MoveRequest{Type: wiki.TypeDocument, ID: "nope", Parent: wiki.RootSectionID}, http.StatusNotFound, ""},
+		{"unknown parent", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: "nope"}, http.StatusNotFound, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, body := e.move(tt.req, tt.status)
@@ -321,17 +323,17 @@ func TestMoveValidation(t *testing.T) {
 	// readers may not move, not even as a preview
 	r := newRestTestEnv(t, withReferenceWiki(t), withTestUsers(t))
 	r.user, r.pass = "kid", "pw-kid"
-	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusForbidden)
+	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusForbidden)
 	r.user, r.pass = "anna", "pw-anna"
-	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusOK)
+	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusOK)
 }
 
 func TestRenameRewritesReferences(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	logo := findResourceByName(e.tm.Root(), "logo.png")
+	logo := wikitest.FindResource(e.tm.Root(), "logo.png")
 	rec := e.doJSON(http.MethodPut, "/resource/"+logo.ID+"/", RenameRequest{Name: "Logo groß.png"})
 	expectStatus(t, rec, http.StatusOK)
-	if r := decode[Resource](t, rec); r.Name != "Logo groß.png" || r.RelPath != "img/Logo groß.png" {
+	if r := decode[wiki.Resource](t, rec); r.Name != "Logo groß.png" || r.RelPath != "img/Logo groß.png" {
 		t.Errorf("renamed: %+v", r)
 	}
 	if got := e.read("index.md"); !strings.Contains(got, "![Logo](img/Logo%20groß.png)") {
@@ -347,7 +349,7 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 	// updateReferences: false only moves
 	off := false
-	e.move(MoveRequest{Type: TypeDocument, ID: id, Name: "Torte", UpdateReferences: &off}, http.StatusOK)
+	e.move(MoveRequest{Type: wiki.TypeDocument, ID: id, Name: "Torte", UpdateReferences: &off}, http.StatusOK)
 	if got := e.read("rezepte/index.md"); !strings.Contains(got, "[Käsekuchen](Käsekuchen.md)") {
 		t.Errorf("rezepte/index.md: %s", got)
 	}
@@ -361,7 +363,7 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 func TestBrokenReferenceMovedTo(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	e.move(MoveRequest{Type: TypeResource, ID: findResourceByName(e.tm.Root(), "logo.png").ID, Name: "Logo.png"}, http.StatusOK)
+	e.move(MoveRequest{Type: wiki.TypeResource, ID: wikitest.FindResource(e.tm.Root(), "logo.png").ID, Name: "Logo.png"}, http.StatusOK)
 	// a link to the old path that arrives on disk (git pull) is reported with the item now
 	if err := os.WriteFile(filepath.Join(e.tm.RootPath(), "reference", "api.md"), []byte("# API\n![alt](../img/logo.png)\n"), 0o644); err != nil {
 		t.Fatal(err)

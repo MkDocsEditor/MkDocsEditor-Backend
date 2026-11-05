@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 // The vectors in docs/link-paths.json are shared with the clients' tests
@@ -41,7 +43,7 @@ func TestLinkPathVectors(t *testing.T) {
 			continue
 		}
 		want := v.Target.Path
-		if v.Target.Type == TypeSection && v.Target.Index != "" {
+		if v.Target.Type == wiki.TypeSection && v.Target.Index != "" {
 			want = v.Target.Index
 		}
 		if d.path != want || d.outside {

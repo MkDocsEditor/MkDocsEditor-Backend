@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
 // withLinks gives the sync test wiki documents that link to each other
@@ -60,7 +62,7 @@ func TestMoveRewritesLiveDocument(t *testing.T) {
 	a.appendText("Typed while connected.\n")
 	eventually(t, "edit on the server", func() bool { return strings.Contains(e.serverText("index.md"), "Typed") })
 
-	e.postMove("bob", MoveRequest{Type: TypeDocument, ID: e.docID("guide/setup.md"), Parent: RootSectionID, Name: "Einrichtung"})
+	e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
 	a.waitFor("the rewrite", func() bool { return strings.Contains(a.textLocked(), "[setup](Einrichtung.md)") })
 	if got := a.text(); got != "# Home\n\nSee [setup](Einrichtung.md).\nTyped while connected.\n" {
 		t.Errorf("client text: %q", got)
@@ -98,7 +100,7 @@ func TestMoveOfflineEditsMerge(t *testing.T) {
 
 	// meanwhile the section moves, a new document is created at the old path, the server restarts
 	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
-	result := e.postMove("alice", MoveRequest{Type: TypeSection, ID: guide.ID, Parent: RootSectionID, Name: "Handbuch"})
+	result := e.postMove("alice", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Handbuch"})
 	// setup.md's "../index.md" stays valid in a section on the same level
 	if len(result.Documents) != 1 || result.Documents[0].Path != "index.md" {
 		t.Fatalf("documents: %+v", result.Documents)
@@ -161,7 +163,7 @@ func TestMoveRedirectsOldIDAfterHello(t *testing.T) {
 	a.connect(oldID)
 	a.disconnect()
 
-	e.postMove("bob", MoveRequest{Type: TypeDocument, ID: oldID, Name: "install"})
+	e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: oldID, Name: "install"})
 	a.appendText("offline\n")
 	if err := a.dial(oldID); err != nil {
 		t.Fatalf("the old id must be upgraded: %v", err)
@@ -197,7 +199,7 @@ func TestMoveGitCommit(t *testing.T) {
 	e.git0("commit", "-q", "-m", "Links")
 
 	e.tm.CreateItemTree()
-	result := e.postMove("bob", MoveRequest{Type: TypeDocument, ID: e.docID("guide/setup.md"), Parent: RootSectionID, Name: "Einrichtung"})
+	result := e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
 	if result.Commit == "" {
 		t.Fatal("no commit hash")
 	}
@@ -235,7 +237,7 @@ func TestMoveLateFix(t *testing.T) {
 	b.connect(e.docID("index.md"))
 	b.disconnect()
 
-	e.postMove("alice", MoveRequest{Type: TypeSection, ID: e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")), Parent: RootSectionID, Name: "Handbuch"})
+	e.postMove("alice", MoveRequest{Type: wiki.TypeSection, ID: e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")), Parent: wiki.RootSectionID, Name: "Handbuch"})
 	b.appendText("Offline: ![Bild](guide/image.png) and [again](<guide/setup.md#top>).\n")
 
 	b.connect(e.docID("index.md"))

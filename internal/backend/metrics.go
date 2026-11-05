@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
@@ -102,7 +103,7 @@ func (s *SyncServer) stats() syncStats {
 
 // countTree returns the number of sections, documents and resources below a section, itself
 // included
-func countTree(section *Section) (sections int, documents int, resources int) {
+func countTree(section *wiki.Section) (sections int, documents int, resources int) {
 	if section == nil {
 		return 0, 0, 0
 	}
@@ -134,7 +135,7 @@ func (c *GitCommitter) pendingStats() (documents int, changes int) {
 // cannot drift away from it
 type MetricsCollector struct {
 	sync *SyncServer
-	tree *TreeManager
+	tree *wiki.TreeManager
 	// git is nil if git is disabled
 	git *GitCommitter
 
@@ -149,7 +150,7 @@ type MetricsCollector struct {
 }
 
 // NewMetricsCollector creates the collector. git may be nil.
-func NewMetricsCollector(syncServer *SyncServer, tree *TreeManager, git *GitCommitter) *MetricsCollector {
+func NewMetricsCollector(syncServer *SyncServer, tree *wiki.TreeManager, git *GitCommitter) *MetricsCollector {
 	desc := func(name string, help string, labels ...string) *prometheus.Desc {
 		return prometheus.NewDesc(metrics.Namespace+"_"+name, help, labels, nil)
 	}
