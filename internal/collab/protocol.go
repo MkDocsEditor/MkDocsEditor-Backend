@@ -1,6 +1,9 @@
 package collab
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // ProtocolVersion is the version of the sync protocol, see docs/sync-protocol.md
 const ProtocolVersion = 1
@@ -108,6 +111,9 @@ type (
 		// LastActiveAt is stamped by the server, see docs/sync-protocol.md section 6
 		LastActiveAt string          `json:"lastActiveAt,omitempty"`
 		Selections   json.RawMessage `json:"selections"`
+		// Viewport is the visible text. From a client, null clears it and a missing one keeps
+		// it. From the server, a missing one means there is none.
+		Viewport json.RawMessage `json:"viewport,omitempty"`
 	}
 
 	PresenceSnapshotMessage struct {
@@ -125,13 +131,21 @@ type (
 		DisplayName  string          `json:"displayName"`
 		Color        string          `json:"color"`
 		Selections   json.RawMessage `json:"selections"`
+		Viewport     json.RawMessage `json:"viewport,omitempty"`
 		LastActiveAt string          `json:"lastActiveAt"`
+		// GhostMs is the remaining time of the ghost of this account, if it has one
+		GhostMs int64 `json:"ghostMs,omitempty"`
 	}
 
 	PresenceLeaveMessage struct {
 		Type       string `json:"type"`
 		DocumentID string `json:"documentId"`
 		ClientID   string `json:"clientId"`
+		// these are only set if the account leaves a ghost, see docs/sync-protocol.md section 6
+		AccountID  string          `json:"accountId,omitempty"`
+		Selections json.RawMessage `json:"selections,omitempty"`
+		Viewport   json.RawMessage `json:"viewport,omitempty"`
+		GhostMs    int64           `json:"ghostMs,omitempty"`
 	}
 
 	DocumentRenamedMessage struct {
@@ -151,6 +165,32 @@ type (
 type selection struct {
 	Anchor string `json:"anchor"`
 	Head   string `json:"head"`
+}
+
+// viewport is the visible text of a client, as cursors
+type viewport struct {
+	Top    string `json:"top"`
+	Bottom string `json:"bottom"`
+}
+
+// jsonNull is a viewport that a client clears
+var jsonNull = json.RawMessage("null")
+
+// cleanViewport checks a viewport and returns it without anything else the client sent. A
+// missing viewport stays nil.
+func cleanViewport(raw json.RawMessage) (json.RawMessage, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), jsonNull) {
+		return jsonNull, true
+	}
+	var v viewport
+	if err := json.Unmarshal(raw, &v); err != nil || v.Top == "" || v.Bottom == "" {
+		return nil, false
+	}
+	clean, err := json.Marshal(v)
+	return clean, err == nil
 }
 
 // hasSelections reports whether valid selections name at least one position

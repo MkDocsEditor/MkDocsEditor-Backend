@@ -457,9 +457,12 @@ order, see [sync-protocol.md](sync-protocol.md#6-presence):
 
 1. In the presence list, among connections with a cursor. A sender can have several
    connections, so it takes the one with the newest `lastActiveAt`.
-2. In `lastPositions` of `presence-snapshot`, where the sender last had a cursor. A sender who
+2. In `lastPositions` of `presence-snapshot`, where the sender last was. A sender who
    switched to a messenger is usually offline by the time the recipient opens the link.
 3. Otherwise it opens the document at the start.
+
+The link also turns on following if the sender is connected or is a ghost, see
+[Ghosts](sync-protocol.md#ghosts). A sender who is fully away is not followed.
 
 **Access request:**
 
@@ -1309,7 +1312,7 @@ compromised client device while unlocked, a malicious admin.
 | Timing attacks on secrets | lookups by hash, `subtle.ConstantTimeCompare` for remaining comparisons |
 | Brute force of link or session tokens | 256-bit tokens; per-IP limit on link endpoints |
 | Join link forwarded | it holds no secret and grants nothing; opening the document still needs a login with access to it |
-| Last positions reveal activity | everyone who can open a document sees where and when each account last had a cursor in it, for 30 days. This goes beyond live presence on purpose, for join links, and never leaves the document's own websocket; deleted accounts are left out |
+| Last positions reveal activity | everyone who can open a document sees where and when each account last had a cursor or a viewport in it, for 30 days. This goes beyond live presence on purpose, for join links, and never leaves the document's own websocket; deleted accounts are left out |
 | Access request by an impostor | a request only carries a claimed name, and `documentId` and `invitedBy` are claims too. The admin must confirm the person out of band before approving, and the clients say so. "Registration by invite links only" stays true: approval creates a normal invite, which is single use, expires and is revocable |
 | Access requests as spam or to probe the wiki | stricter per-IP limits, at most 50 pending, audit log with IP, setting to turn them off. An attacker with many addresses can fill the 50 places for 7 days, which blocks further requests but nothing else. The response is the same for known and unknown ids; only admins see the resolved document and inviter |
 | Access request token leaked or database stolen | the token is shown once, is 256 bits and stored as SHA-256. The token of the invite is the only one the server has to return later, so it is encrypted with the server key, and only returned for the access request token while the invite is unredeemed |

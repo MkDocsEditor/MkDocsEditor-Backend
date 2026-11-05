@@ -163,8 +163,10 @@ type testClient struct {
 	presences map[string]map[string]any
 	// lastPositions is from the presence snapshot
 	lastPositions []any
-	actors        map[string]string
-	messages      []map[string]any
+	// leaves holds the presence-leave messages
+	leaves   []map[string]any
+	actors   map[string]string
+	messages []map[string]any
 }
 
 func newTestClient(t *testing.T, env *syncEnv, user string) *testClient {
@@ -302,6 +304,7 @@ func (c *testClient) process(m map[string]any) {
 		}
 	case collab.MsgPresenceLeave:
 		delete(c.presences, m["clientId"].(string))
+		c.leaves = append(c.leaves, m)
 	case collab.MsgActor:
 		c.actors[m["actorId"].(string)] = m["username"].(string)
 	case collab.MsgError:

@@ -1,6 +1,7 @@
 package collab
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,8 @@ const ContentKey = "content"
 const (
 	// lastPositionKeep is how long a join link can find the last position of an account
 	lastPositionKeep = 30 * 24 * time.Hour
+	// defaultGhostLifetime is how long the cursor of a user stays after they left
+	defaultGhostLifetime = 60 * time.Second
 	// maxLastPositionSize limits what one account can make the server store per document
 	maxLastPositionSize = 4 << 10
 )
@@ -40,10 +43,12 @@ type docSession struct {
 	meta *DocumentMeta
 	// positionsDirty means meta.LastPositions has changes that are not on disk yet
 	positionsDirty bool
-	absPath        string
-	docID          string
-	doc            *automerge.Doc
-	conns          map[*wsConn]struct{}
+	// present holds the accounts with a connection, and since when this visit counts
+	present map[string]time.Time
+	absPath string
+	docID   string
+	doc     *automerge.Doc
+	conns   map[*wsConn]struct{}
 
 	// text and heads of the document the last time it was read from or written to disk
 	diskBaseText  string
@@ -112,6 +117,7 @@ func (s *SyncServer) openSession(relPath string, absPath string, docID string) (
 		absPath: absPath,
 		docID:   docID,
 		conns:   map[*wsConn]struct{}{},
+		present: map[string]time.Time{},
 	}
 
 	meta, saved, err := s.store.Load(relPath)
@@ -352,22 +358,90 @@ func (ds *docSession) flushLocked() {
 	ds.dirty = false
 }
 
-// rememberPositionLocked keeps the selections of an account. They reach the disk with the next
-// flush or when a connection leaves, so moving a cursor causes no write.
-func (ds *docSession) rememberPositionLocked(accountID string, selections json.RawMessage, at time.Time) {
-	if len(selections) > maxLastPositionSize || !hasSelections(selections) {
+// rememberPositionLocked keeps the selections and the viewport of an account. They reach the
+// disk with the next flush or when a connection leaves, so moving a cursor causes no write.
+func (ds *docSession) rememberPositionLocked(accountID string, selections json.RawMessage, view json.RawMessage, at time.Time) {
+	p := ds.meta.LastPositions[accountID]
+	changed := false
+	if len(selections) <= maxLastPositionSize && hasSelections(selections) && !bytes.Equal(selections, p.Selections) {
+		p.Selections = selections
+		changed = true
+	}
+	if view != nil && !bytes.Equal(view, jsonNull) && len(view) <= maxLastPositionSize && !bytes.Equal(view, p.Viewport) {
+		p.Viewport = view
+		changed = true
+	}
+	if !changed {
 		return
 	}
 	if ds.meta.LastPositions == nil {
 		ds.meta.LastPositions = map[string]LastPosition{}
 	}
-	for id, p := range ds.meta.LastPositions {
-		if at.Sub(p.Time) > lastPositionKeep {
+	for id, old := range ds.meta.LastPositions {
+		if at.Sub(old.Time) > lastPositionKeep {
 			delete(ds.meta.LastPositions, id)
 		}
 	}
-	ds.meta.LastPositions[accountID] = LastPosition{Selections: selections, Time: at}
+	p.Time = at
+	ds.meta.LastPositions[accountID] = p
 	ds.positionsDirty = true
+}
+
+// accountJoinedLocked ends the ghost of an account that is back. A position it had before the
+// ghost still counts as its position in this visit.
+func (ds *docSession) accountJoinedLocked(accountID string, now time.Time) {
+	if _, ok := ds.present[accountID]; ok {
+		return
+	}
+	since := now
+	if p, ok := ds.meta.LastPositions[accountID]; ok && !p.LeftAt.IsZero() {
+		if ghostRemaining(p, ds.server.GhostLifetime, now) > 0 {
+			since = p.Time
+		}
+		p.LeftAt = time.Time{}
+		ds.meta.LastPositions[accountID] = p
+		ds.positionsDirty = true
+	}
+	ds.present[accountID] = since
+}
+
+// accountLeftLocked returns the leave message of a connection. It has a ghost if that was the
+// last connection of the account, and the account had a position during this visit.
+func (ds *docSession) accountLeftLocked(conn *wsConn, now time.Time) *PresenceLeaveMessage {
+	msg := &PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: ds.docID, ClientID: conn.clientID}
+	accountID := conn.user.ID
+	for other := range ds.conns {
+		if other.user.ID == accountID {
+			return msg
+		}
+	}
+	since, present := ds.present[accountID]
+	delete(ds.present, accountID)
+	p, ok := ds.meta.LastPositions[accountID]
+	if !present || !ok || p.Time.Before(since) {
+		return msg
+	}
+	p.LeftAt = now
+	ds.meta.LastPositions[accountID] = p
+	ds.positionsDirty = true
+	msg.AccountID, msg.Selections, msg.Viewport = accountID, selectionsOrEmpty(p.Selections), p.Viewport
+	msg.GhostMs = ds.server.GhostLifetime.Milliseconds()
+	return msg
+}
+
+// ghostRemaining returns how long the ghost of a position lasts, 0 if it has none
+func ghostRemaining(p LastPosition, lifetime time.Duration, now time.Time) time.Duration {
+	if p.LeftAt.IsZero() {
+		return 0
+	}
+	return max(0, p.LeftAt.Add(lifetime).Sub(now))
+}
+
+func selectionsOrEmpty(selections json.RawMessage) json.RawMessage {
+	if selections == nil {
+		return json.RawMessage("[]")
+	}
+	return selections
 }
 
 // savePositionsLocked writes the remembered positions if they changed
@@ -394,8 +468,12 @@ func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
 		if u == nil || u.Status == auth.StatusDeleted {
 			continue
 		}
-		out = append(out, LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
-			Selections: p.Selections, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)})
+		info := LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
+			Selections: selectionsOrEmpty(p.Selections), Viewport: p.Viewport, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)}
+		if remaining := ghostRemaining(p, ds.server.GhostLifetime, now); remaining > 0 {
+			info.GhostMs = max(1, remaining.Milliseconds())
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].LastActiveAt != out[j].LastActiveAt {

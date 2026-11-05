@@ -276,10 +276,12 @@ left out. `client` is free text for logs.
 of every other connection on this document:
 `{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …],"lastPositions":[…]}`.
 A peer that connected but has not sent presence yet appears with `"selections": []`.
-`lastPositions` says where accounts last had a cursor, see [Presence](#6-presence).
+`lastPositions` says where accounts last were, see [Presence](#6-presence).
 
 **`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18"}`. Sent
-when a connection closes or times out.
+when a connection closes or times out. If this was the last connection of the account, it
+can also have `accountId`, `selections`, `viewport` and `ghostMs`, see
+[Ghosts](#ghosts).
 
 **`actor`**: a new actor binding (the same fields as the entries in `actors`). It is
 broadcast to all connections of the document when a new actor id is bound.
@@ -402,22 +404,69 @@ Presence is ephemeral. The server relays it and never stores it.
 - The server overwrites `clientId`, `accountId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
 - `lastActiveAt` (RFC 3339, in presence and in the peers of `presence-snapshot`) is stamped
-  by the server: the time of the last presence message of this connection, or the time it
-  connected if it has not sent one. Servers that have it list `join-presence` in `features`
+  by the server: the time of the last presence message of this connection, also one that only
+  changes the viewport, or the time it connected if it has not sent one. Servers that have it list `join-presence` in `features`
   of `GET /server-info/`. A join link picks the sender's connection with the newest value,
   see [auth.md](auth.md#access-request-and-join-link).
 - `lastPositions` in `presence-snapshot` holds, per account, the last non-empty selections
-  in this document, newest first, also for accounts that are offline or online without a
-  cursor: `{"accountId", "username", "displayName", "color", "selections", "lastActiveAt"}`.
-  `lastActiveAt` is the time of those selections. Entries are kept for 30 days, survive
-  restarts and moves, and end with the epoch, because cursors are only valid in their epoch.
-  Selections over 4 KiB are not kept, and deleted accounts are left out. The list can be
-  empty, and servers from before this field do not send it. A cursor can point into text
-  that was deleted since, so the client falls back to the start if it cannot resolve it.
+  and the last viewport in this document, newest first, also for accounts that are offline or
+  online without a cursor: `{"accountId", "username", "displayName", "color", "selections",
+  "viewport"?, "lastActiveAt", "ghostMs"?}`. `selections` is empty if the account only sent
+  a viewport. `lastActiveAt` is the time of the newest selections or viewport in this entry.
+  Entries are kept for 30 days, survive restarts and moves, and end with the epoch, because
+  cursors are only valid in their epoch. Selections or a viewport over 4 KiB are not kept, and
+  deleted accounts are left out. The list can be empty, and servers from before this field do
+  not send it. A cursor can point into text that was deleted since, so the client falls back
+  to the start if it cannot resolve it.
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
   users is the set of distinct account ids in the presence list.
+
+### Viewport
+
+Presence can have an optional `viewport`, the text the user is looking at:
+
+```json
+{ "type": "presence", "documentId": "…", "selections": [], "viewport": { "top": "<cursor>", "bottom": "<cursor>" } }
+```
+
+- `top` and `bottom` are cursors of the first and last visible character, in the format of
+  selections, including `"start"` and `"end"`. They stay correct across edits and do not
+  depend on the screen size or on line wrapping.
+- Clients always send their current `selections`. Empty selections with a viewport mean "no
+  cursor", and the server keeps the last selections in `lastPositions`.
+- From a client, a missing `viewport` keeps the last one, and `"viewport": null` clears it.
+  Clients send null when their editor pane stops being visible, also when someone only reads
+  the rendered preview, so followers do not track a stale spot. From the server, presence is
+  always complete: a missing `viewport` means there is none.
+- Clients send it at most about twice per second while scrolling, and once more when
+  scrolling stops.
+- A follower centers the middle of `top` and `bottom`, on any screen size. Without a viewport
+  it scrolls to the cursor.
+
+### Ghosts
+
+When a user leaves, their cursor stays as a ghost for 60 seconds, so following survives a
+network problem or a quick switch to another app.
+
+```json
+{ "type": "presence-leave", "documentId": "…", "clientId": "c-18", "accountId": "…", "selections": [ … ], "viewport": { … }, "ghostMs": 60000 }
+```
+
+- `accountId`, `selections` and `ghostMs` are only present when the last connection of the
+  account to this document left, and the account had a cursor or a viewport while it was
+  connected. Otherwise there is no ghost. `viewport` is present if there is one.
+- `ghostMs` is a duration and counts from receipt, so differing clocks do not matter. A
+  client that joins during that time finds the remaining time as `ghostMs` of the entry in
+  `lastPositions`. Entries without a ghost do not have the field.
+- A presence message of that account, or a peer in `presence-snapshot`, ends the ghost.
+  Clients key ghosts and following on `accountId`, because a reconnect has a new `clientId`.
+- **Following:** following continues while the ghost lasts, resumes when the account returns,
+  and ends when the ghost expires.
+- **Join links:** a sender who is a ghost still counts as present, so the link turns on
+  following. A sender without a connection and without a ghost is fully away, so the link only
+  goes to the entry in `lastPositions`. See [auth.md](auth.md#access-request-and-join-link).
 
 ### Events websocket
 
