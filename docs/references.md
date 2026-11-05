@@ -322,7 +322,7 @@ problem:
 |---|---|
 | the item and the target section exist | `404` `not-found` |
 | the item is not the root section | `400` `bad-request`, `details.reason: "root"` |
-| the name is a plain, visible file name (no `/`, `\`, NUL, no leading `.`) | `400` `bad-request`, `details.reason: "invalid-name"` |
+| the name is a plain, visible file name (no `/`, `\`, control characters, no leading `.`) | `400` `bad-request`, `details.reason: "invalid-name"` |
 | the new path is not blacklisted and not an `extra_css` file | `400` `bad-request`, `details.reason: "blacklisted"` |
 | a section is not moved into itself or a section below it | `400` `bad-request`, `details.reason: "into-itself"` |
 | something changes | `400` `bad-request`, `details.reason: "no-change"` |

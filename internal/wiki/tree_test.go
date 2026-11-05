@@ -75,7 +75,7 @@ func TestTreeStructure(t *testing.T) {
 
 func TestValidateName(t *testing.T) {
 	valid := []string{"a", "My Page", "über", "file.png", "a..b"}
-	invalid := []string{"", ".", "..", "../x", "a/b", "a\\b", ".hidden", "x\x00y"}
+	invalid := []string{"", ".", "..", "../x", "a/b", "a\\b", ".hidden", "x\x00y", "a\nb", "a\rb", "a\tb", "a\x1bb", "a\x7fb", "a\u0085b"}
 	for _, n := range valid {
 		if err := wiki.ValidateName(n); err != nil {
 			t.Errorf("ValidateName(%q) = %v, want nil", n, err)

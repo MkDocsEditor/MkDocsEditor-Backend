@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/OneOfOne/xxhash"
@@ -390,9 +391,10 @@ func (tm *TreeManager) ReadDocumentContent(d *Document) (string, error) {
 }
 
 // ValidateName checks that a name given by a client is a plain, visible file name
-// that cannot escape its parent folder.
+// that cannot escape its parent folder. Control characters are rejected because names end up
+// in the plain log lines, where a line break would forge a log entry.
 func ValidateName(name string) error {
-	if name == "" || strings.ContainsAny(name, "/\\\x00") || strings.HasPrefix(name, ".") {
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") || strings.ContainsFunc(name, unicode.IsControl) {
 		return fmt.Errorf("%w: %q", ErrInvalidName, name)
 	}
 	return nil
