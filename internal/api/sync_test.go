@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -919,4 +921,208 @@ func TestSyncFailedWriteIsRetried(t *testing.T) {
 	eventually(t, "the document to be unloaded", func() bool {
 		return e.ss.Stats().LoadedDocuments == 0
 	})
+}
+
+// authorshipOf returns the runs of a document as "user:text" and fails on gaps
+func authorshipOf(t *testing.T, e *syncEnv, id string, text string) string {
+	t.Helper()
+	rec := e.do(http.MethodGet, "/document/"+id+"/authorship/", "carol")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var au collab.Authorship
+	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
+		t.Fatal(err)
+	}
+	runes := []rune(text)
+	var got []string
+	end := 0
+	for _, r := range au.Runs {
+		if r.Start != end || r.End > len(runes) {
+			t.Fatalf("run %+v after %d for a text of %d", r, end, len(runes))
+		}
+		end = r.End
+		got = append(got, r.Username+":"+string(runes[r.Start:r.End]))
+	}
+	if end != len(runes) {
+		t.Fatalf("runs end at %d, text has %d code points", end, len(runes))
+	}
+	return strings.Join(got, "|")
+}
+
+func authorshipFile(t *testing.T, e *syncEnv, dir string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(e.stateDir, "documents", dir, "*.authorship"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		return ""
+	}
+	return matches[0]
+}
+
+// A snapshot is written when an edited document unloads, also without any authorship request, and
+// survives a restart. Damaged snapshots are ignored and replaced.
+func TestAuthorshipSnapshotSurvivesRestartAndDamage(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.insertText(0, "Hello ")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
+	want := "alice:Hello |:server:" + setupText
+	a.disconnect()
+	eventually(t, "the snapshot", func() bool { return authorshipFile(t, e, "") != "" })
+	text := "Hello " + setupText
+
+	e.restart()
+	if got := authorshipOf(t, e, id, text); got != want {
+		t.Fatalf("after a restart: %q, want %q", got, want)
+	}
+
+	good, err := os.ReadFile(authorshipFile(t, e, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err = json.Unmarshal(good, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	damage := map[string]func() []byte{
+		"not json":       func() []byte { return []byte("{") },
+		"truncated file": func() []byte { return nil },
+		"old version":    func() []byte { return replaced(t, snapshot, "version", 0) },
+		"other epoch":    func() []byte { return replaced(t, snapshot, "epoch", "other") },
+		"unknown heads": func() []byte {
+			return replaced(t, snapshot, "heads", []string{strings.Repeat("ab", 32)})
+		},
+		"runs too short": func() []byte {
+			return replaced(t, snapshot, "runs", []map[string]any{{"length": 1, "actor": "ff"}})
+		},
+	}
+	for name, content := range damage {
+		if err = os.WriteFile(authorshipFile(t, e, ""), content(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e.restart()
+		if got := authorshipOf(t, e, id, text); got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
+		eventually(t, "the new snapshot after "+name, func() bool {
+			now, err := os.ReadFile(authorshipFile(t, e, ""))
+			return err == nil && bytes.Equal(now, good)
+		})
+	}
+}
+
+func replaced(t *testing.T, snapshot map[string]any, key string, value any) []byte {
+	t.Helper()
+	changed := maps.Clone(snapshot)
+	changed[key] = value
+	b, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// Changes made after the snapshot are applied on top of it
+func TestAuthorshipContinuesFromSnapshot(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.insertText(0, "A ")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
+	a.disconnect()
+	eventually(t, "the snapshot", func() bool { return authorshipFile(t, e, "") != "" })
+	first, err := os.ReadFile(authorshipFile(t, e, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.restart()
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	b.appendText("B\n")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == b.text() })
+	want := "alice:A |:server:" + setupText + "|bob:B\n"
+	if got := authorshipOf(t, e, id, b.text()); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// and the concurrent requests of a new change share a job and agree
+	b.insertText(0, "C ")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == b.text() })
+	want = "bob:C |alice:A |:server:" + setupText + "|bob:B\n"
+	text := b.text()
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := authorshipOf(t, e, id, text); got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		}()
+	}
+	wg.Wait()
+	b.disconnect()
+	eventually(t, "a newer snapshot", func() bool {
+		now, err := os.ReadFile(authorshipFile(t, e, ""))
+		return err == nil && !bytes.Equal(now, first)
+	})
+}
+
+// The snapshot goes with the document when it is moved, deleted and restored
+func TestAuthorshipSnapshotFollowsTheDocument(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.insertText(0, "Hello ")
+	eventually(t, "server", func() bool { return e.serverText("guide/setup.md") == a.text() })
+	a.disconnect()
+	eventually(t, "the snapshot", func() bool { return authorshipFile(t, e, "") != "" })
+	text := "Hello " + setupText
+	want := "alice:Hello |:server:" + setupText
+
+	// rename the section above the document
+	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
+	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename: %v %v", resp, err)
+	}
+	_ = resp.Body.Close()
+	id = e.docID("handbook/setup.md")
+	before, err := os.ReadFile(authorshipFile(t, e, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := authorshipOf(t, e, id, text); got != want {
+		t.Errorf("renamed: %q, want %q", got, want)
+	}
+	if now, err := os.ReadFile(authorshipFile(t, e, "")); err != nil || !bytes.Equal(now, before) {
+		t.Errorf("the snapshot changed after the rename: %v", err)
+	}
+
+	rec := e.do(http.MethodDelete, "/document/"+id+"/", "alice")
+	if rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: status %d: %s", rec.Code, rec.Body.String())
+	}
+	eventually(t, "the archived snapshot", func() bool {
+		return authorshipFile(t, e, "") == "" && authorshipFile(t, e, "deleted") != ""
+	})
+
+	e.writeFile("handbook/setup.md", text)
+	e.tm.CreateItemTree()
+	if got := authorshipOf(t, e, id, text); got != want {
+		t.Errorf("restored: %q, want %q", got, want)
+	}
+	if authorshipFile(t, e, "") == "" || authorshipFile(t, e, "deleted") != "" {
+		t.Error("the snapshot was not restored")
+	}
 }

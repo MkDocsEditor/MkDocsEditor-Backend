@@ -60,6 +60,8 @@ type docSession struct {
 
 	// authorship replay state, advanced on request
 	authorship *authorshipState
+	// authorshipPending counts the changes since the last authorship job started
+	authorshipPending int
 }
 
 // newDocument creates a new Automerge document with the given text, made by a server actor
@@ -356,6 +358,11 @@ func (ds *docSession) flushLocked() {
 	metrics.DocumentStateSize.Observe(float64(len(state)))
 	ds.server.logSyncEvent(SyncEvent{Kind: SyncEventFlushed, Path: ds.meta.Path, Bytes: len(state), Heads: len(ds.doc.Heads()), DurationMs: milliseconds(start)})
 	ds.dirty = false
+	// at least one, changes that are not from clients are not counted one by one
+	ds.authorshipPending++
+	if ds.authorshipPending >= authorshipSnapshotChanges {
+		ds.startAuthorshipJobLocked(state)
+	}
 }
 
 // rememberPositionLocked keeps the selections and the viewport of an account. They reach the
@@ -507,6 +514,7 @@ func (ds *docSession) flushAfterDelay() {
 	}
 	ds.flushLocked()
 	if !ds.dirty && len(ds.conns) == 0 {
+		ds.snapshotAuthorshipLocked()
 		ds.closed = true
 		if s.sessions[ds.meta.Path] == ds {
 			delete(s.sessions, ds.meta.Path)
@@ -544,6 +552,7 @@ func (ds *docSession) countChangesLocked(changes []*automerge.Change) {
 	if len(changes) == 0 {
 		return
 	}
+	ds.authorshipPending += len(changes)
 	counts := map[string]int{}
 	for _, ch := range changes {
 		if owner := ds.server.actors.Owner(ch.ActorID()); owner != "" {

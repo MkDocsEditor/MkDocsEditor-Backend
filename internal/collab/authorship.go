@@ -142,47 +142,33 @@ func appendRun(runs []authorRun, r authorRun) []authorRun {
 }
 
 // Authorship returns the per-character authorship of a document. The document is loaded
-// (and its file content merged) if needed. While the document is loaded, the replay state is
-// kept and only advanced by new changes.
+// (and its file content merged) if needed. A few new changes are applied right here, anything
+// longer runs in a job without holding the locks, see authorship_snapshot.go.
 func (s *SyncServer) Authorship(d *wiki.Document) (*Authorship, error) {
-	var result *Authorship
-	var fork *automerge.Doc
-	err := s.withSession(d, func(session *docSession) error {
-		if state := session.authorship; state != nil {
-			changes, err := session.doc.Changes(state.heads...)
-			if err == nil && len(changes) < 1000 {
-				if err = state.advance(changes); err == nil {
-					result = state.result(s.actorOwner)
-					return nil
-				}
-			}
-			session.authorship = nil
+	var last *Authorship
+	for range authorshipAttempts {
+		var result *Authorship
+		var job *authorshipJob
+		err := s.withSession(d, func(session *docSession) error {
+			result, job = session.authorshipOrJobLocked()
+			return nil
+		})
+		if err != nil || result != nil {
+			return result, err
 		}
-		var err error
-		fork, err = session.doc.Fork()
-		return err
-	})
-	if err != nil || result != nil {
-		return result, err
-	}
-
-	// replaying the whole history takes a while, so it runs without holding the session lock
-	state, err := fullAuthorshipState(fork)
-	if err != nil {
-		return nil, err
-	}
-	if rel, err := s.relPath(d.Path); err == nil {
-		s.mu.Lock()
-		if session := s.sessions[rel]; session != nil {
-			session.mu.Lock()
-			if !session.closed && session.authorship == nil {
-				session.authorship = state
-			}
-			session.mu.Unlock()
+		if job == nil {
+			return nil, errAuthorshipStopped
 		}
-		s.mu.Unlock()
+		<-job.done
+		if job.err != nil {
+			return nil, job.err
+		}
+		// new changes may have arrived while it ran, so look again
+		last = job.result
 	}
-	return state.result(s.actorOwner), nil
+	// the document changes faster than this can catch up. The result of the job is a little
+	// behind, which its heads tell.
+	return last, nil
 }
 
 // ReplayAuthorship computes the authorship of a document from its whole history, without the

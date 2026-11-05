@@ -524,10 +524,18 @@ GET /document/{id}/authorship/
 - The server replays the document history in causal order and attributes every
   inserted text range to the change's actor (a text diff per change). `username` comes
   from the actor map. `:disk` and `:server` runs are external or imported text.
-- While a document is loaded, the server keeps the replay state and only applies the
-  changes made since the last request, so repeated requests are cheap. The first
-  request replays the whole history, which takes about 1.5 s for a page with 3000
-  changes.
+- A replay takes about 0.5 ms per change for a page of 20 KB, and history is never
+  compacted, so the server avoids repeating it. It stores the replay state as a snapshot
+  next to the document and only applies the changes made since then. The snapshot is
+  updated in the background every 200 changes and when a changed document is unloaded,
+  also if nobody asked for its authorship.
+- Up to 100 new changes are applied within the request. More wait for a background job,
+  which concurrent requests share. The first request of a document without a snapshot
+  replays the whole history once.
+- A snapshot that cannot be used is ignored and the history is replayed: a different
+  format version or epoch, heads the document does not have, runs that do not add up to
+  the text at those heads, or an unreadable file. Increase `authorshipSnapshotVersion`
+  whenever a change of the replay or the diff gives other runs for the same history.
 - Readers may call it. Adjacent runs of the same actor are merged.
 - Clients fetch it when they open a document and then update it themselves: text a
   local or remote change inserts belongs to that change's actor (from the sync
@@ -573,6 +581,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
   documents/
     <uuid>.automerge          Automerge save() of the document
     <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "lastPositions": {...}, "diskBaseHeads": [...], "diskBaseHash": "…"}
+    <uuid>.authorship         optional authorship snapshot, moves with the document's other state files
 ```
 
 - Documents have a stable internal uuid. The REST `documentId` is derived from the path

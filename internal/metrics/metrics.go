@@ -42,6 +42,12 @@ const (
 	ConnectionEvents   = "events"
 )
 
+// Values of the label "mode" of AuthorshipReplays
+const (
+	AuthorshipReplayFull   = "full"
+	AuthorshipReplayResume = "resume"
+)
+
 // Values of the label "reason" of SyncRejected
 const (
 	RejectInvalidMessage = "invalid-message"
@@ -164,6 +170,25 @@ var (
 		Namespace: Namespace,
 		Name:      "document_state_corrupt_total",
 		Help:      "Saved Automerge states that could not be loaded, so the document started a new epoch.",
+	})
+
+	AuthorshipReplays = factory.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "authorship_replays_total",
+		Help:      "Authorship replays that ran in the background, by mode (full: the whole history, resume: from the snapshot).",
+	}, []string{"mode"})
+
+	AuthorshipReplayDuration = factory.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: Namespace,
+		Name:      "authorship_replay_duration_seconds",
+		Help:      "Time of an authorship replay, by mode (full: the whole history, resume: from the snapshot).",
+		Buckets:   latencyBuckets,
+	}, []string{"mode"})
+
+	AuthorshipSnapshotsRejected = factory.NewCounter(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "authorship_snapshots_rejected_total",
+		Help:      "Authorship snapshots that could not be used, so the whole history was replayed.",
 	})
 
 	DocumentFlushes = factory.NewCounterVec(prometheus.CounterOpts{
