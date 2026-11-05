@@ -85,6 +85,14 @@ type SyncServer struct {
 	lastPending   int
 	onlineChanges chan struct{}
 	eventsDone    chan struct{}
+
+	// authorshipMu guards the running authorship jobs by document uuid. It is taken while
+	// holding a session lock, never the other way round.
+	authorshipMu      sync.Mutex
+	authorshipJobs    map[string]*authorshipJob
+	authorshipStopped bool
+	authorshipWorkers sync.WaitGroup
+	authorshipSlots   chan struct{}
 }
 
 // NewSyncServer creates the sync server. stateDir holds the Automerge state.
@@ -117,6 +125,8 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 			WriteBufferSize: 4096,
 			CheckOrigin:     checkOrigin(allowedOrigins),
 		},
+		authorshipJobs:   map[string]*authorshipJob{},
+		authorshipSlots:  make(chan struct{}, authorshipParallelJobs),
 		FlushDelay:       2 * time.Second,
 		HeartbeatPeriod:  5 * time.Second,
 		HeartbeatTimeout: 15 * time.Second,
@@ -461,6 +471,9 @@ func (s *SyncServer) Close() {
 		return
 	}
 	s.closed = true
+	s.authorshipMu.Lock()
+	s.authorshipStopped = true
+	s.authorshipMu.Unlock()
 	for p, session := range s.sessions {
 		session.mu.Lock()
 		session.flushLocked()
@@ -473,6 +486,7 @@ func (s *SyncServer) Close() {
 	}
 	s.mu.Unlock()
 	close(s.stop)
+	s.authorshipWorkers.Wait()
 	<-s.workerDone
 	<-s.eventsDone
 }
@@ -563,6 +577,7 @@ func (s *SyncServer) withSession(d *wiki.Document, f func(session *docSession) e
 			s.sessions[rel] = session
 			session.scheduleFlushLocked()
 		} else {
+			session.snapshotAuthorshipLocked()
 			session.closed = true
 		}
 	}
@@ -608,6 +623,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 		session.scheduleFlushLocked()
 		return
 	}
+	session.snapshotAuthorshipLocked()
 	session.closed = true
 	if s.sessions[session.meta.Path] == session {
 		delete(s.sessions, session.meta.Path)

@@ -616,6 +616,7 @@ func (s *SyncServer) releaseLocked(sessions []*plannedDocument) {
 			s.sessions[pd.session.meta.Path] = pd.session
 			pd.session.scheduleFlushLocked()
 		} else {
+			pd.session.snapshotAuthorshipLocked()
 			pd.session.closed = true
 		}
 		pd.session.mu.Unlock()

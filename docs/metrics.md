@@ -58,6 +58,9 @@ are exposed too.
 | `document_flushes_total` | `result` | Writes to the file and the state directory, retried on error |
 | `document_flush_duration_seconds` | | Duration of those writes |
 | `document_state_size_bytes` | | Size of the saved Automerge state at each flush |
+| `authorship_replays_total` | `mode` (`full`, `resume`) | Authorship replays in the background: the whole history, or from the snapshot |
+| `authorship_replay_duration_seconds` | `mode` | Duration of those replays |
+| `authorship_snapshots_rejected_total` | | Authorship snapshots that could not be used, so the whole history was replayed |
 | `tree_rebuilds_total` | | Rebuilds of the item tree |
 | `websocket_connections_total` | `type` (`document`, `events`) | Accepted websocket upgrades |
 | `websocket_send_queue_full_total` | | Clients disconnected for not keeping up |

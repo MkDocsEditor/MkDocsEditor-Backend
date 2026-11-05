@@ -23,6 +23,9 @@ const (
 	stateDeletedDir   = "deleted"
 	stateDocSuffix    = ".automerge"
 	stateMetaSuffix   = ".json"
+	// stateAuthorshipSuffix is the authorship snapshot. It can be recomputed from the document,
+	// so not having one is never an error.
+	stateAuthorshipSuffix = ".authorship"
 )
 
 // DocumentMeta is the sidecar of a saved Automerge document
@@ -55,6 +58,7 @@ type LastPosition struct {
 //
 //	<dir>/documents/<uuid>.automerge   Automerge save()
 //	<dir>/documents/<uuid>.json        DocumentMeta
+//	<dir>/documents/<uuid>.authorship  authorship snapshot, optional
 //	<dir>/documents/deleted/...        state of deleted documents
 //
 // State files are never deleted: corrupt files are renamed, deleted documents are moved.
@@ -130,6 +134,34 @@ func (s *StateStore) metaFile(dir string, uuid string) string {
 	return filepath.Join(dir, uuid+stateMetaSuffix)
 }
 
+func (s *StateStore) authorshipFile(dir string, uuid string) string {
+	return filepath.Join(dir, uuid+stateAuthorshipSuffix)
+}
+
+// LoadAuthorship returns the authorship snapshot of an active document, nil if it has none
+func (s *StateStore) LoadAuthorship(uuid string) ([]byte, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	data, err := os.ReadFile(s.authorshipFile(s.activeDir(), uuid))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return data, err
+}
+
+// SaveAuthorship writes the authorship snapshot of a document. It does nothing if the document was
+// deleted or got a new epoch since, so a job that finishes late leaves no file behind.
+func (s *StateStore) SaveAuthorship(uuid string, data []byte) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	for _, meta := range s.index {
+		if meta.UUID == uuid {
+			return wiki.WriteFile(s.authorshipFile(s.activeDir(), uuid), data)
+		}
+	}
+	return nil
+}
+
 func (s *StateStore) activeDir() string {
 	return filepath.Join(s.dir, stateDocumentsDir)
 }
@@ -191,6 +223,9 @@ func (s *StateStore) RestoreDeleted(relPath string) (bool, error) {
 		if err := os.Rename(f(s.deletedDir(), meta.UUID), f(s.activeDir(), meta.UUID)); err != nil {
 			return false, err
 		}
+	}
+	if err := os.Rename(s.authorshipFile(s.deletedDir(), meta.UUID), s.authorshipFile(s.activeDir(), meta.UUID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("Unable to restore the authorship snapshot of %s: %v", relPath, err)
 	}
 	delete(s.deleted, relPath)
 	s.index[relPath] = meta
@@ -264,7 +299,7 @@ func (s *StateStore) Archive(relPath string) error {
 		if !wiki.IsInside(p, relPath) {
 			continue
 		}
-		for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
+		for _, f := range []func(string, string) string{s.docFile, s.metaFile, s.authorshipFile} {
 			if err := os.Rename(f(s.activeDir(), meta.UUID), f(s.deletedDir(), meta.UUID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
@@ -280,7 +315,7 @@ func (s *StateStore) MarkCorrupt(meta *DocumentMeta) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	suffix := ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
-	for _, f := range []func(string, string) string{s.docFile, s.metaFile} {
+	for _, f := range []func(string, string) string{s.docFile, s.metaFile, s.authorshipFile} {
 		name := f(s.activeDir(), meta.UUID)
 		if err := os.Rename(name, name+suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
