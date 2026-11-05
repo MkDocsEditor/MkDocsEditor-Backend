@@ -262,10 +262,12 @@ left out. `client` is free text for logs.
   "type": "presence",
   "documentId": "…",
   "clientId": "c-18",
+  "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa",
   "username": "anna",
   "displayName": "Anna",
   "color": "#1971c2",
   "actorId": "…",
+  "lastActiveAt": "2026-11-05T09:30:12.123Z",
   "selections": [ { "anchor": "<cursor>", "head": "<cursor>" } ]
 }
 ```
@@ -398,6 +400,11 @@ Presence is ephemeral. The server relays it and never stores it.
   text), so receivers always handle both.
 - The server overwrites `clientId`, `accountId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
+- `lastActiveAt` (RFC 3339, in presence and in the peers of `presence-snapshot`) is stamped
+  by the server: the time of the last presence message of this connection, or the time it
+  connected if it has not sent one. Servers that have it list `join-presence` in `features`
+  of `GET /server-info/`. A join link picks the sender's connection with the newest value,
+  see [auth.md](auth.md#access-request-and-join-link).
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
@@ -428,6 +435,11 @@ Every role may connect. The server then sends:
 - `{"type": "items-moved", "moves": [{"type", "oldId", "newId", "oldPath", "newPath"}]}`:
   items were moved or renamed, sent before `tree-changed`. Clients re-key open editors,
   tabs and caches; see [references.md](references.md#7-ids-after-a-move-redirects).
+- `{"type": "access-requests", "pending": 2}`: only for admins who connected with a
+  session, never for other roles or app tokens. It holds the number of pending access
+  requests, and comes right after the first `online` and whenever the number changes, also when a
+  request expires (checked once per minute). See
+  [auth.md](auth.md#access-request-and-join-link).
 - `{"type": "heartbeat"}`, as on the document websocket.
 
 The client sends `{"type": "heartbeat"}` at least every 5 seconds. Without any
