@@ -249,6 +249,21 @@ var (
 	}, []string{"type"})
 )
 
+// Values of the label "state" of NativeHeap
+const (
+	NativeHeapInUse = "in-use"
+	NativeHeapFree  = "free"
+)
+
+// Memory of C code (Automerge)
+var (
+	NativeHeap = factory.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "native_heap_bytes",
+		Help:      "Memory of malloc (Automerge) by state (in-use, free: kept by malloc, not yet returned to the system). Updated every minute, only with glibc.",
+	}, []string{"state"})
+)
+
 var buildInfo = factory.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: Namespace,
 	Name:      "build_info",

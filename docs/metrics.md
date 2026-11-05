@@ -62,6 +62,7 @@ are exposed too.
 | `authorship_replay_duration_seconds` | `mode` | Duration of those replays |
 | `authorship_snapshots_rejected_total` | | Authorship snapshots that could not be used, so the whole history was replayed |
 | `tree_rebuilds_total` | | Rebuilds of the item tree |
+| `native_heap_bytes` | `state` (`in-use`, `free`) | Memory of malloc, mostly Automerge documents. `free` is kept by malloc and not yet returned to the system. Updated every minute, only in builds with glibc |
 | `websocket_connections_total` | `type` (`document`, `events`) | Accepted websocket upgrades |
 | `websocket_send_queue_full_total` | | Clients disconnected for not keeping up |
 | `websocket_heartbeat_timeouts_total` | | Clients disconnected for missing heartbeats |
@@ -81,6 +82,12 @@ succeeded.
 
 `GET /alive/` is not in the HTTP metrics and not in the request log, because a readiness probe calls
 it every few seconds.
+
+`process_resident_memory_bytes` minus `go_memstats_sys_bytes` is roughly the memory of
+Automerge, which `native_heap_bytes` breaks down. The backend limits malloc to two arenas and
+returns the free memory to the system every minute: Automerge documents are freed in Go
+finalizers, and glibc kept that memory in per-thread arenas, so every load of a document made
+the process bigger.
 
 ## Sync event log
 
