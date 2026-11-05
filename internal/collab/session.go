@@ -405,7 +405,7 @@ func (ds *docSession) accountJoinedLocked(accountID string, now time.Time) {
 		if ghostRemaining(p, ds.server.GhostLifetime, now) > 0 {
 			since = p.Time
 		}
-		p.LeftAt = time.Time{}
+		p.LeftAt, p.LeftSession = time.Time{}, ""
 		ds.meta.LastPositions[accountID] = p
 		ds.positionsDirty = true
 	}
@@ -428,12 +428,64 @@ func (ds *docSession) accountLeftLocked(conn *wsConn, now time.Time) *PresenceLe
 	if !present || !ok || p.Time.Before(since) {
 		return msg
 	}
-	p.LeftAt = now
+	p.LeftAt, p.LeftSession = now, conn.sessionID
 	ds.meta.LastPositions[accountID] = p
 	ds.positionsDirty = true
 	msg.AccountID, msg.Selections, msg.Viewport = accountID, selectionsOrEmpty(p.Selections), p.Viewport
 	msg.GhostMs = ds.server.GhostLifetime.Milliseconds()
 	return msg
+}
+
+// soleConnectionLocked returns the connection of an account if it has exactly one
+func (ds *docSession) soleConnectionLocked(accountID string) *wsConn {
+	var sole *wsConn
+	for c := range ds.conns {
+		if c.user.ID == accountID {
+			if sole != nil {
+				return nil
+			}
+			sole = c
+		}
+	}
+	return sole
+}
+
+// sameDevice reports whether two connections are of one auth session, which is one device. Without
+// a session (app tokens) this is unknown, and they count as different devices.
+func sameDevice(a string, b string) bool {
+	return a != "" && a == b
+}
+
+// broadcastLeaveLocked tells everyone that a connection left. If only one connection of the
+// account remains and it is on another device, it gets a ghost of the connection that left, so
+// someone following their own other device keeps following. For everybody else the account is
+// still online.
+func (ds *docSession) broadcastLeaveLocked(conn *wsConn, leave *PresenceLeaveMessage) {
+	sole := ds.soleConnectionLocked(conn.user.ID)
+	if sole == nil || sameDevice(sole.sessionID, conn.sessionID) || (conn.ownSelections == nil && conn.ownViewport == nil) {
+		ds.broadcastLocked(leave, nil)
+		return
+	}
+	ds.broadcastLocked(leave, sole)
+	own := *leave
+	own.AccountID, own.Selections, own.Viewport = conn.user.ID, selectionsOrEmpty(conn.ownSelections), conn.ownViewport
+	own.GhostMs = ds.server.GhostLifetime.Milliseconds()
+	sole.send(&own)
+}
+
+// ownGhostLocked returns the rest of the ghost of the account of a joining connection, for that
+// connection itself. Only the ghost of another device counts: a join link opened right after the
+// sender left turns on following, while a reload shows no cursor of the previous connection. Call
+// it before accountJoinedLocked.
+func (ds *docSession) ownGhostLocked(conn *wsConn, now time.Time) time.Duration {
+	if _, present := ds.present[conn.user.ID]; present {
+		return 0
+	}
+	p, ok := ds.meta.LastPositions[conn.user.ID]
+	if !ok || sameDevice(conn.sessionID, p.LeftSession) {
+		return 0
+	}
+	return ghostRemaining(p, ds.server.GhostLifetime, now)
 }
 
 // ghostRemaining returns how long the ghost of a position lasts, 0 if it has none
@@ -463,8 +515,9 @@ func (ds *docSession) savePositionsLocked() {
 	ds.positionsDirty = false
 }
 
-// lastPositionsLocked lists the remembered positions of existing accounts, newest first
-func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
+// lastPositionsLocked lists the remembered positions of existing accounts, newest first.
+// ownGhost is the ghost of the account of the connection that gets the list.
+func (ds *docSession) lastPositionsLocked(accountID string, ownGhost time.Duration) []LastPositionInfo {
 	out := make([]LastPositionInfo, 0, len(ds.meta.LastPositions))
 	now := time.Now()
 	for id, p := range ds.meta.LastPositions {
@@ -479,6 +532,9 @@ func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
 			Selections: selectionsOrEmpty(p.Selections), Viewport: p.Viewport, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)}
 		if remaining := ghostRemaining(p, ds.server.GhostLifetime, now); remaining > 0 {
 			info.GhostMs = max(1, remaining.Milliseconds())
+		}
+		if id == accountID && ownGhost > 0 {
+			info.GhostMs = max(1, ownGhost.Milliseconds())
 		}
 		out = append(out, info)
 	}

@@ -52,6 +52,8 @@ type LastPosition struct {
 	Time       time.Time       `json:"time"`
 	// LeftAt is when the last connection of the account left. It is zero while one is connected.
 	LeftAt time.Time `json:"leftAt,omitzero"`
+	// LeftSession is the auth session of the connection that left, if it had one
+	LeftSession string `json:"leftSession,omitempty"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.

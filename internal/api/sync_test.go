@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -1124,5 +1125,209 @@ func TestAuthorshipSnapshotFollowsTheDocument(t *testing.T) {
 	}
 	if authorshipFile(t, e, "") == "" || authorshipFile(t, e, "deleted") != "" {
 		t.Error("the snapshot was not restored")
+	}
+}
+
+// ownDevice logs in anew, so the client has its own auth session like another device
+func ownDevice(t *testing.T, e *syncEnv, user string) *testClient {
+	t.Helper()
+	res, err := e.authn.LoginPassword(user, testPasswords[user], auth.SessionParams{Type: auth.SessionBearer, DeviceName: "other device"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := newTestClient(t, e, user)
+	c.authorization = "Bearer " + res.Token
+	return c
+}
+
+func viewportTop(top string) func(map[string]any) bool {
+	return func(m map[string]any) bool {
+		v, _ := m["viewport"].(map[string]any)
+		return v["top"] == top
+	}
+}
+
+func selectionAnchor(anchor string) func(map[string]any) bool {
+	return func(m map[string]any) bool {
+		s, _ := m["selections"].([]any)
+		return len(s) > 0 && s[0].(map[string]any)["anchor"] == anchor
+	}
+}
+
+func waitPresence(c *testClient, what string, match func(map[string]any) bool) {
+	c.t.Helper()
+	c.waitFor(what, func() bool {
+		for _, m := range c.presences {
+			if match(m) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func leaveCount(c *testClient) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.leaves)
+}
+
+// Someone following their own other device keeps following when it disconnects
+func TestSyncGhostForOwnConnection(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+	phoneSelection := []map[string]string{{"anchor": "phone-1", "head": "phone-1"}}
+	phoneView := map[string]string{"top": "phone-2", "bottom": "phone-3"}
+	followerView := map[string]string{"top": "follower-1", "bottom": "follower-2"}
+
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	browser := newTestClient(t, e, "alice")
+	browser.connect(id)
+	phone := ownDevice(t, e, "alice")
+	phone.connect(id)
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": phoneSelection, "viewport": phoneView})
+	waitPresence(browser, "the position of the phone", viewportTop("phone-2"))
+	// the app goes to the background and clears its position
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "viewport": nil})
+	browser.waitFor("the cleared position", func() bool {
+		for _, m := range browser.presences {
+			if viewportTop("phone-2")(m) {
+				return false
+			}
+		}
+		return true
+	})
+	// the follower publishes where it is, which must not move the ghost of the phone
+	browser.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "viewport": followerView})
+	waitPresence(phone, "the position of the follower", viewportTop("follower-1"))
+
+	phone.disconnect()
+	m := lastLeave(browser, 1)
+	viewport, _ := m["viewport"].(map[string]any)
+	selections, _ := m["selections"].([]any)
+	if m["accountId"] != alice || m["ghostMs"] != float64(60000) || viewport["top"] != "phone-2" || len(selections) != 1 || selections[0].(map[string]any)["anchor"] != "phone-1" {
+		t.Errorf("own ghost = %v", m)
+	}
+	if m := lastLeave(watcher, 1); m["ghostMs"] != nil || m["accountId"] != nil {
+		t.Errorf("leave for somebody else = %v", m)
+	}
+
+	// the device is back: the remaining connection gets its presence, which ends the ghost
+	phone.connect(id)
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": phoneSelection})
+	waitPresence(browser, "the phone is back", selectionAnchor("phone-1"))
+
+	// with three connections the remaining two still see each other, and the last one gets the ghost
+	third := ownDevice(t, e, "alice")
+	third.connect(id)
+	third.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "third-1", "head": "third-1"}}})
+	waitPresence(browser, "the third device", selectionAnchor("third-1"))
+	before := leaveCount(browser)
+	third.disconnect()
+	if m := lastLeave(browser, before+1); m["ghostMs"] != nil {
+		t.Errorf("leave with two connections left = %v", m)
+	}
+	before = leaveCount(browser)
+	phone.disconnect()
+	if m := lastLeave(browser, before+1); m["ghostMs"] != float64(60000) {
+		t.Errorf("leave with one connection left = %v", m)
+	}
+}
+
+// The sender of a join link leaves and opens the link on another device
+func TestSyncOwnGhostOnJoin(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+	sel := []map[string]string{{"anchor": "c", "head": "c"}}
+
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	phone := ownDevice(t, e, "alice")
+	phone.connect(id)
+	phone.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel})
+	waitPresence(watcher, "the position", selectionAnchor("c"))
+	phone.disconnect()
+	lastLeave(watcher, 1)
+
+	browser := newTestClient(t, e, "alice")
+	browser.connect(id)
+	p := lastPositionFor(browser, alice)
+	if ms, ok := p["ghostMs"].(float64); !ok || ms <= 0 || ms > 60000 {
+		t.Errorf("position for the other device = %v", p)
+	}
+	// for everybody else the account is back
+	late := newTestClient(t, e, "carol")
+	late.connect(id)
+	if p := lastPositionFor(late, alice); p["ghostMs"] != nil {
+		t.Errorf("position for somebody else = %v", p)
+	}
+
+	// a second connection finds the first one as a peer, not a ghost
+	second := ownDevice(t, e, "alice")
+	second.connect(id)
+	if p := lastPositionFor(second, alice); p["ghostMs"] != nil {
+		t.Errorf("position with another connection present = %v", p)
+	}
+}
+
+// A reload is a new connection of the same auth session, and shows no cursor of its old self
+func TestSyncNoOwnGhostAfterReload(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+
+	watcher := newTestClient(t, e, "bob")
+	watcher.connect(id)
+	tab := newTestClient(t, e, "alice")
+	tab.connect(id)
+	tab.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	waitPresence(watcher, "the position", selectionAnchor("c"))
+	tab.disconnect()
+	if m := lastLeave(watcher, 1); m["ghostMs"] == nil {
+		t.Errorf("no ghost for somebody else: %v", m)
+	}
+	reloaded := newTestClient(t, e, "alice")
+	reloaded.connect(id)
+	if p := lastPositionFor(reloaded, alice); p == nil || p["ghostMs"] != nil {
+		t.Errorf("position after a reload = %v", p)
+	}
+}
+
+// Two tabs of one browser share the auth session, so they are one device and leave no ghost
+func TestSyncNoOwnGhostBetweenTabs(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+
+	first := newTestClient(t, e, "alice")
+	first.connect(id)
+	second := newTestClient(t, e, "alice")
+	second.connect(id)
+	first.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	waitPresence(second, "the position", selectionAnchor("c"))
+	first.disconnect()
+	if m := lastLeave(second, 1); m["ghostMs"] != nil || m["accountId"] != nil {
+		t.Errorf("leave of the other tab = %v", m)
+	}
+}
+
+// Connections with an app token have no session, so they count as different devices
+func TestSyncOwnGhostWithoutSession(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice")
+	sessionless := func() *testClient {
+		c := newTestClient(t, e, "alice")
+		c.connect(id, connectOptions{useTicket: true})
+		return c
+	}
+	first, second := sessionless(), sessionless()
+	first.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	waitPresence(second, "the position", selectionAnchor("c"))
+	first.disconnect()
+	if m := lastLeave(second, 1); m["ghostMs"] != float64(60000) || m["accountId"] != alice.ID {
+		t.Errorf("leave without a session = %v", m)
 	}
 }

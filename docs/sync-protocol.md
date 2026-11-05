@@ -457,9 +457,18 @@ network problem or a quick switch to another app.
 - `accountId`, `selections` and `ghostMs` are only present when the last connection of the
   account to this document left, and the account had a cursor or a viewport while it was
   connected. Otherwise there is no ghost. `viewport` is present if there is one.
+- **Your own devices:** a ghost of your own account means another device, which is another
+  login session. If exactly one connection of the account remains and it has another session,
+  it gets the ghost of the one that left, from the last cursor and viewport of that connection,
+  if it had any. Everybody else gets the plain message, because the account is still online.
+  With more connections left there is no ghost, they still see each other. A reload or a second
+  tab of one browser shares the session, so it never shows an own ghost. Connections with an app
+  token have no session and count as different devices.
 - `ghostMs` is a duration and counts from receipt, so differing clocks do not matter. A
   client that joins during that time finds the remaining time as `ghostMs` of the entry in
-  `lastPositions`. Entries without a ghost do not have the field.
+  `lastPositions`. Entries without a ghost do not have the field. A client also finds the ghost
+  of its own account there, if no other connection of the account is left and the one that left
+  was another device.
 - A presence message of that account, or a peer in `presence-snapshot`, ends the ghost.
   Clients key ghosts and following on `accountId`, because a reconnect has a new `clientId`.
 - **Following:** following continues while the ghost lasts, resumes when the account returns,

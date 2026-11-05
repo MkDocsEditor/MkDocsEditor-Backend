@@ -149,6 +149,8 @@ type testClient struct {
 	env     *syncEnv
 	user    string
 	actorID string
+	// authorization replaces the shared session of the user, for a second device
+	authorization string
 
 	mu        sync.Mutex
 	ws        *websocket.Conn
@@ -208,6 +210,8 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 			return err
 		}
 		hello["ticket"] = ticket
+	} else if c.authorization != "" {
+		header.Set("Authorization", c.authorization)
 	} else if c.user != "" {
 		header.Set("Authorization", authHeader(c.env.t, c.env.authn, c.user, testPasswords[c.user]))
 	}

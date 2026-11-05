@@ -603,7 +603,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 		Client: conn.clientName, Access: conn.access(), Connections: len(session.conns),
 	})
 	s.onlineChanged()
-	session.broadcastLocked(leave, nil)
+	session.broadcastLeaveLocked(conn, leave)
 	remaining := len(session.conns)
 	session.mu.Unlock()
 	if remaining > 0 {
@@ -658,7 +658,11 @@ type wsConn struct {
 	shadow     *automerge.Doc
 	selections json.RawMessage
 	viewport   json.RawMessage
-	warnedRO   bool
+	// ownSelections and ownViewport are the last non-empty ones of this connection. Unlike
+	// LastPosition, another connection of the account does not overwrite them.
+	ownSelections json.RawMessage
+	ownViewport   json.RawMessage
+	warnedRO      bool
 }
 
 type outgoingMessage struct {
@@ -964,12 +968,14 @@ func (c *wsConn) attachLocked(session *docSession) error {
 		You:           c.userInfo(),
 		Actors:        c.server.Actors(),
 	})
-	session.accountJoinedLocked(c.user.ID, time.Now())
+	now := time.Now()
+	ownGhost := session.ownGhostLocked(c, now)
+	session.accountJoinedLocked(c.user.ID, now)
 	peers := make([]PresenceMessage, 0, len(session.conns))
 	for other := range session.conns {
 		peers = append(peers, other.presenceLocked())
 	}
-	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked()})
+	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked(c.user.ID, ownGhost)})
 	session.conns[c] = struct{}{}
 	session.announceActorLocked(c.actorID, c.user.ID, c)
 	session.broadcastLocked(c.presenceLocked(), c)
@@ -1161,6 +1167,12 @@ func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage
 		c.viewport = nil
 	case view != nil:
 		c.viewport = view
+	}
+	if len(selections) <= maxLastPositionSize && hasSelections(selections) {
+		c.ownSelections = selections
+	}
+	if view != nil && !bytes.Equal(view, jsonNull) && len(view) <= maxLastPositionSize {
+		c.ownViewport = view
 	}
 	session.rememberPositionLocked(c.user.ID, selections, view, c.lastActive)
 	session.broadcastLocked(c.presenceLocked(), c)
