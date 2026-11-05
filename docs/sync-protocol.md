@@ -267,6 +267,9 @@ left out. `client` is free text for logs.
   "displayName": "Anna",
   "color": "#1971c2",
   "actorId": "…",
+  "instanceId": "0f8a…",
+  "deviceName": "Pixel",
+  "instanceColor": "#2b8a3e",
   "lastActiveAt": "2026-11-05T09:30:12.123Z",
   "selections": [ { "anchor": "<cursor>", "head": "<cursor>" } ]
 }
@@ -274,14 +277,15 @@ left out. `client` is free text for logs.
 
 **`presence-snapshot`**: sent once after `initial-content`. It holds the current presence
 of every other connection on this document:
-`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …],"lastPositions":[…]}`.
+`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …],"lastPositions":[…],"ghosts":[…]}`.
 A peer that connected but has not sent presence yet appears with `"selections": []`.
-`lastPositions` says where accounts last were, see [Presence](#6-presence).
+`lastPositions` says where accounts last were, see [Presence](#6-presence), and `ghosts` lists
+instances that left recently, see [Ghosts](#ghosts).
 
-**`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18"}`. Sent
-when a connection closes or times out. If this was the last connection of the account, it
-can also have `accountId`, `selections`, `viewport` and `ghostMs`, see
-[Ghosts](#ghosts).
+**`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18","instanceId":"…"}`.
+Sent when a connection closes or times out. If this was the last connection of its client
+instance, it can also have `accountId`, `selections`, `viewport`, `deviceName`,
+`instanceColor` and `ghostMs`, see [Ghosts](#ghosts).
 
 **`actor`**: a new actor binding (the same fields as the entries in `actors`). It is
 broadcast to all connections of the document when a new actor id is bound.
@@ -401,7 +405,7 @@ Presence is ephemeral. The server relays it and never stores it.
   cursor lookup: `"start"` resolves to 0, `"end"` to the current text length. A client
   may send them in other cases too (for example `"start"` for index 0 of a non-empty
   text), so receivers always handle both.
-- The server overwrites `clientId`, `accountId`, `username`, `displayName`, `color` and `actorId`
+- The server overwrites `clientId`, `instanceId`, `deviceName`, `accountId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
 - `lastActiveAt` (RFC 3339, in presence and in the peers of `presence-snapshot`) is stamped
   by the server: the time of the last presence message of this connection, also one that only
@@ -411,7 +415,7 @@ Presence is ephemeral. The server relays it and never stores it.
 - `lastPositions` in `presence-snapshot` holds, per account, the last non-empty selections
   and the last viewport in this document, newest first, also for accounts that are offline or
   online without a cursor: `{"accountId", "username", "displayName", "color", "selections",
-  "viewport"?, "lastActiveAt", "ghostMs"?}`. `selections` is empty if the account only sent
+  "viewport"?, "lastActiveAt"}`. `selections` is empty if the account only sent
   a viewport. `lastActiveAt` is the time of the newest selections or viewport in this entry.
   Entries are kept for 30 days, survive restarts and moves, and end with the epoch, because
   cursors are only valid in their epoch. Selections or a viewport over 4 KiB are not kept, and
@@ -422,6 +426,25 @@ Presence is ephemeral. The server relays it and never stores it.
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
   users is the set of distinct account ids in the presence list.
+
+### Client instances
+
+Every client instance behaves the same, whatever its account, device or client type. An
+instance is one tab or one app installation, and it can reconnect and reload.
+
+- `hello` can have `instanceId`, 32 lowercase hex characters that the client generates and
+  keeps across reconnects and reloads. Anything else closes the connection with 4400. Without
+  it, the server uses `clientId` as the instance id. The server also uses `clientId` if another
+  account has this id in the document, so nobody can pose as an instance of someone else.
+  `you.instanceId` in `initial-content` is the id in use.
+- `presence`, and `peers` in `presence-snapshot`, have `instanceId` and `deviceName`, stamped by
+  the server. `deviceName` is the device name of the login session, else `client` of `hello`,
+  and is missing if there is neither.
+- `presence` from a client can have `instanceColor`: `"#rrggbb"` sets it, `null` clears it, and
+  a missing one leaves it unchanged. `hello` also accepts it, so a reload has the color in its
+  first presence. It belongs to the connection and never changes the account color or
+  authorship. `color` stays the account color. Clients draw `instanceColor`, or else `color`.
+- Servers with client instances list `instance-presence` in `features` of `GET /server-info/`.
 
 ### Viewport
 
@@ -447,26 +470,32 @@ Presence can have an optional `viewport`, the text the user is looking at:
 
 ### Ghosts
 
-When a user leaves, their cursor stays as a ghost for 60 seconds, so following survives a
-network problem or a quick switch to another app.
+When a client instance leaves, its cursor stays as a ghost for 60 seconds, so following survives
+a network problem or a quick switch to another app. This also holds for other instances of the
+same account and the same login session.
 
 ```json
-{ "type": "presence-leave", "documentId": "…", "clientId": "c-18", "accountId": "…", "selections": [ … ], "viewport": { … }, "ghostMs": 60000 }
+{ "type": "presence-leave", "documentId": "…", "clientId": "c-18", "instanceId": "…", "accountId": "…", "selections": [ … ], "viewport": { … }, "deviceName": "Pixel", "instanceColor": "#2b8a3e", "ghostMs": 60000 }
 ```
 
 - `accountId`, `selections` and `ghostMs` are only present when the last connection of the
-  account to this document left, and the account had a cursor or a viewport while it was
-  connected. Otherwise there is no ghost. `viewport` is present if there is one.
+  instance left, and that connection sent a cursor or a viewport. Otherwise there is no ghost,
+  for example if another connection of the instance is still there because of a half-open socket.
+  `viewport`, `deviceName` and `instanceColor` are present if there are any.
+- The position is the last non-empty cursor and viewport of that connection. A client that clears
+  its position when it goes to the background keeps its ghost where it was.
 - `ghostMs` is a duration and counts from receipt, so differing clocks do not matter. A
-  client that joins during that time finds the remaining time as `ghostMs` of the entry in
-  `lastPositions`. Entries without a ghost do not have the field.
-- A presence message of that account, or a peer in `presence-snapshot`, ends the ghost.
-  Clients key ghosts and following on `accountId`, because a reconnect has a new `clientId`.
-- **Following:** following continues while the ghost lasts, resumes when the account returns,
-  and ends when the ghost expires.
-- **Join links:** a sender who is a ghost still counts as present, so the link turns on
-  following. A sender without a connection and without a ghost is fully away, so the link only
-  goes to the entry in `lastPositions`. See [auth.md](auth.md#access-request-and-join-link).
+  client that joins during that time finds the ghost in `ghosts` of `presence-snapshot`:
+  `{"instanceId", "accountId", "username", "displayName", "color", "instanceColor"?,
+  "deviceName"?, "selections", "viewport"?, "ghostMs"}`, the most recent first. `ghostMs` is the
+  remaining time. The list can be empty, ghosts survive unloading the document, and
+  deleted accounts are left out. The ghost of the joining instance is not in it.
+- A `presence` of the same `instanceId` ends the ghost. A join of that instance ends it on the
+  server and sends such a presence, so a reload shows nothing once it is back.
+- **Following:** clients follow an instance. Following continues while its ghost lasts, resumes
+  when it returns, and ends when the ghost expires.
+- **Join links:** an instance that is a ghost still counts as present, so the link turns on
+  following. See [auth.md](auth.md#access-request-and-join-link).
 
 ### Events websocket
 

@@ -3,6 +3,7 @@ package collab
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 )
 
 // ProtocolVersion is the version of the sync protocol, see docs/sync-protocol.md
@@ -59,11 +60,16 @@ type (
 		Ticket     string `json:"ticket,omitempty"`
 		Epoch      string `json:"epoch,omitempty"`
 		Client     string `json:"client,omitempty"`
+		// InstanceID and InstanceColor are optional, see docs/sync-protocol.md section 6
+		InstanceID    string `json:"instanceId,omitempty"`
+		InstanceColor string `json:"instanceColor,omitempty"`
 	}
 
 	// UserInfo describes a user to other users
 	UserInfo struct {
-		ClientID    string `json:"clientId,omitempty"`
+		ClientID string `json:"clientId,omitempty"`
+		// InstanceID is the instance id the server uses for this connection
+		InstanceID  string `json:"instanceId,omitempty"`
 		AccountID   string `json:"accountId"`
 		Username    string `json:"username"`
 		DisplayName string `json:"displayName"`
@@ -108,6 +114,11 @@ type (
 		DisplayName string `json:"displayName,omitempty"`
 		Color       string `json:"color,omitempty"`
 		ActorID     string `json:"actorId,omitempty"`
+		// InstanceID and DeviceName are stamped by the server, see docs/sync-protocol.md section 6
+		InstanceID string `json:"instanceId,omitempty"`
+		DeviceName string `json:"deviceName,omitempty"`
+		// InstanceColor is the color of this client instance. Color stays that of the account.
+		InstanceColor string `json:"instanceColor,omitempty"`
 		// LastActiveAt is stamped by the server, see docs/sync-protocol.md section 6
 		LastActiveAt string          `json:"lastActiveAt,omitempty"`
 		Selections   json.RawMessage `json:"selections"`
@@ -122,6 +133,22 @@ type (
 		Peers      []PresenceMessage `json:"peers"`
 		// LastPositions says where accounts last had a cursor, see docs/sync-protocol.md section 6
 		LastPositions []LastPositionInfo `json:"lastPositions"`
+		// Ghosts are the client instances that left recently, see docs/sync-protocol.md section 6
+		Ghosts []GhostInfo `json:"ghosts"`
+	}
+
+	// GhostInfo is a client instance that left, with the time its cursor stays
+	GhostInfo struct {
+		InstanceID    string          `json:"instanceId"`
+		AccountID     string          `json:"accountId"`
+		Username      string          `json:"username"`
+		DisplayName   string          `json:"displayName"`
+		Color         string          `json:"color"`
+		InstanceColor string          `json:"instanceColor,omitempty"`
+		DeviceName    string          `json:"deviceName,omitempty"`
+		Selections    json.RawMessage `json:"selections"`
+		Viewport      json.RawMessage `json:"viewport,omitempty"`
+		GhostMs       int64           `json:"ghostMs"`
 	}
 
 	// LastPositionInfo is a last position with the account it belongs to
@@ -133,19 +160,20 @@ type (
 		Selections   json.RawMessage `json:"selections"`
 		Viewport     json.RawMessage `json:"viewport,omitempty"`
 		LastActiveAt string          `json:"lastActiveAt"`
-		// GhostMs is the remaining time of the ghost of this account, if it has one
-		GhostMs int64 `json:"ghostMs,omitempty"`
 	}
 
 	PresenceLeaveMessage struct {
 		Type       string `json:"type"`
 		DocumentID string `json:"documentId"`
 		ClientID   string `json:"clientId"`
-		// these are only set if the account leaves a ghost, see docs/sync-protocol.md section 6
-		AccountID  string          `json:"accountId,omitempty"`
-		Selections json.RawMessage `json:"selections,omitempty"`
-		Viewport   json.RawMessage `json:"viewport,omitempty"`
-		GhostMs    int64           `json:"ghostMs,omitempty"`
+		InstanceID string `json:"instanceId,omitempty"`
+		// these are only set if the instance leaves a ghost, see docs/sync-protocol.md section 6
+		AccountID     string          `json:"accountId,omitempty"`
+		Selections    json.RawMessage `json:"selections,omitempty"`
+		Viewport      json.RawMessage `json:"viewport,omitempty"`
+		DeviceName    string          `json:"deviceName,omitempty"`
+		InstanceColor string          `json:"instanceColor,omitempty"`
+		GhostMs       int64           `json:"ghostMs,omitempty"`
 	}
 
 	DocumentRenamedMessage struct {
@@ -160,6 +188,43 @@ type (
 		Message string `json:"message"`
 	}
 )
+
+var (
+	instanceIDFormat    = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	instanceColorFormat = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+)
+
+// validInstanceID checks an instance id of a client. It may be missing.
+func validInstanceID(id string) bool {
+	return id == "" || instanceIDFormat.MatchString(id)
+}
+
+// validInstanceColor checks an instance color of a client. It may be missing.
+func validInstanceColor(color string) bool {
+	return color == "" || instanceColorFormat.MatchString(color)
+}
+
+// parseInstanceColor reads the instance color of a presence message. The result is nil if the
+// color stays as it is, and points to an empty string if it is cleared.
+func parseInstanceColor(data []byte) (*string, bool) {
+	var m struct {
+		InstanceColor json.RawMessage `json:"instanceColor"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	if m.InstanceColor == nil {
+		return nil, true
+	}
+	color := ""
+	if bytes.Equal(bytes.TrimSpace(m.InstanceColor), jsonNull) {
+		return &color, true
+	}
+	if err := json.Unmarshal(m.InstanceColor, &color); err != nil || color == "" || !validInstanceColor(color) {
+		return nil, false
+	}
+	return &color, true
+}
 
 // presence selections are a JSON array of {anchor, head} objects with string cursors
 type selection struct {

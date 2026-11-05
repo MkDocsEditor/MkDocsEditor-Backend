@@ -149,6 +149,8 @@ type testClient struct {
 	env     *syncEnv
 	user    string
 	actorID string
+	// authorization replaces the shared session of the user
+	authorization string
 
 	mu        sync.Mutex
 	ws        *websocket.Conn
@@ -163,6 +165,10 @@ type testClient struct {
 	presences map[string]map[string]any
 	// lastPositions is from the presence snapshot
 	lastPositions []any
+	// ghosts is from the presence snapshot
+	ghosts []any
+	// you is from initial-content
+	you map[string]any
 	// leaves holds the presence-leave messages
 	leaves   []map[string]any
 	actors   map[string]string
@@ -208,6 +214,8 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 			return err
 		}
 		hello["ticket"] = ticket
+	} else if c.authorization != "" {
+		header.Set("Authorization", c.authorization)
 	} else if c.user != "" {
 		header.Set("Authorization", authHeader(c.env.t, c.env.authn, c.user, testPasswords[c.user]))
 	}
@@ -281,6 +289,7 @@ func (c *testClient) process(m map[string]any) {
 			c.doc = doc
 		}
 		c.epoch = epoch
+		c.you, _ = m["you"].(map[string]any)
 		for _, a := range m["actors"].([]any) {
 			am := a.(map[string]any)
 			c.actors[am["actorId"].(string)] = am["username"].(string)
@@ -298,6 +307,7 @@ func (c *testClient) process(m map[string]any) {
 		c.presences[m["clientId"].(string)] = m
 	case collab.MsgPresenceSnapshot:
 		c.lastPositions, _ = m["lastPositions"].([]any)
+		c.ghosts, _ = m["ghosts"].([]any)
 		for _, p := range m["peers"].([]any) {
 			pm := p.(map[string]any)
 			c.presences[pm["clientId"].(string)] = pm

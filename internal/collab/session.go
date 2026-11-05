@@ -43,12 +43,10 @@ type docSession struct {
 	meta *DocumentMeta
 	// positionsDirty means meta.LastPositions has changes that are not on disk yet
 	positionsDirty bool
-	// present holds the accounts with a connection, and since when this visit counts
-	present map[string]time.Time
-	absPath string
-	docID   string
-	doc     *automerge.Doc
-	conns   map[*wsConn]struct{}
+	absPath        string
+	docID          string
+	doc            *automerge.Doc
+	conns          map[*wsConn]struct{}
 
 	// text and heads of the document the last time it was read from or written to disk
 	diskBaseText  string
@@ -119,7 +117,6 @@ func (s *SyncServer) openSession(relPath string, absPath string, docID string) (
 		absPath: absPath,
 		docID:   docID,
 		conns:   map[*wsConn]struct{}{},
-		present: map[string]time.Time{},
 	}
 
 	meta, saved, err := s.store.Load(relPath)
@@ -394,54 +391,94 @@ func (ds *docSession) rememberPositionLocked(accountID string, selections json.R
 	ds.positionsDirty = true
 }
 
-// accountJoinedLocked ends the ghost of an account that is back. A position it had before the
-// ghost still counts as its position in this visit.
-func (ds *docSession) accountJoinedLocked(accountID string, now time.Time) {
-	if _, ok := ds.present[accountID]; ok {
-		return
+// resolveInstanceLocked sets the instance id of a joining connection. Without one it is the client
+// id. Nobody can pose as an instance of another account, because an id in use by another account
+// is not taken. Presence cannot be forged, and this also covers a browser with a new login.
+func (ds *docSession) resolveInstanceLocked(conn *wsConn, now time.Time) {
+	ds.dropExpiredGhostsLocked(now)
+	id := conn.instanceID
+	taken := id == ""
+	if g, ok := ds.meta.Ghosts[id]; ok && g.AccountID != conn.user.ID {
+		taken = true
 	}
-	since := now
-	if p, ok := ds.meta.LastPositions[accountID]; ok && !p.LeftAt.IsZero() {
-		if ghostRemaining(p, ds.server.GhostLifetime, now) > 0 {
-			since = p.Time
+	for other := range ds.conns {
+		if other.instanceID == id && other.user.ID != conn.user.ID {
+			taken = true
 		}
-		p.LeftAt = time.Time{}
-		ds.meta.LastPositions[accountID] = p
+	}
+	if taken {
+		id = conn.clientID
+	}
+	conn.instanceID = id
+	if _, ok := ds.meta.Ghosts[id]; ok {
+		// back again: the presence of this connection ends the ghost for the clients
+		delete(ds.meta.Ghosts, id)
 		ds.positionsDirty = true
 	}
-	ds.present[accountID] = since
 }
 
-// accountLeftLocked returns the leave message of a connection. It has a ghost if that was the
-// last connection of the account, and the account had a position during this visit.
-func (ds *docSession) accountLeftLocked(conn *wsConn, now time.Time) *PresenceLeaveMessage {
-	msg := &PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: ds.docID, ClientID: conn.clientID}
-	accountID := conn.user.ID
+// instanceLeftLocked returns the leave message of a connection, which already is out of conns. It
+// has a ghost if that was the last connection of its client instance, and the connection had a
+// position.
+func (ds *docSession) instanceLeftLocked(conn *wsConn, now time.Time) *PresenceLeaveMessage {
+	msg := &PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: ds.docID, ClientID: conn.clientID, InstanceID: conn.instanceID}
 	for other := range ds.conns {
-		if other.user.ID == accountID {
+		if other.instanceID == conn.instanceID {
 			return msg
 		}
 	}
-	since, present := ds.present[accountID]
-	delete(ds.present, accountID)
-	p, ok := ds.meta.LastPositions[accountID]
-	if !present || !ok || p.Time.Before(since) {
+	if conn.ownSelections == nil && conn.ownViewport == nil {
 		return msg
 	}
-	p.LeftAt = now
-	ds.meta.LastPositions[accountID] = p
+	ds.dropExpiredGhostsLocked(now)
+	if ds.meta.Ghosts == nil {
+		ds.meta.Ghosts = map[string]InstanceGhost{}
+	}
+	ds.meta.Ghosts[conn.instanceID] = InstanceGhost{
+		AccountID: conn.user.ID, DeviceName: conn.deviceName, InstanceColor: conn.instanceColor,
+		Selections: selectionsOrEmpty(conn.ownSelections), Viewport: conn.ownViewport, LeftAt: now,
+	}
 	ds.positionsDirty = true
-	msg.AccountID, msg.Selections, msg.Viewport = accountID, selectionsOrEmpty(p.Selections), p.Viewport
+	msg.AccountID, msg.Selections, msg.Viewport = conn.user.ID, selectionsOrEmpty(conn.ownSelections), conn.ownViewport
+	msg.DeviceName, msg.InstanceColor = conn.deviceName, conn.instanceColor
 	msg.GhostMs = ds.server.GhostLifetime.Milliseconds()
 	return msg
 }
 
-// ghostRemaining returns how long the ghost of a position lasts, 0 if it has none
-func ghostRemaining(p LastPosition, lifetime time.Duration, now time.Time) time.Duration {
-	if p.LeftAt.IsZero() {
-		return 0
+func (ds *docSession) dropExpiredGhostsLocked(now time.Time) {
+	for id, g := range ds.meta.Ghosts {
+		if ghostRemaining(g, ds.server.GhostLifetime, now) == 0 {
+			delete(ds.meta.Ghosts, id)
+			ds.positionsDirty = true
+		}
 	}
-	return max(0, p.LeftAt.Add(lifetime).Sub(now))
+}
+
+// ghostsLocked lists the current ghosts of existing accounts, the most recent first
+func (ds *docSession) ghostsLocked(now time.Time) []GhostInfo {
+	ds.dropExpiredGhostsLocked(now)
+	out := make([]GhostInfo, 0, len(ds.meta.Ghosts))
+	for id, g := range ds.meta.Ghosts {
+		u := ds.server.authenticator.UserByID(g.AccountID)
+		if u == nil || u.Status == auth.StatusDeleted {
+			continue
+		}
+		out = append(out, GhostInfo{InstanceID: id, AccountID: g.AccountID, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
+			InstanceColor: g.InstanceColor, DeviceName: g.DeviceName, Selections: g.Selections, Viewport: g.Viewport,
+			GhostMs: max(1, ghostRemaining(g, ds.server.GhostLifetime, now).Milliseconds())})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GhostMs != out[j].GhostMs {
+			return out[i].GhostMs > out[j].GhostMs
+		}
+		return out[i].InstanceID < out[j].InstanceID
+	})
+	return out
+}
+
+// ghostRemaining returns how long a ghost lasts
+func ghostRemaining(g InstanceGhost, lifetime time.Duration, now time.Time) time.Duration {
+	return max(0, g.LeftAt.Add(lifetime).Sub(now))
 }
 
 func selectionsOrEmpty(selections json.RawMessage) json.RawMessage {
@@ -477,9 +514,6 @@ func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
 		}
 		info := LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
 			Selections: selectionsOrEmpty(p.Selections), Viewport: p.Viewport, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)}
-		if remaining := ghostRemaining(p, ds.server.GhostLifetime, now); remaining > 0 {
-			info.GhostMs = max(1, remaining.Milliseconds())
-		}
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool {

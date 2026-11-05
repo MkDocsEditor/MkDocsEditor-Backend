@@ -67,6 +67,8 @@ type (
 const (
 	FeatureJoinPresence   = "join-presence"
 	FeatureAccessRequests = "access-requests"
+	// FeatureInstancePresence means presence and ghosts are per client instance
+	FeatureInstancePresence = "instance-presence"
 )
 
 func (rs *RestService) accessRequestsDisabled(c echo.Context) error {

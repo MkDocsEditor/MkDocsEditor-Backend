@@ -450,19 +450,20 @@ editor, at the position of the sender. Without an account they can ask the admin
 invite. There is no email and no push service: the admins are notified on the events
 websocket, and the requester's client polls.
 
-**Join link:** `{clientUrl}/join/{documentId}?from={accountId}`. It only exists in the
-clients, the backend has no route for it. It holds no secret and grants nothing: opening
+**Join link:** `{clientUrl}/join/{documentId}?from={accountId}&instance={instanceId}`, where
+`instance` is optional. It only exists in the clients, the backend has no route for it. It holds no secret and grants nothing: opening
 the document still needs a login. The client looks the sender up by `accountId`, in this
 order, see [sync-protocol.md](sync-protocol.md#6-presence):
 
-1. In the presence list, among connections with a cursor. A sender can have several
-   connections, so it takes the one with the newest `lastActiveAt`.
-2. In `lastPositions` of `presence-snapshot`, where the sender last was. A sender who
-   switched to a messenger is usually offline by the time the recipient opens the link.
-3. Otherwise it opens the document at the start.
+1. The instance named by `instance`, if it is in the presence list or in `ghosts` of
+   `presence-snapshot`. The client follows it.
+2. Otherwise the most recently active instance of the account, by `lastActiveAt` in the presence
+   list and then in `ghosts`. The client follows it.
+3. In `lastPositions` of `presence-snapshot`, where the sender last was, without following. A
+   sender who switched to a messenger a while ago has no ghost any more.
+4. Otherwise it opens the document at the start.
 
-The link also turns on following if the sender is connected or is a ghost, see
-[Ghosts](sync-protocol.md#ghosts). A sender who is fully away is not followed.
+See [Ghosts](sync-protocol.md#ghosts). A sender who is fully away is not followed.
 
 **Access request:**
 
@@ -784,7 +785,7 @@ provider (from the AAGUID) and absent for unknown authenticators.
  "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
  "passkeys": {"enabled": true, "rpId": "markusressel.de"},
  "loginMethods": ["password", "passkey", "device-link"], "require2FA": false,
- "features": ["moved-lookup", "join-presence", "access-requests"]}
+ "features": ["moved-lookup", "join-presence", "instance-presence", "access-requests"]}
 ```
 
 - `name`: `server.instanceName`, else the host of `wikiUrl`, else the host of
@@ -798,7 +799,8 @@ provider (from the AAGUID) and absent for unknown authenticators.
 - `features`: optional API features of this server, for clients that also talk to older
   servers. A server from before this field has none. Clients ignore names they do not
   know. `moved-lookup`: `GET /moved/?id=…&id=…`, see
-  [references.md](references.md#7-ids-after-a-move-redirects). `join-presence`: presence
+  [references.md](references.md#7-ids-after-a-move-redirects). `instance-presence`: presence and ghosts are per client instance, see
+  [sync-protocol.md](sync-protocol.md#client-instances). `join-presence`: presence
   has `lastActiveAt`, see [sync-protocol.md](sync-protocol.md#6-presence).
   `access-requests`: the server accepts access requests right now, see
   [Access request](#access-request-and-join-link).
@@ -1251,7 +1253,7 @@ Additive only; existing clients keep working.
   `GET /account/device-links/{id}/` every few seconds until `redeemed` or `expired`,
   revoke on cancel); Android handles `/connect#…`.
 - Join links and access requests, see
-  [Access request](#access-request-and-join-link): open `/join/{documentId}?from={accountId}`
+  [Access request](#access-request-and-join-link): open `/join/{documentId}?from={accountId}&instance={instanceId}`
   in the editor at the sender's position, offer the request form when `features` contains
   `access-requests`, and poll the status. Admins get a pending list with approve and reject,
   and a reminder to confirm the person first.
