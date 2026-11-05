@@ -170,6 +170,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	echoRest.Use(rs.securityHeaders)
 
 	echoRest.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		Skipper:     isAliveCheck,
 		LogMethod:   true,
 		LogURIPath:  true,
 		LogStatus:   true,

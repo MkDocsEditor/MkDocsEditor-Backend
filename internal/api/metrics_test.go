@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -226,10 +227,18 @@ func TestHTTPMetricsUseRoutePatterns(t *testing.T) {
 		return testutil.ToFloat64(metrics.HTTPRequests.WithLabelValues(method, route, status))
 	}
 
+	statusBefore := count("GET", "/auth/status/", "200")
+	request("GET", "/auth/status")
+	if count("GET", "/auth/status/", "200") != statusBefore+1 {
+		t.Error("/auth/status/ not counted with its route")
+	}
+
+	// readiness probes would drown the requests of real clients
 	aliveBefore := count("GET", EndpointPathAlive, "200")
 	request("GET", "/alive")
-	if count("GET", EndpointPathAlive, "200") != aliveBefore+1 {
-		t.Error("/alive/ not counted with its route")
+	request("GET", "/alive/")
+	if count("GET", EndpointPathAlive, "200") != aliveBefore {
+		t.Error("a check of /alive/ is counted")
 	}
 
 	// the auth middleware answers before the missing route matters
@@ -264,5 +273,33 @@ func TestHTTPMetricsUseRoutePatterns(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestRequestLogLeavesOutAliveChecks(t *testing.T) {
+	e := newSyncEnv(t)
+
+	var logged lockedBuffer
+	previous := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	for _, path := range []string{"/alive/", "/auth/status/"} {
+		resp, err := http.Get(e.http.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d", path, resp.StatusCode)
+		}
+	}
+
+	output := logged.String()
+	if strings.Contains(output, "/alive/") {
+		t.Errorf("a check of /alive/ is logged: %s", output)
+	}
+	if !strings.Contains(output, "GET /auth/status/ 200") {
+		t.Errorf("another request is not logged: %s", output)
 	}
 }
