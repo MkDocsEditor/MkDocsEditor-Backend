@@ -149,7 +149,7 @@ func TestAdminSettingsAndAudit(t *testing.T) {
 	r := admin.do(http.MethodGet, "/admin/settings/", nil)
 	var settings map[string]any
 	r.json(t, &settings)
-	if len(settings) != 1 || settings["require2FA"] != false {
+	if len(settings) != 2 || settings["require2FA"] != false || settings["accessRequestsEnabled"] != true {
 		t.Errorf("settings = %s", r.body)
 	}
 	clk.advance(11 * time.Minute)

@@ -262,18 +262,21 @@ left out. `client` is free text for logs.
   "type": "presence",
   "documentId": "…",
   "clientId": "c-18",
+  "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa",
   "username": "anna",
   "displayName": "Anna",
   "color": "#1971c2",
   "actorId": "…",
+  "lastActiveAt": "2026-11-05T09:30:12.123Z",
   "selections": [ { "anchor": "<cursor>", "head": "<cursor>" } ]
 }
 ```
 
 **`presence-snapshot`**: sent once after `initial-content`. It holds the current presence
 of every other connection on this document:
-`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …]}`. A peer that
-connected but has not sent presence yet appears with `"selections": []`.
+`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …],"lastPositions":[…]}`.
+A peer that connected but has not sent presence yet appears with `"selections": []`.
+`lastPositions` says where accounts last had a cursor, see [Presence](#6-presence).
 
 **`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18"}`. Sent
 when a connection closes or times out.
@@ -398,6 +401,19 @@ Presence is ephemeral. The server relays it and never stores it.
   text), so receivers always handle both.
 - The server overwrites `clientId`, `accountId`, `username`, `displayName`, `color` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
+- `lastActiveAt` (RFC 3339, in presence and in the peers of `presence-snapshot`) is stamped
+  by the server: the time of the last presence message of this connection, or the time it
+  connected if it has not sent one. Servers that have it list `join-presence` in `features`
+  of `GET /server-info/`. A join link picks the sender's connection with the newest value,
+  see [auth.md](auth.md#access-request-and-join-link).
+- `lastPositions` in `presence-snapshot` holds, per account, the last non-empty selections
+  in this document, newest first, also for accounts that are offline or online without a
+  cursor: `{"accountId", "username", "displayName", "color", "selections", "lastActiveAt"}`.
+  `lastActiveAt` is the time of those selections. Entries are kept for 30 days, survive
+  restarts and moves, and end with the epoch, because cursors are only valid in their epoch.
+  Selections over 4 KiB are not kept, and deleted accounts are left out. The list can be
+  empty, and servers from before this field do not send it. A cursor can point into text
+  that was deleted since, so the client falls back to the start if it cannot resolve it.
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
@@ -428,6 +444,11 @@ Every role may connect. The server then sends:
 - `{"type": "items-moved", "moves": [{"type", "oldId", "newId", "oldPath", "newPath"}]}`:
   items were moved or renamed, sent before `tree-changed`. Clients re-key open editors,
   tabs and caches; see [references.md](references.md#7-ids-after-a-move-redirects).
+- `{"type": "access-requests", "pending": 2}`: only for admins who connected with a
+  session, never for other roles or app tokens. It holds the number of pending access
+  requests, and comes right after the first `online` and whenever the number changes, also when a
+  request expires (checked once per minute). See
+  [auth.md](auth.md#access-request-and-join-link).
 - `{"type": "heartbeat"}`, as on the document websocket.
 
 The client sends `{"type": "heartbeat"}` at least every 5 seconds. Without any
@@ -502,7 +523,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
   auth.db                     accounts and actor id -> account bindings (SQLite, see auth.md)
   documents/
     <uuid>.automerge          Automerge save() of the document
-    <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "diskBaseHeads": [...], "diskBaseHash": "…"}
+    <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "lastPositions": {...}, "diskBaseHeads": [...], "diskBaseHash": "…"}
 ```
 
 - Documents have a stable internal uuid. The REST `documentId` is derived from the path

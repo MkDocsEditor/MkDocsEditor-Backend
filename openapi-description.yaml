@@ -315,6 +315,70 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /auth/access-requests/:
+    post:
+      summary: "Ask the admins for an invite"
+      description: |
+        Public, with a strict per-IP rate limit. The response does not depend on whether
+        `documentId` or `invitedBy` exist. The token is shown only here. See
+        [Access request](https://github.com/MkDocsEditor/MkDocsEditor-Backend/blob/master/docs/auth.md#access-request-and-join-link).
+      operationId: createAccessRequest
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccessRequest"
+      responses:
+        "201":
+          description: "The request with its token (shown only now)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedAccessRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/access-requests/status/:
+    post:
+      summary: "The state of an access request"
+      description: |
+        Public, with a strict per-IP rate limit: poll at most every 30 seconds. An unknown
+        token gives 400 `invalid-access-request`.
+      operationId: accessRequestStatus
+      tags: [ Auth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ token ]
+              properties:
+                token:
+                  type: string
+                  description: "The `mda_…` token of the request"
+      responses:
+        "200":
+          description: "The state"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessRequestStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /auth/link/passkey/begin/:
     post:
       summary: "Start the passkey registration of a setup, invite or reset link"
@@ -1246,6 +1310,103 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /admin/access-requests/:
+    get:
+      summary: "List access requests"
+      operationId: listAccessRequests
+      tags: [ Admin ]
+      parameters:
+        - name: status
+          in: query
+          description: "Only requests in this state"
+          schema:
+            type: string
+            enum: [ pending, approved, rejected, expired ]
+      responses:
+        "200":
+          description: "Access requests, newest first"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/access-requests/{requestId}/approve/:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: "Approve an access request"
+      description: |
+        Creates a normal invite link with the name of the request as its note. Confirm the
+        person out of band first: the name is only a claim.
+      operationId: approveAccessRequest
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveAccessRequest"
+      responses:
+        "200":
+          description: "The request and the invite with its token and link"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovedAccessRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "The request is already decided or expired (`conflict`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/access-requests/{requestId}/reject/:
+    parameters:
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: "Reject an access request"
+      operationId: rejectAccessRequest
+      tags: [ Admin ]
+      responses:
+        "204":
+          description: "Rejected (or it already was)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "The request is approved or expired (`conflict`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /admin/settings/:
     get:
@@ -3480,6 +3641,117 @@ components:
       properties:
         require2FA:
           type: boolean
+        accessRequestsEnabled:
+          type: boolean
+          description: "People without an account may ask for an invite"
+
+    CreateAccessRequest:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          description: "Who is asking. Only a claim, and untrusted plain text."
+        message:
+          type: string
+          maxLength: 500
+          description: "Untrusted plain text"
+        documentId:
+          type: string
+          maxLength: 128
+          description: "The document of the join link"
+        invitedBy:
+          type: string
+          maxLength: 128
+          description: "The account id of the join link"
+
+    CreatedAccessRequest:
+      type: object
+      required: [ requestId, token, status, expiresAt ]
+      properties:
+        requestId:
+          type: string
+        token:
+          type: string
+          description: "`mda_…`, shown only once"
+        status:
+          type: string
+          enum: [ pending ]
+        expiresAt:
+          type: string
+          format: date-time
+
+    AccessRequestStatus:
+      type: object
+      required: [ status ]
+      properties:
+        status:
+          type: string
+          enum: [ pending, approved, rejected, expired ]
+        inviteToken:
+          type: string
+          description: "`mdl_…`, only while the request is approved and the invite is unredeemed"
+
+    AccessRequest:
+      type: object
+      required: [ id, name, message, status, createdAt, expiresAt, documentId, documentPath, invitedByAccountId, invitedByName ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: "Only a claim, and untrusted plain text"
+        message:
+          type: string
+          description: "Untrusted plain text"
+        status:
+          type: string
+          enum: [ pending, approved, rejected, expired ]
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        documentId:
+          type: string
+          nullable: true
+        documentPath:
+          type: string
+          nullable: true
+        invitedByAccountId:
+          type: string
+          nullable: true
+        invitedByName:
+          type: string
+          nullable: true
+
+    ApproveAccessRequest:
+      type: object
+      required: [ role ]
+      properties:
+        role:
+          type: string
+          enum: [ admin, editor, reader ]
+        expiresInHours:
+          type: integer
+          minimum: 1
+          maximum: 720
+
+    ApprovedAccessRequest:
+      type: object
+      required: [ request, invite, token, url ]
+      properties:
+        request:
+          $ref: "#/components/schemas/AccessRequest"
+        invite:
+          $ref: "#/components/schemas/Link"
+        token:
+          type: string
+        url:
+          type: string
+          nullable: true
 
     AuditEvent:
       type: object

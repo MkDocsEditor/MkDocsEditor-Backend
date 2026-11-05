@@ -18,11 +18,12 @@ const (
 
 // Token prefixes, see docs/auth.md section 3
 const (
-	PrefixSession   = "mds_"
-	PrefixAppToken  = "mdp_"
-	PrefixLink      = "mdl_"
-	PrefixChallenge = "mdc_"
-	PrefixDevice    = "mdd_"
+	PrefixSession       = "mds_"
+	PrefixAppToken      = "mdp_"
+	PrefixLink          = "mdl_"
+	PrefixChallenge     = "mdc_"
+	PrefixDevice        = "mdd_"
+	PrefixAccessRequest = "mda_"
 )
 
 // Session is a login of one device
@@ -353,6 +354,7 @@ func (s *Service) pruneExpired() {
 	_, _ = s.db.Exec("DELETE FROM audit_events WHERE time < ?", toMillis(now.Add(-s.cfg.auditRetention)))
 	_, _ = s.db.Exec("DELETE FROM app_tokens WHERE expires_at != 0 AND expires_at <= ?", toMillis(now))
 	_, _ = s.db.Exec("DELETE FROM device_links WHERE expires_at <= ?", toMillis(now.Add(-deviceLinkKeep)))
+	_, _ = s.db.Exec("DELETE FROM access_requests WHERE expires_at <= ?", toMillis(now.Add(-accessRequestKeep)))
 }
 
 // Revoke reasons

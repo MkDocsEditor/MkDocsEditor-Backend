@@ -63,6 +63,9 @@ const (
 	CodeConflict                  = "conflict"
 	CodeRateLimited               = "rate-limited"
 	CodeInternal                  = "internal"
+	CodeInvalidAccessRequest      = "invalid-access-request"
+	CodeAccessRequestsDisabled    = "access-requests-disabled"
+	CodeTooManyAccessRequests     = "too-many-access-requests"
 )
 
 // TicketResponse is the response of POST /auth/ws-ticket/
@@ -132,7 +135,7 @@ func isPublicPath(path string) bool {
 		return true
 	}
 	return strings.HasPrefix(path, "/auth/login/") || strings.HasPrefix(path, "/auth/passkey/login/") || strings.HasPrefix(path, "/auth/link/") ||
-		strings.HasPrefix(path, "/auth/device-link/")
+		strings.HasPrefix(path, "/auth/device-link/") || strings.HasPrefix(path, "/auth/access-requests/")
 }
 
 // restrictedPaths are reachable by a session that must still set up a second factor
@@ -465,6 +468,12 @@ var authErrorResponses = []struct {
 	{auth.ErrInvalidTokenScope, http.StatusBadRequest, CodeBadRequest},
 	{auth.ErrInvalidTokenExpiry, http.StatusBadRequest, CodeBadRequest},
 	{auth.ErrDeviceLinkRedeemed, http.StatusConflict, CodeConflict},
+	{auth.ErrInvalidAccessRequest, http.StatusBadRequest, CodeInvalidAccessRequest},
+	{auth.ErrInvalidAccessRequestName, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidAccessRequestText, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidAccessRequestClaim, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrTooManyAccessRequests, http.StatusTooManyRequests, CodeTooManyAccessRequests},
+	{auth.ErrAccessRequestDecided, http.StatusConflict, CodeConflict},
 }
 
 // authError maps errors of the auth package to responses

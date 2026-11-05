@@ -26,6 +26,9 @@ const (
 type serverKeys struct {
 	totp          []byte // AES-256-GCM key of the TOTP secrets
 	recoveryCodes []byte // HMAC-SHA256 key of the recovery code hashes
+	// accessRequestInvite is the AES-256-GCM key of the invite tokens of approved access
+	// requests. Unlike other tokens they must be returned later.
+	accessRequestInvite []byte
 }
 
 func deriveKey(master []byte, purpose string) []byte {
@@ -41,7 +44,7 @@ func loadServerKeys(stateDir, file string) (*serverKeys, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &serverKeys{totp: deriveKey(master, "totp-secret"), recoveryCodes: deriveKey(master, "recovery-codes")}, nil
+	return &serverKeys{totp: deriveKey(master, "totp-secret"), accessRequestInvite: deriveKey(master, "access-request-invite"), recoveryCodes: deriveKey(master, "recovery-codes")}, nil
 }
 
 func decodeServerKey(s, source string) ([]byte, error) {
@@ -89,8 +92,8 @@ func readServerKey(stateDir, file string) ([]byte, error) {
 	return key, nil
 }
 
-// seal encrypts data with AES-256-GCM; the account id is authenticated, so a secret cannot
-// be moved to another account
+// seal encrypts data with AES-256-GCM; the account id (or another owner of the secret) is
+// authenticated, so a secret cannot be moved to another account
 func seal(key []byte, plaintext []byte, accountID string) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {

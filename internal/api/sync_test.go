@@ -202,7 +202,58 @@ func TestSyncReaderChangesAreDropped(t *testing.T) {
 	}
 }
 
+// collabStoreMeta reads the sidecar from the disk, like a restarted server
+func collabStoreMeta(t *testing.T, e *syncEnv, rel string) *collab.DocumentMeta {
+	t.Helper()
+	store, err := collab.NewStateStore(e.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store.Meta(rel)
+}
+
+// A join link has to find the sender also after they left for a messenger
+func TestSyncLastPositions(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice")
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	sel := []map[string]string{{"anchor": "cursor-1", "head": "cursor-1"}}
+	before := time.Now()
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel})
+	time.Sleep(50 * time.Millisecond)
+	// the editor loses the focus: the position stays what it was
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}})
+	time.Sleep(50 * time.Millisecond)
+	a.disconnect()
+
+	// the document is unloaded when the last connection leaves
+	eventually(t, "the document is unloaded", func() bool {
+		meta := collabStoreMeta(t, e, "guide/setup.md")
+		return meta != nil && len(meta.LastPositions) == 1
+	})
+
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	b.waitFor("the snapshot", func() bool { return b.lastPositions != nil })
+	if len(b.lastPositions) != 1 {
+		t.Fatalf("lastPositions = %v", b.lastPositions)
+	}
+	p := b.lastPositions[0].(map[string]any)
+	at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(p["lastActiveAt"]))
+	if p["accountId"] != alice.ID || p["username"] != "alice" || err != nil || at.Before(before) {
+		t.Errorf("position = %v", p)
+	}
+	selections, ok := p["selections"].([]any)
+	if !ok || len(selections) != 1 || selections[0].(map[string]any)["anchor"] != "cursor-1" {
+		t.Errorf("selections = %v", p["selections"])
+	}
+}
+
 func TestSyncPresence(t *testing.T) {
+	start := time.Now()
 	e := newSyncEnv(t)
 	id := e.docID("guide/setup.md")
 	a := newTestClient(t, e, "alice")
@@ -213,9 +264,28 @@ func TestSyncPresence(t *testing.T) {
 	b.waitFor("snapshot with a", func() bool { return len(b.presences) == 1 })
 	a.waitFor("b's join", func() bool { return len(a.presences) == 1 })
 
+	// the snapshot and the join carry the account and the connect time
+	checkPresence := func(c *testClient, username string, after time.Time) {
+		t.Helper()
+		c.waitFor(username+" presence", func() bool {
+			for _, p := range c.presences {
+				at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(p["lastActiveAt"]))
+				if p["username"] == username && p["accountId"] == e.authn.UserByUsername(username).ID && err == nil && !at.Before(after) {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	checkPresence(b, "alice", start)
+	checkPresence(a, "bob", start)
+
 	sel := []map[string]string{{"anchor": "cursor-1", "head": "cursor-2"}}
-	// presence fields are stamped by the server, a forged username is overwritten
-	b.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "username": "mallory", "selections": sel})
+	// presence fields are stamped by the server, a forged username or time is overwritten
+	time.Sleep(5 * time.Millisecond)
+	beforeMessage := time.Now()
+	b.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "username": "mallory", "lastActiveAt": "2000-01-01T00:00:00Z", "selections": sel})
+	checkPresence(a, "bob", beforeMessage)
 	a.waitFor("b's selection", func() bool {
 		for _, p := range a.presences {
 			if s, ok := p["selections"].([]any); ok && len(s) == 1 {

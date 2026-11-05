@@ -125,6 +125,13 @@ Setup, invite and reset links share one table: `id`, `kind` (`setup`, `invite`,
 and to the person redeeming it), `resetSecondFactors` (reset only), `createdBy`,
 `createdAt`, `expiresAt`, `usedAt`, `usedBy`, `revokedAt`. Links are single use.
 
+### Access request
+
+A person without an account asks the admins for an invite: `id`, token hash, `name` (at
+most 80 characters), `message` (at most 500), `documentId` and `invitedBy` as the client
+claimed them, `status`, `createdAt`, `expiresAt`, who decided and when, the invite link
+and its token, encrypted with the server key. See [Access request](#access-request-and-join-link).
+
 ### Device link
 
 Pairs a new device (the Android app) with an account that is signed in elsewhere (the web
@@ -151,7 +158,8 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 `recovery-code.used`, `passkey.added`, `passkey.renamed`, `passkey.removed`,
 `app-token.created`, `app-token.revoked`, `device-link.created`,
 `device-link.revoked`, `device-link.redeemed`, `setup.link-created`, `setup.completed`,
-`invite.created`, `invite.revoked`, `invite.redeemed`, `reset.created`,
+`invite.created`, `invite.revoked`, `invite.redeemed`, `access-request.created`,
+`access-request.approved`, `access-request.rejected`, `reset.created`,
 `reset.revoked`, `reset.redeemed`, `account.created`, `account.imported`,
 `account.updated`, `account.role-changed`, `account.disabled`, `account.enabled`,
 `account.deleted`, `settings.changed`, `rate-limit.triggered`, `item.moved`,
@@ -167,6 +175,7 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `require2FA` | bool | `false` | Every account must have a second factor: TOTP or at least one passkey. Accounts without one can log in with their password but only reach the endpoints needed to set one up. |
+| `accessRequestsEnabled` | bool | `true` | People without an account may ask for an invite, see [Access request](#access-request-and-join-link). |
 
 ### Storage
 
@@ -211,6 +220,7 @@ admin reset with `resetSecondFactors`).
 | link token | `mdl_` + 43 base64url characters | link fragment, request bodies |
 | login challenge | `mdc_` + 43 base64url characters | between password and second factor |
 | device link token | `mdd_` + 43 base64url characters | connect link payload, redeem request body |
+| access request token | `mda_` + 43 base64url characters | response of the request, status request body |
 | websocket ticket | 43 base64url characters (unchanged) | first websocket message |
 
 Tokens are compared by looking up their SHA-256 hash, so no timing difference depends on
@@ -432,6 +442,65 @@ Set-Cookie: __Host-mkdocseditor_session=mds_…; Path=/; Max-Age=7776000; HttpOn
 3. With `require2FA`, the new session is restricted until a second factor is set up
    (`user.secondFactorSetupRequired: true`). An account created with a passkey already
    has one.
+
+### Access request and join link
+
+Someone in a document sends a link through a messenger. The recipient lands in the
+editor, at the position of the sender. Without an account they can ask the admin for an
+invite. There is no email and no push service: the admins are notified on the events
+websocket, and the requester's client polls.
+
+**Join link:** `{clientUrl}/join/{documentId}?from={accountId}`. It only exists in the
+clients, the backend has no route for it. It holds no secret and grants nothing: opening
+the document still needs a login. The client looks the sender up by `accountId`, in this
+order, see [sync-protocol.md](sync-protocol.md#6-presence):
+
+1. In the presence list, among connections with a cursor. A sender can have several
+   connections, so it takes the one with the newest `lastActiveAt`.
+2. In `lastPositions` of `presence-snapshot`, where the sender last had a cursor. A sender who
+   switched to a messenger is usually offline by the time the recipient opens the link.
+3. Otherwise it opens the document at the start.
+
+**Access request:**
+
+1. The client checks that `features` of `GET /server-info/` contains `access-requests`,
+   and only then offers the button.
+2. `POST /auth/access-requests/` with `{"name": "Anna", "message": "Hi, Markus sent me a
+   link", "documentId": "…", "invitedBy": "<accountId>"}`. The last three are optional,
+   and the join link provides the ids. The response holds a token that is shown only once:
+   `{"requestId": "…", "token": "mda_…", "status": "pending", "expiresAt": "…"}`. The
+   client stores it. The response does not depend on whether the document or the account
+   exist.
+3. Admins get `{"type": "access-requests", "pending": 1}` on the events websocket and
+   look at `GET /admin/access-requests/?status=pending`.
+4. The admin **confirms the person out of band**, because `name` is only a claim, then
+   calls `POST /admin/access-requests/{id}/approve/` with `{"role": "editor"}` or
+   `POST /admin/access-requests/{id}/reject/`. Approving creates a normal invite link with
+   the name as its note. Its `url` can also be sent to the person directly.
+5. The client polls `POST /auth/access-requests/status/` with `{"token": "mda_…"}` at most
+   every 30 seconds in the foreground, and far less often in the background (Android: every
+   15 minutes). While the response holds an `inviteToken`, the client redeems it like any
+   invite link (section 7).
+
+| `status` | Meaning |
+|---|---|
+| `pending` | Waiting for an admin |
+| `approved` | Approved. `inviteToken` is present until the invite is redeemed |
+| `rejected` | Rejected by an admin, or the invite was revoked after the approval |
+| `expired` | Nobody decided within 7 days, or the invite expired before it was redeemed |
+
+A request is decided once. Approving or rejecting a decided or expired request gives 409
+`conflict`, except that rejecting a rejected request is a no-op. At most 50 requests can
+be pending at once: further ones get 429 `too-many-access-requests`, without
+`Retry-After`, because only an admin decision or the expiry frees a place. Requests are
+deleted 60 days after their `expiresAt`, and their token then gives 400
+`invalid-access-request`.
+
+The public endpoints answer 403 `access-requests-disabled` while `accessRequestsEnabled`
+is off, while the server waits for its setup (no admin could answer), and with
+`server.auth.disabled`. That includes the status endpoint: turning the setting off also
+stops the delivery of invite tokens that were not fetched yet. The admin endpoints keep
+working, so open requests can still be decided.
 
 ### Password login
 
@@ -712,7 +781,7 @@ provider (from the AAGUID) and absent for unknown authenticators.
  "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
  "passkeys": {"enabled": true, "rpId": "markusressel.de"},
  "loginMethods": ["password", "passkey", "device-link"], "require2FA": false,
- "features": ["moved-lookup"]}
+ "features": ["moved-lookup", "join-presence", "access-requests"]}
 ```
 
 - `name`: `server.instanceName`, else the host of `wikiUrl`, else the host of
@@ -726,7 +795,10 @@ provider (from the AAGUID) and absent for unknown authenticators.
 - `features`: optional API features of this server, for clients that also talk to older
   servers. A server from before this field has none. Clients ignore names they do not
   know. `moved-lookup`: `GET /moved/?id=…&id=…`, see
-  [references.md](references.md#7-ids-after-a-move-redirects).
+  [references.md](references.md#7-ids-after-a-move-redirects). `join-presence`: presence
+  has `lastActiveAt`, see [sync-protocol.md](sync-protocol.md#6-presence).
+  `access-requests`: the server accepts access requests right now, see
+  [Access request](#access-request-and-join-link).
 - Nothing secret and nothing about accounts (no user counts, no usernames). `/auth/status/`
   stays as it is; `/server-info/` is the superset for onboarding screens.
 
@@ -757,6 +829,8 @@ creation.
 | GET | `/.well-known/assetlinks.json` | | Digital Asset Links, only when configured, see section 12 |
 | GET | `/server-info/` | | server info object |
 | POST | `/auth/device-link/redeem/` | `{token, username?, deviceName?, sessionType?}` (`sessionType` default `bearer`) | session response |
+| POST | `/auth/access-requests/` | `{name, message?, documentId?, invitedBy?}` | 201 `{requestId, token, status: "pending", expiresAt}` |
+| POST | `/auth/access-requests/status/` | `{token}` | `{status, inviteToken?}` |
 
 `displayName` defaults to the username. Invalid, used, expired or revoked link tokens all
 give 400 `invalid-link`.
@@ -820,11 +894,22 @@ a pending secret (never started or expired), confirm answers 409 `conflict`.
 | GET | `/admin/invites/` | | `?status=pending` (optional filter) | `[link object]` |
 | POST | `/admin/invites/` | | `{role, expiresInHours?, note?}` | `{invite: link object, token, url}` |
 | DELETE | `/admin/invites/{id}/` | | | 204 (revoke) |
+| GET | `/admin/access-requests/` | | `?status=pending` (optional filter) | `[access request object]`, newest first |
+| POST | `/admin/access-requests/{id}/approve/` | | `{role, expiresInHours?}` | `{request: access request object, invite: link object, token, url}` |
+| POST | `/admin/access-requests/{id}/reject/` | | | 204 |
 | GET | `/admin/reset-links/` | | `?status=pending` | `[link object]` |
 | DELETE | `/admin/reset-links/{id}/` | | | 204 (revoke) |
-| GET | `/admin/settings/` | | | `{"require2FA": false}` |
-| PATCH | `/admin/settings/` | yes | `{"require2FA": true}` | `{"require2FA": true}` |
+| GET | `/admin/settings/` | | | `{"require2FA": false, "accessRequestsEnabled": true}` |
+| PATCH | `/admin/settings/` | yes | `{"require2FA"?, "accessRequestsEnabled"?}` | the settings |
 | GET | `/admin/audit/` | | `?limit=100&before=<id>&type=login.failed&account=<id>` (`limit` ≤ 500) | `{"events": [{id, time, type, actor: {id, username}?, target: {id, username}?, ip, userAgent, details}], "next": <id or null>}` |
+
+The access request object is `{id, name, message, status, createdAt, expiresAt,
+documentId, documentPath, invitedByAccountId, invitedByName}`. `documentId` and
+`documentPath` are the current ones if the claimed document exists, also after a move,
+and `null` otherwise. `invitedByAccountId` and `invitedByName` are `null` unless the
+claimed account exists and is not deleted. Only these admin endpoints resolve the claims.
+`name` and `message` are untrusted plain text: clients show them as text, and never as
+Markdown, HTML or a link.
 
 Admin guards (409 `conflict` with an explanation): an admin cannot disable, delete or
 demote themselves, and the last active admin cannot be demoted, disabled or deleted.
@@ -854,6 +939,7 @@ Every error response is JSON:
 | 400 | `invalid-username` | username rules violated |
 | 400 | `weak-password` | `details.reason`: `too-short`, `too-long`, `common`, `repetitive`, `contains-username`; `details.minLength`, `details.maxLength` |
 | 400 | `invalid-link` | link token unknown, used, expired or revoked |
+| 400 | `invalid-access-request` | access request token unknown |
 | 400 | `invalid-second-factor` | wrong TOTP code during enrollment confirmation |
 | 400 | `passkey-registration-failed` | attestation could not be verified |
 | 401 | `unauthenticated` | no credentials, or the session/app token is invalid, expired or revoked |
@@ -865,6 +951,7 @@ Every error response is JSON:
 | 403 | `account-disabled` | correct credentials, but the account is disabled |
 | 403 | `reauth-required` | sensitive action without a recent authentication |
 | 403 | `second-factor-setup-required` | restricted session (`require2FA`) |
+| 403 | `access-requests-disabled` | access requests are not accepted right now |
 | 403 | `csrf-check-failed` | missing `X-Requested-With` |
 | 403 | `origin-not-allowed` | `Origin` not allowed (or missing with a cookie) |
 | 404 | `not-found` | unknown route or object |
@@ -875,6 +962,7 @@ Every error response is JSON:
 | 409 | `second-factor-required` | the action would leave the account without a second factor while `require2FA` is on |
 | 409 | `conflict` | other conflicts (last admin, self-demotion; existing document conflicts keep their old body) |
 | 429 | `rate-limited` | `Retry-After` header (seconds) and `details.retryAfter` |
+| 429 | `too-many-access-requests` | 50 access requests are pending |
 | 500 | `internal` | |
 
 Websocket close codes stay as in `sync-protocol.md`: `4001` unauthenticated or session
@@ -888,6 +976,9 @@ In memory, per process (restarts reset them):
   `/auth/passkey/login/…`, `/auth/link/…`, `/auth/device-link/…`) and on
   `/auth/reauth/…`: token bucket,
   burst 20, refill 1 per 6 seconds (10 per minute).
+- **Per client IP on access requests**, with their own fixed buckets, stricter than the
+  above: `POST /auth/access-requests/` burst 5, refill 1 per 12 minutes (5 per hour);
+  `POST /auth/access-requests/status/` burst 10, refill 1 per 15 seconds (4 per minute).
 - **Per account** (by lower-cased username, also for names that do not exist, so the
   limit does not reveal accounts): after 5 consecutive failed passwords, second factors
   or step-ups, each further attempt must wait 2^(n−5) seconds after the last failure,
@@ -896,7 +987,8 @@ In memory, per process (restarts reset them):
 - **Per login challenge:** 5 attempts.
 - Over the limit: 429 `rate-limited` with `Retry-After`. Triggered limits are logged and
   recorded in the audit log (at most once per minute per key).
-- The numbers are configurable under `server.auth.rateLimits` (section 13), and
+- The numbers, except those of access requests, are configurable under
+  `server.auth.rateLimits` (section 13), and
   `rateLimits.disabled: true` turns all of them off. That is meant for automated tests
   that log in many times from one address, never for production.
 
@@ -1155,6 +1247,11 @@ Additive only; existing clients keep working.
   `POST /account/device-links/`, QR code of `connectUrl`, poll
   `GET /account/device-links/{id}/` every few seconds until `redeemed` or `expired`,
   revoke on cancel); Android handles `/connect#…`.
+- Join links and access requests, see
+  [Access request](#access-request-and-join-link): open `/join/{documentId}?from={accountId}`
+  in the editor at the sender's position, offer the request form when `features` contains
+  `access-requests`, and poll the status. Admins get a pending list with approve and reject,
+  and a reminder to confirm the person first.
 
 **Web:**
 
@@ -1211,6 +1308,12 @@ compromised client device while unlocked, a malicious admin.
 | Memory exhaustion through hashing | at most 4 concurrent Argon2id computations; rate limits |
 | Timing attacks on secrets | lookups by hash, `subtle.ConstantTimeCompare` for remaining comparisons |
 | Brute force of link or session tokens | 256-bit tokens; per-IP limit on link endpoints |
+| Join link forwarded | it holds no secret and grants nothing; opening the document still needs a login with access to it |
+| Last positions reveal activity | everyone who can open a document sees where and when each account last had a cursor in it, for 30 days. This goes beyond live presence on purpose, for join links, and never leaves the document's own websocket; deleted accounts are left out |
+| Access request by an impostor | a request only carries a claimed name, and `documentId` and `invitedBy` are claims too. The admin must confirm the person out of band before approving, and the clients say so. "Registration by invite links only" stays true: approval creates a normal invite, which is single use, expires and is revocable |
+| Access requests as spam or to probe the wiki | stricter per-IP limits, at most 50 pending, audit log with IP, setting to turn them off. An attacker with many addresses can fill the 50 places for 7 days, which blocks further requests but nothing else. The response is the same for known and unknown ids; only admins see the resolved document and inviter |
+| Access request token leaked or database stolen | the token is shown once, is 256 bits and stored as SHA-256. The token of the invite is the only one the server has to return later, so it is encrypted with the server key, and only returned for the access request token while the invite is unredeemed |
+| Text of an access request attacks the admin | name and message are limited, control characters are rejected (the message may have line breaks), clients show them as plain text, and they are not written to the logs or the audit log |
 | Device link QR code photographed or link forwarded | creation needs step-up; 5-minute, single-use token; the web shows which device redeemed it; the session is listed and revocable; the new session needs its own step-up for sensitive actions |
 
 Residual risks: rate limits are per process and reset on restart; an attacker with read

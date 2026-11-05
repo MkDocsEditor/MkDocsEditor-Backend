@@ -148,10 +148,11 @@ func (s *Service) AuthenticateAppToken(token string) (*User, *AppToken, error) {
 
 // settingsView is the JSON of the instance settings
 type settingsView struct {
-	Require2FA bool `json:"require2FA"`
+	Require2FA            bool `json:"require2FA"`
+	AccessRequestsEnabled bool `json:"accessRequestsEnabled"`
 }
 
 // Settings returns the instance settings
 func (s *Service) Settings() any {
-	return settingsView{Require2FA: s.Require2FA()}
+	return settingsView{Require2FA: s.Require2FA(), AccessRequestsEnabled: s.AccessRequestsEnabled()}
 }

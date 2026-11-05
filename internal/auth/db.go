@@ -163,6 +163,25 @@ CREATE TABLE device_links (
 );
 CREATE INDEX device_links_account ON device_links(account_id, created_at);
 `,
+	// 7: requests of people without an account for an invite
+	`
+CREATE TABLE access_requests (
+	id           TEXT PRIMARY KEY,
+	token_hash   BLOB NOT NULL UNIQUE,
+	name         TEXT NOT NULL,
+	message      TEXT NOT NULL DEFAULT '',
+	document_id  TEXT NOT NULL DEFAULT '',
+	invited_by   TEXT NOT NULL DEFAULT '',
+	status       TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+	created_at   INTEGER NOT NULL,
+	expires_at   INTEGER NOT NULL,
+	decided_at   INTEGER NOT NULL DEFAULT 0,
+	decided_by   TEXT NOT NULL DEFAULT '',
+	link_id      TEXT NOT NULL DEFAULT '',
+	invite_token BLOB
+);
+CREATE INDEX access_requests_status ON access_requests(status, expires_at);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

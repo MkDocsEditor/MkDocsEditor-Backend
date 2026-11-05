@@ -97,21 +97,35 @@ type (
 	}
 
 	PresenceMessage struct {
-		Type        string          `json:"type"`
-		DocumentID  string          `json:"documentId"`
-		ClientID    string          `json:"clientId,omitempty"`
-		AccountID   string          `json:"accountId,omitempty"`
-		Username    string          `json:"username,omitempty"`
-		DisplayName string          `json:"displayName,omitempty"`
-		Color       string          `json:"color,omitempty"`
-		ActorID     string          `json:"actorId,omitempty"`
-		Selections  json.RawMessage `json:"selections"`
+		Type        string `json:"type"`
+		DocumentID  string `json:"documentId"`
+		ClientID    string `json:"clientId,omitempty"`
+		AccountID   string `json:"accountId,omitempty"`
+		Username    string `json:"username,omitempty"`
+		DisplayName string `json:"displayName,omitempty"`
+		Color       string `json:"color,omitempty"`
+		ActorID     string `json:"actorId,omitempty"`
+		// LastActiveAt is stamped by the server, see docs/sync-protocol.md section 6
+		LastActiveAt string          `json:"lastActiveAt,omitempty"`
+		Selections   json.RawMessage `json:"selections"`
 	}
 
 	PresenceSnapshotMessage struct {
 		Type       string            `json:"type"`
 		DocumentID string            `json:"documentId"`
 		Peers      []PresenceMessage `json:"peers"`
+		// LastPositions says where accounts last had a cursor, see docs/sync-protocol.md section 6
+		LastPositions []LastPositionInfo `json:"lastPositions"`
+	}
+
+	// LastPositionInfo is a last position with the account it belongs to
+	LastPositionInfo struct {
+		AccountID    string          `json:"accountId"`
+		Username     string          `json:"username"`
+		DisplayName  string          `json:"displayName"`
+		Color        string          `json:"color"`
+		Selections   json.RawMessage `json:"selections"`
+		LastActiveAt string          `json:"lastActiveAt"`
 	}
 
 	PresenceLeaveMessage struct {
@@ -137,6 +151,12 @@ type (
 type selection struct {
 	Anchor string `json:"anchor"`
 	Head   string `json:"head"`
+}
+
+// hasSelections reports whether valid selections name at least one position
+func hasSelections(raw json.RawMessage) bool {
+	var sel []selection
+	return json.Unmarshal(raw, &sel) == nil && len(sel) > 0
 }
 
 // validSelections checks the format of the selections of a presence message

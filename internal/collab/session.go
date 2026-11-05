@@ -2,11 +2,13 @@ package collab
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"sort"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -19,6 +21,13 @@ import (
 
 const ContentKey = "content"
 
+const (
+	// lastPositionKeep is how long a join link can find the last position of an account
+	lastPositionKeep = 30 * 24 * time.Hour
+	// maxLastPositionSize limits what one account can make the server store per document
+	maxLastPositionSize = 4 << 10
+)
+
 // ErrNotUTF8 is returned for files that cannot be edited because they are not valid UTF-8
 var ErrNotUTF8 = errors.New("the file is not valid UTF-8")
 
@@ -27,12 +36,14 @@ var ErrNotUTF8 = errors.New("the file is not valid UTF-8")
 type docSession struct {
 	server *SyncServer
 
-	mu      sync.Mutex
-	meta    *DocumentMeta
-	absPath string
-	docID   string
-	doc     *automerge.Doc
-	conns   map[*wsConn]struct{}
+	mu   sync.Mutex
+	meta *DocumentMeta
+	// positionsDirty means meta.LastPositions has changes that are not on disk yet
+	positionsDirty bool
+	absPath        string
+	docID          string
+	doc            *automerge.Doc
+	conns          map[*wsConn]struct{}
 
 	// text and heads of the document the last time it was read from or written to disk
 	diskBaseText  string
@@ -325,6 +336,8 @@ func (ds *docSession) flushLocked() {
 	if err := ds.server.store.Save(ds.meta, state); err != nil {
 		log.Printf("Unable to save the state of %s: %v", ds.meta.Path, err)
 		failed = true
+	} else {
+		ds.positionsDirty = false
 	}
 	metrics.DocumentFlushDuration.Observe(time.Since(start).Seconds())
 	if failed {
@@ -337,6 +350,60 @@ func (ds *docSession) flushLocked() {
 	metrics.DocumentStateSize.Observe(float64(len(state)))
 	ds.server.logSyncEvent(SyncEvent{Kind: SyncEventFlushed, Path: ds.meta.Path, Bytes: len(state), Heads: len(ds.doc.Heads()), DurationMs: milliseconds(start)})
 	ds.dirty = false
+}
+
+// rememberPositionLocked keeps the selections of an account. They reach the disk with the next
+// flush or when a connection leaves, so moving a cursor causes no write.
+func (ds *docSession) rememberPositionLocked(accountID string, selections json.RawMessage, at time.Time) {
+	if len(selections) > maxLastPositionSize || !hasSelections(selections) {
+		return
+	}
+	if ds.meta.LastPositions == nil {
+		ds.meta.LastPositions = map[string]LastPosition{}
+	}
+	for id, p := range ds.meta.LastPositions {
+		if at.Sub(p.Time) > lastPositionKeep {
+			delete(ds.meta.LastPositions, id)
+		}
+	}
+	ds.meta.LastPositions[accountID] = LastPosition{Selections: selections, Time: at}
+	ds.positionsDirty = true
+}
+
+// savePositionsLocked writes the remembered positions if they changed
+func (ds *docSession) savePositionsLocked() {
+	if !ds.positionsDirty || ds.closed {
+		return
+	}
+	if err := ds.server.store.SaveMeta(ds.meta); err != nil {
+		log.Printf("Unable to save the last positions of %s: %v", ds.meta.Path, err)
+		return
+	}
+	ds.positionsDirty = false
+}
+
+// lastPositionsLocked lists the remembered positions of existing accounts, newest first
+func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
+	out := make([]LastPositionInfo, 0, len(ds.meta.LastPositions))
+	now := time.Now()
+	for id, p := range ds.meta.LastPositions {
+		if now.Sub(p.Time) > lastPositionKeep {
+			continue
+		}
+		u := ds.server.authenticator.UserByID(id)
+		if u == nil || u.Status == auth.StatusDeleted {
+			continue
+		}
+		out = append(out, LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
+			Selections: p.Selections, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastActiveAt != out[j].LastActiveAt {
+			return out[i].LastActiveAt > out[j].LastActiveAt
+		}
+		return out[i].AccountID < out[j].AccountID
+	})
+	return out
 }
 
 // scheduleFlushLocked marks the session dirty and flushes it within the flush delay
