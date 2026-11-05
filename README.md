@@ -144,43 +144,9 @@ storage and git architecture are specified in [docs/sync-protocol.md](docs/sync-
 References between pages, moving and renaming with automatic link updates, and the link
 path algorithm the clients share are specified in [docs/references.md](docs/references.md).
 
-[OpenAPI Documentation](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml)
-
-The [OpenAPI file](openapi-description.yaml) is the reference for the REST API. CI lints it and
-checks that it lists exactly the routes the backend serves. Overview:
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/alive/` | Liveness probe, no authentication |
-| GET | `/auth/whoami/` | The authenticated user |
-| POST | `/auth/ws-ticket/` | A single-use websocket ticket (60 s) |
-| GET | `/actors/` | Automerge actor id to user map |
-| GET | `/mkdocs/config/` | The MkDocs configuration (`mkdocs.yml`) as JSON |
-| GET | `/section/` | The whole tree |
-| POST | `/section/` | Create a section (`{"parent","name"}`) |
-| GET, PUT, DELETE | `/section/{id}/` | Get, rename (`{"name"}`, updates references), delete (`?force=true` while documents in it are open) |
-| POST | `/document/` | Create a document (`{"parent","name"}`) |
-| GET, PUT, DELETE | `/document/{id}/` | Get, rename (`{"name"}`, updates references), delete (`?force=true` while it is open) |
-| GET | `/document/{id}/content/` | The markdown text (live while open) |
-| GET | `/document/{id}/authorship/` | Who wrote which part of the text |
-| GET | `/document/{id}/references/` | Outgoing links, images and other references, resolved or broken |
-| GET | `/document/{id}/backlinks/`, `/section/{id}/backlinks/`, `/resource/{id}/backlinks/` | References to the item ("used by") |
-| GET | `/resource/{id}/thumbnail/?size=256` | Thumbnail of an image resource (JPEG or PNG) |
-| GET | `/references/broken/` | All broken references |
-| GET | `/references/unused-resources/` | Resources that nothing uses |
-| GET | `/link/?from=&to=&anchor=` | The link destination from a document to an item, see [docs/references.md](docs/references.md#8-the-link-path-algorithm) |
-| GET | `/document/{id}/history/` | Git commits of the document (requires `git.enabled`) |
-| GET | `/document/{id}/history/{revision}/content/` | The text at a revision |
-| GET | `/document/{id}/history/diff/?from=&to=` | Unified diff between revisions (`current` is the live text) |
-| POST | `/document/{id}/history/{revision}/restore/` | Restore a revision as a normal edit |
-| GET | `/events/ws/` | Events websocket: tree changes and who has which document open |
-| GET | `/document/{id}/ws/` | Realtime editing websocket, see [docs/sync-protocol.md](docs/sync-protocol.md) |
-| POST | `/resource/{sectionId}/{name}/` | Upload a file (multipart field `file`) |
-| GET, PUT, DELETE | `/resource/{id}/` | Get, rename (`{"name"}`, updates references), delete |
-| POST | `/move/` | Move or rename a section, document or resource and update every reference to it (`dryRun` for a preview) |
-| GET | `/moved/{id}/` | Where the item with an old id is now |
-| GET | `/moved/?id=&id=` | The same for up to 200 ids in one request; ids that have not moved are left out |
-| GET | `/resource/{id}/content/` | The file |
+The REST API is described in the [OpenAPI file](openapi-description.yaml), which you can
+[browse in Swagger Editor](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml).
+CI lints it and checks that it lists exactly the routes the backend serves.
 
 # Contributing
 
