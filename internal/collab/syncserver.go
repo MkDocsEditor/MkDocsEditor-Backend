@@ -3,6 +3,7 @@
 package collab
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -50,7 +51,9 @@ type SyncServer struct {
 	FlushDelay       time.Duration
 	HeartbeatPeriod  time.Duration
 	HeartbeatTimeout time.Duration
-	HelloTimeout     time.Duration
+	// GhostLifetime is how long the cursor of a user stays after they left
+	GhostLifetime time.Duration
+	HelloTimeout  time.Duration
 
 	// OnFileWritten is called (with the session lock held) after the server wrote a document file
 	OnFileWritten func(relPath string)
@@ -117,6 +120,7 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 		FlushDelay:       2 * time.Second,
 		HeartbeatPeriod:  5 * time.Second,
 		HeartbeatTimeout: 15 * time.Second,
+		GhostLifetime:    defaultGhostLifetime,
 		HelloTimeout:     10 * time.Second,
 		sessions:         map[string]*docSession{},
 		treeChanges:      make(chan struct{}, 1),
@@ -577,13 +581,14 @@ func (s *SyncServer) leave(conn *wsConn) {
 		return
 	}
 	delete(session.conns, conn)
+	leave := session.accountLeftLocked(conn, time.Now())
 	session.savePositionsLocked()
 	s.logSyncEvent(SyncEvent{
 		Kind: SyncEventLeft, Path: session.meta.Path, User: conn.user.Username, ClientID: conn.clientID,
 		Client: conn.clientName, Access: conn.access(), Connections: len(session.conns),
 	})
 	s.onlineChanged()
-	session.broadcastLocked(&PresenceLeaveMessage{Type: MsgPresenceLeave, DocumentID: session.docID, ClientID: conn.clientID}, nil)
+	session.broadcastLocked(leave, nil)
 	remaining := len(session.conns)
 	session.mu.Unlock()
 	if remaining > 0 {
@@ -636,6 +641,7 @@ type wsConn struct {
 	syncState  *automerge.SyncState
 	shadow     *automerge.Doc
 	selections json.RawMessage
+	viewport   json.RawMessage
 	warnedRO   bool
 }
 
@@ -901,7 +907,12 @@ func (c *wsConn) handleMessage(data []byte) bool {
 			c.sendError(ErrCodeBadRequest, "invalid presence")
 			return true
 		}
-		c.handlePresence(m.Selections)
+		view, ok := cleanViewport(m.Viewport)
+		if !ok {
+			c.sendError(ErrCodeBadRequest, "invalid presence")
+			return true
+		}
+		c.handlePresence(m.Selections, view)
 	}
 	// heartbeats only keep the connection alive, unknown types are ignored for forward compatibility
 	return true
@@ -937,6 +948,7 @@ func (c *wsConn) attachLocked(session *docSession) error {
 		You:           c.userInfo(),
 		Actors:        c.server.Actors(),
 	})
+	session.accountJoinedLocked(c.user.ID, time.Now())
 	peers := make([]PresenceMessage, 0, len(session.conns))
 	for other := range session.conns {
 		peers = append(peers, other.presenceLocked())
@@ -965,6 +977,7 @@ func (c *wsConn) presenceLocked() PresenceMessage {
 		ActorID:      c.actorID,
 		LastActiveAt: c.lastActive.UTC().Format(time.RFC3339Nano),
 		Selections:   c.selections,
+		Viewport:     c.viewport,
 	}
 }
 
@@ -1120,14 +1133,20 @@ func sameHeads(a, b []automerge.ChangeHash) bool {
 	return true
 }
 
-func (c *wsConn) handlePresence(selections json.RawMessage) {
+func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage) {
 	metrics.PresenceMessages.Inc()
 	session := c.session
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	c.selections = selections
 	c.lastActive = time.Now()
-	session.rememberPositionLocked(c.user.ID, selections, c.lastActive)
+	switch {
+	case bytes.Equal(view, jsonNull):
+		c.viewport = nil
+	case view != nil:
+		c.viewport = view
+	}
+	session.rememberPositionLocked(c.user.ID, selections, view, c.lastActive)
 	session.broadcastLocked(c.presenceLocked(), c)
 }
 

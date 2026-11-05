@@ -252,6 +252,214 @@ func TestSyncLastPositions(t *testing.T) {
 	}
 }
 
+// lastLeave waits for another presence-leave and returns it
+func lastLeave(c *testClient, count int) map[string]any {
+	c.t.Helper()
+	c.waitFor("presence-leave", func() bool { return len(c.leaves) >= count })
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.leaves[count-1]
+}
+
+func positionOf(c *testClient, accountID string) map[string]any {
+	c.t.Helper()
+	c.waitFor("the snapshot", func() bool { return c.lastPositions != nil })
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.lastPositions {
+		if m := p.(map[string]any); m["accountId"] == accountID {
+			return m
+		}
+	}
+	return nil
+}
+
+func TestSyncGhost(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+	bobID := e.authn.UserByUsername("bob").ID
+	sel := []map[string]string{{"anchor": "cursor-1", "head": "cursor-1"}}
+	view := map[string]string{"top": "cursor-2", "bottom": "cursor-3"}
+
+	watcher := newTestClient(t, e, "carol")
+	watcher.connect(id)
+
+	// someone who never had a position leaves no ghost
+	bob := newTestClient(t, e, "bob")
+	bob.connect(id)
+	bob.disconnect()
+	if m := lastLeave(watcher, 1); m["ghostMs"] != nil || m["accountId"] != nil {
+		t.Errorf("leave without a position = %v", m)
+	}
+
+	// only the last connection of an account leaves a ghost
+	a1 := newTestClient(t, e, "alice")
+	a1.connect(id)
+	a2 := newTestClient(t, e, "alice")
+	a2.connect(id)
+	a1.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel, "viewport": view})
+	watcher.waitFor("the selection", func() bool {
+		for _, p := range watcher.presences {
+			if p["viewport"] != nil {
+				return true
+			}
+		}
+		return false
+	})
+	a1.disconnect()
+	if m := lastLeave(watcher, 2); m["ghostMs"] != nil {
+		t.Errorf("leave of the first connection = %v", m)
+	}
+	a2.disconnect()
+	m := lastLeave(watcher, 3)
+	if m["accountId"] != alice || m["ghostMs"] != float64(60000) || m["viewport"] == nil || len(m["selections"].([]any)) != 1 {
+		t.Errorf("leave of the last connection = %v", m)
+	}
+
+	// a joiner gets the rest of the ghost
+	joiner := newTestClient(t, e, "bob")
+	joiner.connect(id)
+	p := positionOf(joiner, alice)
+	if p == nil {
+		t.Fatal("no position")
+	}
+	if ms, ok := p["ghostMs"].(float64); !ok || ms <= 0 || ms > 60000 || p["viewport"] == nil {
+		t.Errorf("position = %v", p)
+	}
+	if p := positionOf(joiner, bobID); p != nil {
+		t.Errorf("position of bob = %v", p)
+	}
+
+	// coming back ends the ghost, and the old position still counts for the next leave
+	back := newTestClient(t, e, "alice")
+	back.connect(id)
+	eventually(t, "the ghost ended", func() bool {
+		late := newTestClient(t, e, "bob")
+		late.connect(id)
+		defer late.disconnect()
+		p := positionOf(late, alice)
+		return p != nil && p["ghostMs"] == nil
+	})
+	count := func() int {
+		watcher.mu.Lock()
+		defer watcher.mu.Unlock()
+		return len(watcher.leaves)
+	}
+	before := count()
+	back.disconnect()
+	eventually(t, "the ghost is back", func() bool {
+		watcher.mu.Lock()
+		defer watcher.mu.Unlock()
+		for _, l := range watcher.leaves[before:] {
+			if l["accountId"] == alice && l["ghostMs"] != nil {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestSyncGhostExpires(t *testing.T) {
+	e := newSyncEnv(t)
+	e.ss.GhostLifetime = 30 * time.Millisecond
+	id := e.docID("guide/setup.md")
+	alice := e.authn.UserByUsername("alice").ID
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "c", "head": "c"}}})
+	time.Sleep(50 * time.Millisecond)
+	a.disconnect()
+	time.Sleep(60 * time.Millisecond)
+
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	if p := positionOf(b, alice); p == nil || p["ghostMs"] != nil {
+		t.Errorf("position after the ghost = %v", p)
+	}
+
+	// back after the ghost, without a new position: no ghost at the old spot
+	again := newTestClient(t, e, "alice")
+	again.connect(id)
+	again.disconnect()
+	eventually(t, "the second leave", func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.leaves) == 1
+	})
+	if m := lastLeave(b, 1); m["ghostMs"] != nil {
+		t.Errorf("leave without a new position = %v", m)
+	}
+}
+
+func TestSyncViewport(t *testing.T) {
+	e := newSyncEnv(t)
+	id := e.docID("guide/setup.md")
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	b := newTestClient(t, e, "bob")
+	b.connect(id)
+	sel := []map[string]string{{"anchor": "c", "head": "c"}}
+
+	viewportOf := func() any {
+		for _, p := range b.presences {
+			if p["username"] == "alice" {
+				return p["viewport"]
+			}
+		}
+		return nil
+	}
+
+	// only the known fields pass
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": sel,
+		"viewport": map[string]string{"top": "t", "bottom": "b", "extra": "x"}})
+	b.waitFor("the viewport", func() bool { return viewportOf() != nil })
+	b.waitFor("only the known fields", func() bool {
+		v, ok := viewportOf().(map[string]any)
+		if !ok || len(v) != 2 || v["top"] != "t" || v["bottom"] != "b" {
+			t.Errorf("viewport = %v", v)
+		}
+		return true
+	})
+
+	// a missing viewport keeps the last one, also with empty selections
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}})
+	b.waitFor("empty selections", func() bool {
+		for _, p := range b.presences {
+			if s, ok := p["selections"].([]any); ok && p["username"] == "alice" && len(s) == 0 {
+				return true
+			}
+		}
+		return false
+	})
+	b.waitFor("the kept viewport", func() bool {
+		if viewportOf() == nil {
+			t.Error("the viewport is gone")
+		}
+		return true
+	})
+
+	// null clears it for peers, the last position keeps it
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "viewport": nil})
+	b.waitFor("the cleared viewport", func() bool { return viewportOf() == nil })
+	c := newTestClient(t, e, "carol")
+	c.connect(id)
+	p := positionOf(c, e.authn.UserByUsername("alice").ID)
+	if p == nil || p["viewport"] == nil || len(p["selections"].([]any)) != 1 || p["ghostMs"] != nil {
+		t.Errorf("position = %v", p)
+	}
+
+	// invalid ones are refused
+	for _, invalid := range []any{"text", map[string]string{"top": "t"}, map[string]any{"top": 1, "bottom": 2}} {
+		a.mu.Lock()
+		before := len(a.errors)
+		a.mu.Unlock()
+		a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "viewport": invalid})
+		a.waitFor("the error", func() bool { return len(a.errors) > before })
+	}
+}
+
 func TestSyncPresence(t *testing.T) {
 	start := time.Now()
 	e := newSyncEnv(t)

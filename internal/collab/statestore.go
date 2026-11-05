@@ -37,15 +37,18 @@ type DocumentMeta struct {
 	DiskBaseHeads []string `json:"diskBaseHeads"`
 	// LastChange is the time of the last change by a user
 	LastChange time.Time `json:"lastChange"`
-	// LastPositions holds where accounts last had a cursor in this document, by account id.
+	// LastPositions holds where accounts last were in this document, by account id.
 	// Cursors are only valid in their epoch, and a new epoch has a new meta.
 	LastPositions map[string]LastPosition `json:"lastPositions,omitempty"`
 }
 
-// LastPosition is the last non-empty selections of an account in a document
+// LastPosition is the last non-empty selections and the last viewport of an account in a document
 type LastPosition struct {
 	Selections json.RawMessage `json:"selections"`
+	Viewport   json.RawMessage `json:"viewport,omitempty"`
 	Time       time.Time       `json:"time"`
+	// LeftAt is when the last connection of the account left. It is zero while one is connected.
+	LeftAt time.Time `json:"leftAt,omitzero"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.
