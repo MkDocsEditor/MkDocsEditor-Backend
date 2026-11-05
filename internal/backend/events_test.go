@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/gorilla/websocket"
 )
 
@@ -96,7 +97,7 @@ func (c *eventsClient) count(msgType string) int {
 
 // online returns "docId:user,user;..." of the newest online message
 func (c *eventsClient) online() string {
-	m := c.last(MsgOnline)
+	m := c.last(collab.MsgOnline)
 	if m == nil {
 		return "<none>"
 	}
@@ -136,17 +137,17 @@ func TestEventsOnlineAndTree(t *testing.T) {
 	if rec := e.doBody(http.MethodPost, "/document/", "bob", `{"parent":"`+guide+`","name":"new"}`); rec.Code != http.StatusOK {
 		t.Fatalf("create: %d", rec.Code)
 	}
-	eventually(t, "tree-changed after create", func() bool { return ev.count(MsgTreeChanged) >= 1 })
-	n := ev.count(MsgTreeChanged)
+	eventually(t, "tree-changed after create", func() bool { return ev.count(collab.MsgTreeChanged) >= 1 })
+	n := ev.count(collab.MsgTreeChanged)
 	// a change on disk, seen by the file watcher
 	e.writeFile("guide/other.md", "# Other\n")
 	e.tm.CreateItemTree()
-	eventually(t, "tree-changed after disk change", func() bool { return ev.count(MsgTreeChanged) > n })
+	eventually(t, "tree-changed after disk change", func() bool { return ev.count(collab.MsgTreeChanged) > n })
 
 	// shutdown closes the events socket with 1001
 	e.stop()
 	<-ev.closed
-	if ev.closeCode != CloseGoingAway {
+	if ev.closeCode != collab.CloseGoingAway {
 		t.Errorf("close code %d", ev.closeCode)
 	}
 }
@@ -154,11 +155,11 @@ func TestEventsOnlineAndTree(t *testing.T) {
 func TestEventsAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	ev := dialEvents(t, e, "bob", true)
-	eventually(t, "snapshot with ticket", func() bool { return ev.last(MsgOnline) != nil })
+	eventually(t, "snapshot with ticket", func() bool { return ev.last(collab.MsgOnline) != nil })
 
 	anon := dialEvents(t, e, "", false)
 	<-anon.closed
-	if anon.closeCode != CloseUnauthorized {
+	if anon.closeCode != collab.CloseUnauthorized {
 		t.Errorf("close code without auth %d", anon.closeCode)
 	}
 }
@@ -172,7 +173,7 @@ func TestEventsHeartbeatTimeout(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no heartbeat timeout")
 	}
-	if quiet.closeCode != CloseHeartbeatTimout {
+	if quiet.closeCode != collab.CloseHeartbeatTimout {
 		t.Errorf("close code %d", quiet.closeCode)
 	}
 }

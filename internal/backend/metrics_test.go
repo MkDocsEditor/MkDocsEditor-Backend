@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -32,15 +33,15 @@ func (b *lockedBuffer) String() string {
 }
 
 // syncEvents parses the event log
-func syncEvents(t *testing.T, b *lockedBuffer) []SyncEvent {
+func syncEvents(t *testing.T, b *lockedBuffer) []collab.SyncEvent {
 	t.Helper()
-	var events []SyncEvent
+	var events []collab.SyncEvent
 	for line := range strings.Lines(b.String()) {
-		var e SyncEvent
+		var e collab.SyncEvent
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			t.Fatalf("not a JSON line: %q: %v", line, err)
 		}
-		if e.Type != syncEventType || e.Time == "" {
+		if e.Type != collab.SyncEventType || e.Time == "" {
 			t.Fatalf("incomplete event: %q", line)
 		}
 		events = append(events, e)
@@ -48,7 +49,7 @@ func syncEvents(t *testing.T, b *lockedBuffer) []SyncEvent {
 	return events
 }
 
-func hasEvent(events []SyncEvent, match func(SyncEvent) bool) bool {
+func hasEvent(events []collab.SyncEvent, match func(collab.SyncEvent) bool) bool {
 	for _, e := range events {
 		if match(e) {
 			return true
@@ -149,29 +150,31 @@ func TestMetricsAndEventsOfASyncSession(t *testing.T) {
 	alice.disconnect()
 	carol.disconnect()
 	eventually(t, "the document to unload", func() bool {
-		return hasEvent(syncEvents(t, eventLog), func(ev SyncEvent) bool { return ev.Kind == SyncEventUnloaded })
+		return hasEvent(syncEvents(t, eventLog), func(ev collab.SyncEvent) bool { return ev.Kind == collab.SyncEventUnloaded })
 	})
 
 	events := syncEvents(t, eventLog)
 	const path = "guide/setup.md"
-	for what, match := range map[string]func(SyncEvent) bool{
-		"load": func(ev SyncEvent) bool { return ev.Kind == SyncEventLoaded && ev.Path == path },
-		"alice joined": func(ev SyncEvent) bool {
-			return ev.Kind == SyncEventJoined && ev.User == "alice" && ev.Access == "write" && ev.Client == "test"
+	for what, match := range map[string]func(collab.SyncEvent) bool{
+		"load": func(ev collab.SyncEvent) bool { return ev.Kind == collab.SyncEventLoaded && ev.Path == path },
+		"alice joined": func(ev collab.SyncEvent) bool {
+			return ev.Kind == collab.SyncEventJoined && ev.User == "alice" && ev.Access == "write" && ev.Client == "test"
 		},
-		"carol joined": func(ev SyncEvent) bool {
-			return ev.Kind == SyncEventJoined && ev.User == "carol" && ev.Access == "read"
+		"carol joined": func(ev collab.SyncEvent) bool {
+			return ev.Kind == collab.SyncEventJoined && ev.User == "carol" && ev.Access == "read"
 		},
-		"change": func(ev SyncEvent) bool {
-			return ev.Kind == SyncEventChangesApplied && ev.User == "alice" && ev.Path == path && ev.Changes > 0 &&
+		"change": func(ev collab.SyncEvent) bool {
+			return ev.Kind == collab.SyncEventChangesApplied && ev.User == "alice" && ev.Path == path && ev.Changes > 0 &&
 				ev.Bytes > 0 && ev.Heads > 0 && ev.Actor == alice.actorID
 		},
-		"rejected": func(ev SyncEvent) bool {
-			return ev.Kind == SyncEventRejected && ev.User == "carol" && ev.Reason == metrics.RejectReadOnly
+		"rejected": func(ev collab.SyncEvent) bool {
+			return ev.Kind == collab.SyncEventRejected && ev.User == "carol" && ev.Reason == metrics.RejectReadOnly
 		},
-		"external": func(ev SyncEvent) bool { return ev.Kind == SyncEventExternalChange && ev.Path == path },
-		"flushed":  func(ev SyncEvent) bool { return ev.Kind == SyncEventFlushed && ev.Path == path && ev.Bytes > 0 },
-		"left":     func(ev SyncEvent) bool { return ev.Kind == SyncEventLeft && ev.User == "alice" },
+		"external": func(ev collab.SyncEvent) bool { return ev.Kind == collab.SyncEventExternalChange && ev.Path == path },
+		"flushed": func(ev collab.SyncEvent) bool {
+			return ev.Kind == collab.SyncEventFlushed && ev.Path == path && ev.Bytes > 0
+		},
+		"left": func(ev collab.SyncEvent) bool { return ev.Kind == collab.SyncEventLeft && ev.User == "alice" },
 	} {
 		if !hasEvent(events, match) {
 			t.Errorf("no %s event in %s", what, eventLog.String())
@@ -179,15 +182,6 @@ func TestMetricsAndEventsOfASyncSession(t *testing.T) {
 	}
 	if strings.Contains(eventLog.String(), secret) {
 		t.Error("document text in the event log")
-	}
-}
-
-func TestEventLogIsOffByDefault(t *testing.T) {
-	e := newSyncEnv(t)
-	alice := newTestClient(t, e, "alice")
-	alice.connect(e.docID("index.md"))
-	if e.ss.eventLog != nil {
-		t.Fatal("the event log is on")
 	}
 }
 

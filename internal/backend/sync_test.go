@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
@@ -50,7 +51,7 @@ func TestSyncTwoClientsConverge(t *testing.T) {
 	// the actor map knows both clients
 	a.waitFor("b's actor", func() bool { return a.actors[b.actorID] == "bob" })
 	rec := e.do(http.MethodGet, "/actors/", "alice")
-	var actors []ActorInfo
+	var actors []collab.ActorInfo
 	_ = json.Unmarshal(rec.bytes(), &actors)
 	found := map[string]string{}
 	for _, info := range actors {
@@ -171,7 +172,7 @@ func TestSyncExternalChangeWhileConnected(t *testing.T) {
 	// the disk change is attributed to the disk pseudo user
 	a.waitFor("disk actor", func() bool {
 		for _, user := range a.actors {
-			if user == ActorUserDisk {
+			if user == collab.ActorUserDisk {
 				return true
 			}
 		}
@@ -188,7 +189,7 @@ func TestSyncReaderChangesAreDropped(t *testing.T) {
 		t.Fatal("reader not marked read-only")
 	}
 	carol.appendText("vandalism\n")
-	carol.waitFor("read-only error", func() bool { return len(carol.errors) > 0 && carol.errors[0] == ErrCodeReadOnly })
+	carol.waitFor("read-only error", func() bool { return len(carol.errors) > 0 && carol.errors[0] == collab.ErrCodeReadOnly })
 
 	// the reader still receives edits of others
 	a := newTestClient(t, e, "alice")
@@ -214,7 +215,7 @@ func TestSyncPresence(t *testing.T) {
 
 	sel := []map[string]string{{"anchor": "cursor-1", "head": "cursor-2"}}
 	// presence fields are stamped by the server, a forged username is overwritten
-	b.send(map[string]any{"type": MsgPresence, "documentId": id, "username": "mallory", "selections": sel})
+	b.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "username": "mallory", "selections": sel})
 	a.waitFor("b's selection", func() bool {
 		for _, p := range a.presences {
 			if s, ok := p["selections"].([]any); ok && len(s) == 1 {
@@ -232,7 +233,7 @@ func TestSyncPresence(t *testing.T) {
 		return true
 	})
 
-	b.send(map[string]any{"type": MsgPresence, "documentId": id, "selections": "not a list"})
+	b.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": "not a list"})
 	b.waitFor("error", func() bool { return len(b.errors) > 0 })
 
 	b.disconnect()
@@ -248,7 +249,7 @@ func TestSyncAuthAndProtocolErrors(t *testing.T) {
 	if err := anon.dial(id); err != nil {
 		t.Fatal(err)
 	}
-	if code := anon.waitClosed(); code != CloseUnauthorized {
+	if code := anon.waitClosed(); code != collab.CloseUnauthorized {
 		t.Errorf("anonymous close code %d", code)
 	}
 
@@ -257,7 +258,7 @@ func TestSyncAuthAndProtocolErrors(t *testing.T) {
 	if err := bad.dial(id, connectOptions{hello: map[string]any{"ticket": "nope"}}); err != nil {
 		t.Fatal(err)
 	}
-	if code := bad.waitClosed(); code != CloseUnauthorized {
+	if code := bad.waitClosed(); code != collab.CloseUnauthorized {
 		t.Errorf("bad ticket close code %d", code)
 	}
 
@@ -266,8 +267,8 @@ func TestSyncAuthAndProtocolErrors(t *testing.T) {
 	if err := c.dial(id, connectOptions{noHello: true}); err != nil {
 		t.Fatal(err)
 	}
-	c.send(map[string]any{"type": MsgSyncRequest})
-	if code := c.waitClosed(); code != CloseProtocolError {
+	c.send(map[string]any{"type": collab.MsgSyncRequest})
+	if code := c.waitClosed(); code != collab.CloseProtocolError {
 		t.Errorf("no hello close code %d", code)
 	}
 
@@ -279,7 +280,7 @@ func TestSyncAuthAndProtocolErrors(t *testing.T) {
 	if err := thief.dial(id); err != nil {
 		t.Fatal(err)
 	}
-	if code := thief.waitClosed(); code != CloseForbidden {
+	if code := thief.waitClosed(); code != collab.CloseForbidden {
 		t.Errorf("foreign actor close code %d", code)
 	}
 
@@ -289,12 +290,12 @@ func TestSyncAuthAndProtocolErrors(t *testing.T) {
 	forger.mu.Lock()
 	fork, _ := forger.doc.Fork()
 	_ = fork.SetActorID(a.actorID)
-	_ = fork.Path(contentKey).Text().Append("forged\n")
+	_ = fork.Path(collab.ContentKey).Text().Append("forged\n")
 	_, _ = fork.Commit("forged")
 	_, _ = forger.doc.Merge(fork)
 	forger.flush()
 	forger.mu.Unlock()
-	if code := forger.waitClosed(); code != CloseForbidden {
+	if code := forger.waitClosed(); code != collab.CloseForbidden {
 		t.Errorf("forged change close code %d", code)
 	}
 	a.settle()
@@ -317,7 +318,7 @@ func TestSyncHeartbeatTimeout(t *testing.T) {
 	a := newTestClient(t, e, "alice")
 	a.connect(id)
 	// the server sends heartbeats, the client sends nothing
-	if code := a.waitClosed(); code != CloseHeartbeatTimout {
+	if code := a.waitClosed(); code != collab.CloseHeartbeatTimout {
 		t.Errorf("close code %d", code)
 	}
 }
@@ -345,7 +346,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	var renamed map[string]any
 	a.waitFor("document-renamed", func() bool {
 		for _, m := range a.messages {
-			if m["type"] == MsgDocumentRenamed {
+			if m["type"] == collab.MsgDocumentRenamed {
 				renamed = m
 			}
 		}
@@ -354,7 +355,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	if renamed["newDocumentId"] != newID || renamed["documentId"] != id {
 		t.Errorf("renamed = %v", renamed)
 	}
-	if code := a.waitClosed(); code != CloseRenamed {
+	if code := a.waitClosed(); code != collab.CloseRenamed {
 		t.Errorf("close code %d", code)
 	}
 	if !strings.HasSuffix(e.readFile("handbook/setup.md"), "before rename\n") {
@@ -377,7 +378,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 	if rec := e.do(http.MethodDelete, "/document/"+newID+"/?force=true", "bob"); rec.Code != http.StatusOK {
 		t.Fatalf("delete with force: %d", rec.Code)
 	}
-	if code := a.waitClosed(); code != CloseNotFound {
+	if code := a.waitClosed(); code != collab.CloseNotFound {
 		t.Errorf("close code after delete %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(e.project, "docs", "handbook", "setup.md")); !os.IsNotExist(err) {
@@ -405,7 +406,7 @@ func TestSyncDeletedOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.tm.CreateItemTree()
-	if code := a.waitClosed(); code != CloseNotFound {
+	if code := a.waitClosed(); code != collab.CloseNotFound {
 		t.Errorf("close code %d", code)
 	}
 }
@@ -438,12 +439,12 @@ func TestSyncLostStateStartsNewEpoch(t *testing.T) {
 		t.Fatal("epoch did not change after the state was lost")
 	}
 	// the client re-applies its unsynced edits as a text diff (docs/sync-protocol.md, Epochs)
-	base, err := textAt(old, serverHeads)
+	base, err := collab.TextAt(old, serverHeads)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mine, _ := contentText(old)
-	a.edit(func(text *automerge.Text) error { return spliceDiff(text, base, mine) })
+	mine, _ := collab.ContentText(old)
+	a.edit(func(text *automerge.Text) error { return collab.SpliceDiff(text, base, mine) })
 	eventually(t, "re-applied edit on the server", func() bool {
 		return e.serverText("guide/setup.md") == setupText+"offline\n"
 	})
@@ -504,7 +505,7 @@ func TestSyncConcurrentClients(t *testing.T) {
 func TestStateDirInsideDocsIsRefused(t *testing.T) {
 	project := wikitest.New(t)
 	tm := wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
-	if _, err := NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
+	if _, err := collab.NewSyncServer(tm, newTestAuthenticator(t, t.TempDir()), filepath.Join(project, "docs", ".state"), nil); err == nil {
 		t.Error("state dir inside docs accepted")
 	}
 }
@@ -518,7 +519,7 @@ func TestExcludeFromGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := ExcludeFromGit(project, filepath.Join(project, ".mkdocseditor")); err != nil {
+		if err := collab.ExcludeFromGit(project, filepath.Join(project, ".mkdocseditor")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -537,11 +538,11 @@ func TestAuthorship(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	var au Authorship
+	var au collab.Authorship
 	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
 		t.Fatal(err)
 	}
-	if len(au.Runs) != 1 || au.Runs[0].Username != ActorUserServer || au.Runs[0].End != len([]rune(setupText)) {
+	if len(au.Runs) != 1 || au.Runs[0].Username != collab.ActorUserServer || au.Runs[0].End != len([]rune(setupText)) {
 		t.Fatalf("initial runs: %+v", au.Runs)
 	}
 
@@ -595,15 +596,10 @@ func TestAuthorship(t *testing.T) {
 	if err := json.Unmarshal(rec.bytes(), &au); err != nil {
 		t.Fatal(err)
 	}
-	e.ss.mu.Lock()
-	session := e.ss.sessions["guide/setup.md"]
-	e.ss.mu.Unlock()
-	if session == nil {
+	if e.ss.Stats().LoadedDocuments == 0 {
 		t.Fatal("document not loaded")
 	}
-	session.mu.Lock()
-	full, err := computeAuthorship(session.doc, e.ss.actorOwner)
-	session.mu.Unlock()
+	full, err := e.ss.ReplayAuthorship(e.tm.GetDocument(id))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,8 +639,6 @@ func TestSyncFailedWriteIsRetried(t *testing.T) {
 	}
 	eventually(t, "the change on disk", func() bool { return e.readFile("guide/setup.md") == before+"more" })
 	eventually(t, "the document to be unloaded", func() bool {
-		e.ss.mu.Lock()
-		defer e.ss.mu.Unlock()
-		return len(e.ss.sessions) == 0
+		return e.ss.Stats().LoadedDocuments == 0
 	})
 }

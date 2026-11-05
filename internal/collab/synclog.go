@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"encoding/json"
@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// syncEventType marks the lines of the sync event log, so a log query can select them
-const syncEventType = "sync-event"
+// SyncEventType marks the lines of the sync event log, so a log query can select them
+const SyncEventType = "sync-event"
 
 // maxLoggedClientName limits the client name of a hello message, which the client chooses
 const maxLoggedClientName = 64
@@ -70,7 +70,7 @@ func (s *SyncServer) logSyncEvent(e SyncEvent) {
 		return
 	}
 	e.Time = time.Now().UTC().Format(time.RFC3339Nano)
-	e.Type = syncEventType
+	e.Type = SyncEventType
 	data, err := json.Marshal(e)
 	if err != nil {
 		log.Printf("Unable to encode a sync event: %v", err)

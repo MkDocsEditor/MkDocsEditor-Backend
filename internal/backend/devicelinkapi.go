@@ -10,6 +10,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/labstack/echo/v4"
 )
 
@@ -115,7 +116,7 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 	return c.JSONPretty(http.StatusOK, &ServerInfoResponse{
 		Name:            name,
 		Version:         global.Version,
-		ProtocolVersion: ProtocolVersion,
+		ProtocolVersion: collab.ProtocolVersion,
 		BackendURL:      optionalString(rs.backendURL(c)),
 		WikiURL:         optionalString(wikiURL),
 		WebClientURL:    optionalString(clientURL),

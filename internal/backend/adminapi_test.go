@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 )
 
 func adminUserByName(t *testing.T, admin *client, username string) auth.AdminUser {
@@ -67,7 +68,7 @@ func TestAdminUsers(t *testing.T) {
 	if updated.Role != auth.RoleAdmin || updated.DisplayName != "Anna B." {
 		t.Errorf("updated = %s", r.body)
 	}
-	if _, code := readUntilClose(t, ws, 5*time.Second); code != CloseForbidden {
+	if _, code := readUntilClose(t, ws, 5*time.Second); code != collab.CloseForbidden {
 		t.Errorf("after the role change: close code %d", code)
 	}
 	// the session stays and has the new role

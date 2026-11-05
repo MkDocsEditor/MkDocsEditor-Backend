@@ -126,7 +126,7 @@ func thumbnailKey(r *wiki.Resource, size int) string {
 }
 
 func (rs *RestService) thumbnailDir() string {
-	return filepath.Join(rs.sync.store.Dir(), thumbnailsDir)
+	return filepath.Join(rs.sync.StateDir(), thumbnailsDir)
 }
 
 // pruneThumbnails removes the cached thumbnails that belong to no current version of a resource

@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"unicode/utf8"
@@ -49,7 +49,7 @@ func (a *authorshipState) advance(changes []*automerge.Change) error {
 		if err := a.scratch.LoadIncremental(ch.Save()); err != nil {
 			return err
 		}
-		text, err := contentText(a.scratch)
+		text, err := ContentText(a.scratch)
 		if err != nil {
 			// no text content yet (or not any more)
 			text = ""
@@ -183,6 +183,21 @@ func (s *SyncServer) Authorship(d *wiki.Document) (*Authorship, error) {
 		s.mu.Unlock()
 	}
 	return state.result(s.actorOwner), nil
+}
+
+// ReplayAuthorship computes the authorship of a document from its whole history, without the
+// state Authorship keeps. The result must always equal that of Authorship.
+func (s *SyncServer) ReplayAuthorship(d *wiki.Document) (*Authorship, error) {
+	var result *Authorship
+	err := s.withSession(d, func(session *docSession) error {
+		state, err := fullAuthorshipState(session.doc)
+		if err != nil {
+			return err
+		}
+		result = state.result(s.actorOwner)
+		return nil
+	})
+	return result, err
 }
 
 // actorOwner returns the current username and the account id of an actor

@@ -22,6 +22,13 @@ linters:
         linters:
           - gosec
           - errcheck
+      # The websocket handlers receive the upgrade request, so gosec treats everything that
+      # happens on a connection as tainted by it. The request only selects a document: paths
+      # come from the item tree and the state store, as for G304.
+      - path: internal/collab/
+        linters:
+          - gosec
+        text: "G70[36]"
 
 formatters:
   enable:

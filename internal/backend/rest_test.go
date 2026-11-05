@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
@@ -50,7 +51,7 @@ func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *co
 	}
 	tm := wiki.NewTreeManager(configuration.CurrentConfig.MkDocs)
 	authenticator := newTestAuthenticator(t, filepath.Join(project, ".mkdocseditor"))
-	ss, err := NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
+	ss, err := collab.NewSyncServer(tm, authenticator, filepath.Join(project, ".mkdocseditor"), configuration.CurrentConfig.Server.CORS.AllowedOrigins)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,26 +412,6 @@ func TestRestCorsPreflight(t *testing.T) {
 	e.rs.echoRest.ServeHTTP(rec, req)
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("unknown origin allowed")
-	}
-}
-
-func TestWebsocketOriginCheck(t *testing.T) {
-	check := checkOrigin([]string{"https://editor.example.com"})
-	for origin, want := range map[string]bool{
-		"":                           true,
-		"https://editor.example.com": true,
-		"https://evil.example.com":   false,
-	} {
-		req := httptest.NewRequest(http.MethodGet, "/document/x/ws/", nil)
-		if origin != "" {
-			req.Header.Set("Origin", origin)
-		}
-		if got := check(req); got != want {
-			t.Errorf("origin %q: %v, want %v", origin, got, want)
-		}
-	}
-	if !checkOrigin(nil)(httptest.NewRequest(http.MethodGet, "/", nil)) {
-		t.Error("no configured origins must allow everything")
 	}
 }
 

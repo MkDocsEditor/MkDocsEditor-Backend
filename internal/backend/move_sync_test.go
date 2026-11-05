@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
@@ -21,14 +22,14 @@ func (e *syncEnv) withLinks() {
 	e.tm.CreateItemTree()
 }
 
-func (e *syncEnv) postMove(user string, req MoveRequest) *MoveResult {
+func (e *syncEnv) postMove(user string, req collab.MoveRequest) *collab.MoveResult {
 	e.t.Helper()
 	body, _ := json.Marshal(req)
 	rec := e.doBody(http.MethodPost, "/move/", user, string(body))
 	if rec.Code != http.StatusOK {
 		e.t.Fatalf("move: %d %s", rec.Code, rec.Body.String())
 	}
-	var result MoveResult
+	var result collab.MoveResult
 	if err := json.Unmarshal(rec.bytes(), &result); err != nil {
 		e.t.Fatal(err)
 	}
@@ -41,14 +42,14 @@ func waitRenamed(t *testing.T, c *testClient) string {
 	var newID string
 	c.waitFor("document-renamed", func() bool {
 		for _, m := range c.messages {
-			if m["type"] == MsgDocumentRenamed {
+			if m["type"] == collab.MsgDocumentRenamed {
 				newID, _ = m["newDocumentId"].(string)
 			}
 		}
 		return newID != ""
 	})
-	if code := c.waitClosed(); code != CloseRenamed {
-		t.Errorf("close code %d, want %d", code, CloseRenamed)
+	if code := c.waitClosed(); code != collab.CloseRenamed {
+		t.Errorf("close code %d, want %d", code, collab.CloseRenamed)
 	}
 	return newID
 }
@@ -63,7 +64,7 @@ func TestMoveRewritesLiveDocument(t *testing.T) {
 	a.appendText("Typed while connected.\n")
 	eventually(t, "edit on the server", func() bool { return strings.Contains(e.serverText("index.md"), "Typed") })
 
-	e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
+	e.postMove("bob", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
 	a.waitFor("the rewrite", func() bool { return strings.Contains(a.textLocked(), "[setup](Einrichtung.md)") })
 	if got := a.text(); got != "# Home\n\nSee [setup](Einrichtung.md).\nTyped while connected.\n" {
 		t.Errorf("client text: %q", got)
@@ -74,8 +75,8 @@ func TestMoveRewritesLiveDocument(t *testing.T) {
 	}
 
 	// the events websocket tells which ids changed
-	eventually(t, "items-moved", func() bool { return events.last(MsgItemsMoved) != nil })
-	moves, _ := events.last(MsgItemsMoved)["moves"].([]any)
+	eventually(t, "items-moved", func() bool { return events.last(collab.MsgItemsMoved) != nil })
+	moves, _ := events.last(collab.MsgItemsMoved)["moves"].([]any)
 	if len(moves) != 1 || moves[0].(map[string]any)["newId"] != e.docID("Einrichtung.md") {
 		t.Errorf("items-moved: %v", moves)
 	}
@@ -101,7 +102,7 @@ func TestMoveOfflineEditsMerge(t *testing.T) {
 
 	// meanwhile the section moves, a new document is created at the old path, the server restarts
 	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
-	result := e.postMove("alice", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Handbuch"})
+	result := e.postMove("alice", collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Handbuch"})
 	// setup.md's "../index.md" stays valid in a section on the same level
 	if len(result.Documents) != 1 || result.Documents[0].Path != "index.md" {
 		t.Fatalf("documents: %+v", result.Documents)
@@ -164,7 +165,7 @@ func TestMoveRedirectsOldIDAfterHello(t *testing.T) {
 	a.connect(oldID)
 	a.disconnect()
 
-	e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: oldID, Name: "install"})
+	e.postMove("bob", collab.MoveRequest{Type: wiki.TypeDocument, ID: oldID, Name: "install"})
 	a.appendText("offline\n")
 	if err := a.dial(oldID); err != nil {
 		t.Fatalf("the old id must be upgraded: %v", err)
@@ -200,7 +201,7 @@ func TestMoveGitCommit(t *testing.T) {
 	e.git0("commit", "-q", "-m", "Links")
 
 	e.tm.CreateItemTree()
-	result := e.postMove("bob", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
+	result := e.postMove("bob", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("guide/setup.md"), Parent: wiki.RootSectionID, Name: "Einrichtung"})
 	if result.Commit == "" {
 		t.Fatal("no commit hash")
 	}
@@ -238,7 +239,7 @@ func TestMoveLateFix(t *testing.T) {
 	b.connect(e.docID("index.md"))
 	b.disconnect()
 
-	e.postMove("alice", MoveRequest{Type: wiki.TypeSection, ID: e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")), Parent: wiki.RootSectionID, Name: "Handbuch"})
+	e.postMove("alice", collab.MoveRequest{Type: wiki.TypeSection, ID: e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")), Parent: wiki.RootSectionID, Name: "Handbuch"})
 	b.appendText("Offline: ![Bild](guide/image.png) and [again](<guide/setup.md#top>).\n")
 
 	b.connect(e.docID("index.md"))

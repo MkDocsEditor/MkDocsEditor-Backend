@@ -95,8 +95,8 @@ func (rs *RestService) toReference(r references.ResolvedRef) *Reference {
 		ref.Status = RefStatusBroken
 		ref.Reason = r.Reason
 		ref.Path = r.Dest.Path
-		if moved, ok := rs.sync.movedTarget(r.Source.RelPath, r.Dest); ok {
-			ref.MovedTo, ref.SuggestedDestination = moved.item, moved.destination
+		if moved, ok := rs.sync.MovedTarget(r.Source.RelPath, r.Dest); ok {
+			ref.MovedTo, ref.SuggestedDestination = moved.Item, moved.Destination
 		}
 	}
 	return ref

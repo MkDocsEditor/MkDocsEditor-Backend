@@ -1,13 +1,14 @@
-package backend
+package collab
 
 import (
 	"encoding/json"
 	"log"
+	"net/http"
 	"sort"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
-	"github.com/labstack/echo/v4"
 )
 
 // Events websocket message types, see docs/sync-protocol.md section 6
@@ -36,15 +37,16 @@ const (
 	maxEventMessageSize = 64 << 10
 )
 
-// HandleEventsWebsocket serves GET /events/ws/
-func (s *SyncServer) HandleEventsWebsocket(c echo.Context) error {
-	ws, err := s.upgrader.Upgrade(c.Response(), c.Request(), nil)
+// HandleEventsWebsocket serves GET /events/ws/. user and sessionID are those of the upgrade request
+// if it was authenticated: else the hello message has to bring a ticket.
+func (s *SyncServer) HandleEventsWebsocket(w http.ResponseWriter, r *http.Request, user *auth.User, sessionID string) error {
+	ws, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil
 	}
 	ws.SetReadLimit(maxEventMessageSize)
 	metrics.WebsocketConnections.WithLabelValues(metrics.ConnectionEvents).Inc()
-	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
+	conn := newWsConn(s, ws, user, sessionID)
 	go conn.writeLoop()
 	conn.runEvents()
 	return nil

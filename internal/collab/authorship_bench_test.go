@@ -1,4 +1,4 @@
-package backend
+package collab
 
 import (
 	"strings"
@@ -9,10 +9,10 @@ import (
 
 func benchDoc() *automerge.Doc {
 	doc := automerge.New()
-	_ = doc.Path(contentKey).Set(automerge.NewText(strings.Repeat("lorem ipsum dolor sit amet\n", 700)))
+	_ = doc.Path(ContentKey).Set(automerge.NewText(strings.Repeat("lorem ipsum dolor sit amet\n", 700)))
 	_, _ = doc.Commit("import")
 	for i := range 3000 {
-		_ = doc.Path(contentKey).Text().Insert((i*37)%15000, "x")
+		_ = doc.Path(ContentKey).Text().Insert((i*37)%15000, "x")
 		_, _ = doc.Commit("edit")
 	}
 	return doc
@@ -39,7 +39,7 @@ func BenchmarkAuthorshipIncremental(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := range 10 {
-			_ = doc.Path(contentKey).Text().Insert(j*100, "y")
+			_ = doc.Path(ContentKey).Text().Insert(j*100, "y")
 			_, _ = doc.Commit("edit")
 		}
 		changes, err := doc.Changes(state.heads...)
@@ -51,4 +51,13 @@ func BenchmarkAuthorshipIncremental(b *testing.B) {
 		}
 		state.result(func(string) (string, string) { return "", "" })
 	}
+}
+
+// computeAuthorship replays the whole history of a document
+func computeAuthorship(doc *automerge.Doc, owner func(actorID string) (string, string)) (*Authorship, error) {
+	state, err := fullAuthorshipState(doc)
+	if err != nil {
+		return nil, err
+	}
+	return state.result(owner), nil
 }

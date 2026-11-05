@@ -9,103 +9,14 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
-	automerge "github.com/automerge/automerge-go"
 )
 
-func TestReferenceEditsKeepTheMarkup(t *testing.T) {
-	root := &wiki.Section{Type: wiki.TypeSection, ID: wiki.RootSectionID, Documents: []*wiki.Document{}, Subsections: []*wiki.Section{}, Resources: []*wiki.Resource{}}
-	guide := &wiki.Section{Type: wiki.TypeSection, ID: "g", Name: "guide", RelPath: "guide", Documents: []*wiki.Document{}, Subsections: []*wiki.Section{}, Resources: []*wiki.Resource{}}
-	root.Subsections = append(root.Subsections, guide)
-	root.Documents = append(root.Documents, &wiki.Document{RelPath: "index.md", Name: "index"})
-	guide.Documents = append(guide.Documents, &wiki.Document{RelPath: "guide/setup.md", Name: "setup"})
-	guide.Resources = append(guide.Resources, &wiki.Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
-	lookup := references.NewTreeLookup(root)
-	op := &moveOp{oldRel: "guide", newRel: "Anleitungen/guide"}
-
-	text := "# Start\n" +
-		"Siehe [die Einrichtung](guide/setup.md#install \"Name\") und ![Bild](<guide/Bild 1.png>){ width=300 }.\n" +
-		"<img alt=\"x\" src='guide/Bild%201.png'> [Mappe](guide/) [extern](https://example.org/guide/setup.md)\n" +
-		"`[code](guide/setup.md)` [kaputt](guide/fehlt.md) [abs](/guide/setup.md)\n" +
-		"[def]: ./guide/setup.md\n"
-	edits := references.ReferenceEdits(text, "index.md", "index.md", lookup, op.mapPath)
-	got := references.ApplyEdits(text, edits)
-	want := "# Start\n" +
-		"Siehe [die Einrichtung](Anleitungen/guide/setup.md#install \"Name\") und ![Bild](<Anleitungen/guide/Bild 1.png>){ width=300 }.\n" +
-		"<img alt=\"x\" src='Anleitungen/guide/Bild%201.png'> [Mappe](Anleitungen/guide/) [extern](https://example.org/guide/setup.md)\n" +
-		"`[code](guide/setup.md)` [kaputt](guide/fehlt.md) [abs](/Anleitungen/guide/setup.md)\n" +
-		"[def]: ./Anleitungen/guide/setup.md\n"
-	if got != want {
-		t.Errorf("got\n%s\nwant\n%s", got, want)
-	}
-	lines := references.LineEdits(text, edits)
-	if len(lines) != 4 || lines[0].Line != 2 || lines[3].Line != 5 || lines[3].After != "[def]: ./Anleitungen/guide/setup.md" {
-		t.Errorf("line edits: %+v", lines)
-	}
-
-	// references inside the moved section to the outside change, those within it do not
-	inside := "[Start](../index.md) [Bild](Bild%201.png) [selbst](setup.md#a)\n"
-	got = references.ApplyEdits(inside, references.ReferenceEdits(inside, "guide/setup.md", "Anleitungen/guide/setup.md", lookup, op.mapPath))
-	if got != "[Start](../../index.md) [Bild](Bild%201.png) [selbst](setup.md#a)\n" {
-		t.Errorf("inside: %s", got)
-	}
-
-	// the Automerge splices produce the same text, and only touch what differs
-	doc := automerge.New()
-	if err := doc.Path(contentKey).Set(automerge.NewText(text)); err != nil {
-		t.Fatal(err)
-	}
-	if err := references.SpliceEdits(doc.Path(contentKey).Text(), text, edits); err != nil {
-		t.Fatal(err)
-	}
-	if s, _ := contentText(doc); s != want {
-		t.Errorf("splices give\n%s", s)
-	}
-}
-
-func TestConfigEdits(t *testing.T) {
-	content := "site_name: Wiki # Kommentar\n" +
-		"theme:\n  name: material\n  logo: guide/logo.png\n" +
-		"nav:\n" +
-		"  - Start: index.md\n" +
-		"  - Anleitung:\n" +
-		"    - 'Einrichtung': 'guide/setup.md'   # bleibt\n" +
-		"    - \"Grüße\": \"guide/grüße.md\"\n" +
-		"    - guide/plain.md\n" +
-		"    - Extern: https://example.org/guide/setup.md\n" +
-		"extra_javascript:\n  - guide/x.js\n  - path: guide/y.js\n    defer: true\n" +
-		"markdown_extensions:\n  - pymdownx.emoji:\n      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
-	op := &moveOp{oldRel: "guide", newRel: "Hand buch: neu"}
-	got, edits := references.ConfigEdits(content, "mkdocs.yml", op.mapPath)
-	want := "site_name: Wiki # Kommentar\n" +
-		"theme:\n  name: material\n  logo: \"Hand buch: neu/logo.png\"\n" +
-		"nav:\n" +
-		"  - Start: index.md\n" +
-		"  - Anleitung:\n" +
-		"    - 'Einrichtung': 'Hand buch: neu/setup.md'   # bleibt\n" +
-		"    - \"Grüße\": \"Hand buch: neu/grüße.md\"\n" +
-		"    - \"Hand buch: neu/plain.md\"\n" +
-		"    - Extern: https://example.org/guide/setup.md\n" +
-		"extra_javascript:\n  - \"Hand buch: neu/x.js\"\n  - path: \"Hand buch: neu/y.js\"\n    defer: true\n" +
-		"markdown_extensions:\n  - pymdownx.emoji:\n      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
-	if got != want {
-		t.Errorf("got\n%s\nwant\n%s", got, want)
-	}
-	if len(edits) != 6 || edits[0].Line != 4 || edits[0].File != "mkdocs.yml" {
-		t.Errorf("edits: %+v", edits)
-	}
-
-	op = &moveOp{oldRel: "guide/setup.md", newRel: "Anleitung/Einrichtung.md"}
-	got, _ = references.ConfigEdits(content, "mkdocs.yml", op.mapPath)
-	if !strings.Contains(got, "    - 'Einrichtung': 'Anleitung/Einrichtung.md'   # bleibt\n") {
-		t.Errorf("single file:\n%s", got)
-	}
-}
-
 // moveRequest posts a move and decodes the answer
-func (e *restTestEnv) move(req MoveRequest, wantStatus int) (*MoveResult, map[string]any) {
+func (e *restTestEnv) move(req collab.MoveRequest, wantStatus int) (*collab.MoveResult, map[string]any) {
 	e.t.Helper()
 	rec := e.doJSON(http.MethodPost, "/move/", req)
 	if rec.Code != wantStatus {
@@ -116,7 +27,7 @@ func (e *restTestEnv) move(req MoveRequest, wantStatus int) (*MoveResult, map[st
 		_ = json.Unmarshal(rec.Body.Bytes(), &errBody)
 		return nil, errBody
 	}
-	var result MoveResult
+	var result collab.MoveResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		e.t.Fatal(err)
 	}
@@ -142,7 +53,7 @@ func TestMoveSection(t *testing.T) {
 	configBefore, _ := os.ReadFile(filepath.Join(e.project, "mkdocs.yml"))
 
 	// the preview changes nothing
-	preview, _ := e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID, DryRun: true}, http.StatusOK)
+	preview, _ := e.move(collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID, DryRun: true}, http.StatusOK)
 	if !preview.DryRun || preview.Item != nil || preview.OldPath != "guide" || preview.NewPath != "Handbuch/guide" || preview.NewID != e.docID("Handbuch/guide") {
 		t.Errorf("preview: %+v", preview)
 	}
@@ -172,7 +83,7 @@ func TestMoveSection(t *testing.T) {
 		t.Error("the preview changed mkdocs.yml")
 	}
 
-	result, _ := e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID}, http.StatusOK)
+	result, _ := e.move(collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: handbuch.ID}, http.StatusOK)
 	if result.DryRun || result.Item == nil || len(result.Documents) != 2 || len(result.Config) != 1 {
 		t.Fatalf("result: %+v", result)
 	}
@@ -213,7 +124,7 @@ func TestMoveSection(t *testing.T) {
 	expectStatus(t, e.do(http.MethodGet, "/moved/unknown/", nil, ""), http.StatusNotFound)
 
 	// a second move of the section: the old id follows the chain
-	e.move(MoveRequest{Type: wiki.TypeSection, ID: result.NewID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
+	e.move(collab.MoveRequest{Type: wiki.TypeSection, ID: result.NewID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
 	e.getJSON("/moved/"+oldSetupID+"/", &movedResp)
 	if movedResp.Item.Path != "Anleitung/setup.md" {
 		t.Errorf("after the second move: %+v", movedResp.Item)
@@ -230,7 +141,7 @@ func TestMovedList(t *testing.T) {
 	indexID := e.docID("index.md")
 
 	e.user, e.pass = "anna", "pw-anna"
-	e.move(MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
+	e.move(collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: wiki.RootSectionID, Name: "Anleitung"}, http.StatusOK)
 	newSetupID := e.docID("Anleitung/setup.md")
 
 	// readers may look up too; current, unknown and repeated ids are left out or answered once
@@ -293,22 +204,22 @@ func TestMoveValidation(t *testing.T) {
 	}
 	for _, tt := range []struct {
 		name   string
-		req    MoveRequest
+		req    collab.MoveRequest
 		status int
 		reason string
 	}{
-		{"root", MoveRequest{Type: wiki.TypeSection, ID: wiki.RootSectionID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonRoot},
-		{"into itself", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: guide.ID}, http.StatusBadRequest, MoveReasonIntoItself},
-		{"into a subsection", MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: sub.ID}, http.StatusBadRequest, MoveReasonIntoItself},
-		{"no change", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: wiki.RootSectionID}, http.StatusBadRequest, MoveReasonNoChange},
-		{"invalid name", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, MoveReasonInvalidName},
-		{"hidden name", MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, MoveReasonInvalidName},
-		{"blacklisted", MoveRequest{Type: wiki.TypeSection, ID: sub.ID, Parent: wiki.RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, MoveReasonBlacklisted},
-		{"extra_css", MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, MoveReasonBlacklisted},
-		{"invalid type", MoveRequest{Type: "folder", ID: guide.ID}, http.StatusBadRequest, MoveReasonInvalidType},
-		{"exists", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("rezepte/index.md"), Parent: wiki.RootSectionID}, http.StatusConflict, MoveReasonExists},
-		{"unknown item", MoveRequest{Type: wiki.TypeDocument, ID: "nope", Parent: wiki.RootSectionID}, http.StatusNotFound, ""},
-		{"unknown parent", MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: "nope"}, http.StatusNotFound, ""},
+		{"root", collab.MoveRequest{Type: wiki.TypeSection, ID: wiki.RootSectionID, Parent: guide.ID}, http.StatusBadRequest, collab.MoveReasonRoot},
+		{"into itself", collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: guide.ID}, http.StatusBadRequest, collab.MoveReasonIntoItself},
+		{"into a subsection", collab.MoveRequest{Type: wiki.TypeSection, ID: guide.ID, Parent: sub.ID}, http.StatusBadRequest, collab.MoveReasonIntoItself},
+		{"no change", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: wiki.RootSectionID}, http.StatusBadRequest, collab.MoveReasonNoChange},
+		{"invalid name", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Name: "../x"}, http.StatusBadRequest, collab.MoveReasonInvalidName},
+		{"hidden name", collab.MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Name: ".logo.png"}, http.StatusBadRequest, collab.MoveReasonInvalidName},
+		{"blacklisted", collab.MoveRequest{Type: wiki.TypeSection, ID: sub.ID, Parent: wiki.RootSectionID, Name: "blacklisted"}, http.StatusBadRequest, collab.MoveReasonBlacklisted},
+		{"extra_css", collab.MoveRequest{Type: wiki.TypeResource, ID: logo.ID, Parent: e.tm.GenerateID(filepath.Join(e.tm.RootPath(), "stylesheets")), Name: "extra.css"}, http.StatusBadRequest, collab.MoveReasonBlacklisted},
+		{"invalid type", collab.MoveRequest{Type: "folder", ID: guide.ID}, http.StatusBadRequest, collab.MoveReasonInvalidType},
+		{"exists", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("rezepte/index.md"), Parent: wiki.RootSectionID}, http.StatusConflict, collab.MoveReasonExists},
+		{"unknown item", collab.MoveRequest{Type: wiki.TypeDocument, ID: "nope", Parent: wiki.RootSectionID}, http.StatusNotFound, ""},
+		{"unknown parent", collab.MoveRequest{Type: wiki.TypeDocument, ID: e.docID("index.md"), Parent: "nope"}, http.StatusNotFound, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, body := e.move(tt.req, tt.status)
@@ -324,9 +235,9 @@ func TestMoveValidation(t *testing.T) {
 	// readers may not move, not even as a preview
 	r := newRestTestEnv(t, withReferenceWiki(t), withTestUsers(t))
 	r.user, r.pass = "kid", "pw-kid"
-	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusForbidden)
+	expectStatus(t, r.doJSON(http.MethodPost, "/move/", collab.MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusForbidden)
 	r.user, r.pass = "anna", "pw-anna"
-	expectStatus(t, r.doJSON(http.MethodPost, "/move/", MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusOK)
+	expectStatus(t, r.doJSON(http.MethodPost, "/move/", collab.MoveRequest{Type: wiki.TypeDocument, ID: r.docID("index.md"), Name: "x", DryRun: true}), http.StatusOK)
 }
 
 func TestRenameRewritesReferences(t *testing.T) {
@@ -350,7 +261,7 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 	// updateReferences: false only moves
 	off := false
-	e.move(MoveRequest{Type: wiki.TypeDocument, ID: id, Name: "Torte", UpdateReferences: &off}, http.StatusOK)
+	e.move(collab.MoveRequest{Type: wiki.TypeDocument, ID: id, Name: "Torte", UpdateReferences: &off}, http.StatusOK)
 	if got := e.read("rezepte/index.md"); !strings.Contains(got, "[Käsekuchen](Käsekuchen.md)") {
 		t.Errorf("rezepte/index.md: %s", got)
 	}
@@ -364,7 +275,7 @@ func TestRenameRewritesReferences(t *testing.T) {
 
 func TestBrokenReferenceMovedTo(t *testing.T) {
 	e := newRestTestEnv(t, withReferenceWiki(t))
-	e.move(MoveRequest{Type: wiki.TypeResource, ID: wikitest.FindResource(e.tm.Root(), "logo.png").ID, Name: "Logo.png"}, http.StatusOK)
+	e.move(collab.MoveRequest{Type: wiki.TypeResource, ID: wikitest.FindResource(e.tm.Root(), "logo.png").ID, Name: "Logo.png"}, http.StatusOK)
 	// a link to the old path that arrives on disk (git pull) is reported with the item now
 	if err := os.WriteFile(filepath.Join(e.tm.RootPath(), "reference", "api.md"), []byte("# API\n![alt](../img/logo.png)\n"), 0o644); err != nil {
 		t.Fatal(err)

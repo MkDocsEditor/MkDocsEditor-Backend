@@ -1,4 +1,6 @@
-package backend
+// Package collab is the realtime editing of documents: the Automerge sync over websockets,
+// presence, the state of loaded documents, authorship and moves. See docs/sync-protocol.md.
+package collab
 
 import (
 	"encoding/base64"
@@ -18,7 +20,6 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	automerge "github.com/automerge/automerge-go"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
 )
 
 // ErrDocumentInUse is returned when a document that clients are connected to should be deleted
@@ -137,14 +138,6 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 	go s.eventsWorker()
 	authenticator.OnRevoke(s.onRevoke)
 	return s, nil
-}
-
-// sessionIDFromContext returns the id of the session that authenticated a request, or ""
-func sessionIDFromContext(c echo.Context) string {
-	if sess := SessionFromContext(c); sess != nil {
-		return sess.ID
-	}
-	return ""
 }
 
 // onRevoke closes the websockets of ended sessions, disabled accounts and changed roles
@@ -473,15 +466,17 @@ func (s *SyncServer) Close() {
 	<-s.eventsDone
 }
 
-// HandleWebsocket serves GET /document/{id}/ws/
-func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
+// HandleWebsocket serves GET /document/{id}/ws/. user and sessionID are those of the upgrade
+// request if it was authenticated: else the hello message has to bring a ticket. It returns
+// wiki.ErrNotFound for an unknown document, before the upgrade.
+func (s *SyncServer) HandleWebsocket(w http.ResponseWriter, r *http.Request, user *auth.User, sessionID string, documentID string) error {
 	if s.treeManager.GetDocument(documentID) == nil {
 		// an old id is upgraded, so the client learns the new id after hello
-		if item, _, ok := s.resolveRedirect(documentID, ""); !ok || item.Type != wiki.TypeDocument {
-			return echo.ErrNotFound
+		if item, _, ok := s.ResolveRedirect(documentID, ""); !ok || item.Type != wiki.TypeDocument {
+			return wiki.ErrNotFound
 		}
 	}
-	ws, err := s.upgrader.Upgrade(c.Response(), c.Request(), nil)
+	ws, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// the upgrader already wrote an error response
 		return nil
@@ -489,7 +484,7 @@ func (s *SyncServer) HandleWebsocket(c echo.Context, documentID string) error {
 	ws.SetReadLimit(maxMessageSize)
 	metrics.WebsocketConnections.WithLabelValues(metrics.ConnectionDocument).Inc()
 
-	conn := newWsConn(s, ws, UserFromContext(c), sessionIDFromContext(c))
+	conn := newWsConn(s, ws, user, sessionID)
 	go conn.writeLoop()
 	conn.run(documentID)
 	return nil
@@ -1119,4 +1114,9 @@ func (c *wsConn) handlePresence(selections json.RawMessage) {
 	defer session.mu.Unlock()
 	c.selections = selections
 	session.broadcastLocked(c.presenceLocked(), c)
+}
+
+// StateDir returns the state directory
+func (s *SyncServer) StateDir() string {
+	return s.store.Dir()
 }
