@@ -261,7 +261,7 @@ func lastLeave(c *testClient, count int) map[string]any {
 	return c.leaves[count-1]
 }
 
-func positionOf(c *testClient, accountID string) map[string]any {
+func lastPositionFor(c *testClient, accountID string) map[string]any {
 	c.t.Helper()
 	c.waitFor("the snapshot", func() bool { return c.lastPositions != nil })
 	c.mu.Lock()
@@ -320,14 +320,14 @@ func TestSyncGhost(t *testing.T) {
 	// a joiner gets the rest of the ghost
 	joiner := newTestClient(t, e, "bob")
 	joiner.connect(id)
-	p := positionOf(joiner, alice)
+	p := lastPositionFor(joiner, alice)
 	if p == nil {
 		t.Fatal("no position")
 	}
 	if ms, ok := p["ghostMs"].(float64); !ok || ms <= 0 || ms > 60000 || p["viewport"] == nil {
 		t.Errorf("position = %v", p)
 	}
-	if p := positionOf(joiner, bobID); p != nil {
+	if p := lastPositionFor(joiner, bobID); p != nil {
 		t.Errorf("position of bob = %v", p)
 	}
 
@@ -338,7 +338,7 @@ func TestSyncGhost(t *testing.T) {
 		late := newTestClient(t, e, "bob")
 		late.connect(id)
 		defer late.disconnect()
-		p := positionOf(late, alice)
+		p := lastPositionFor(late, alice)
 		return p != nil && p["ghostMs"] == nil
 	})
 	count := func() int {
@@ -375,7 +375,7 @@ func TestSyncGhostExpires(t *testing.T) {
 
 	b := newTestClient(t, e, "bob")
 	b.connect(id)
-	if p := positionOf(b, alice); p == nil || p["ghostMs"] != nil {
+	if p := lastPositionFor(b, alice); p == nil || p["ghostMs"] != nil {
 		t.Errorf("position after the ghost = %v", p)
 	}
 
@@ -445,7 +445,7 @@ func TestSyncViewport(t *testing.T) {
 	b.waitFor("the cleared viewport", func() bool { return viewportOf() == nil })
 	c := newTestClient(t, e, "carol")
 	c.connect(id)
-	p := positionOf(c, e.authn.UserByUsername("alice").ID)
+	p := lastPositionFor(c, e.authn.UserByUsername("alice").ID)
 	if p == nil || p["viewport"] == nil || len(p["selections"].([]any)) != 1 || p["ghostMs"] != nil {
 		t.Errorf("position = %v", p)
 	}
