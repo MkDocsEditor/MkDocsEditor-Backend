@@ -1,4 +1,4 @@
-package backend
+package references
 
 import (
 	"path"
@@ -168,32 +168,32 @@ var (
 	encodedNonASCIIRe = regexp.MustCompile(`%[89A-Fa-f][0-9A-Fa-f]`)
 )
 
-// destination is a parsed link destination, see docs/references.md section 3
-type destination struct {
+// Destination is a parsed link destination, see docs/references.md section 3
+type Destination struct {
 	// raw is the destination as written
 	raw string
 	// target is the part before "?" and "#", as written (encoded)
 	target string
 	// suffix is "?query#anchor" as written, or ""
 	suffix string
-	// anchor is the part after "#", or ""
-	anchor string
+	// Anchor is the part after "#", or ""
+	Anchor string
 	// absolute is true for destinations starting with "/"
 	absolute bool
 	// dotSlash is true for destinations starting with "./"
 	dotSlash bool
 	// folder is true for destinations ending with "/"
 	folder bool
-	// path is the resolved path relative to the docs folder ("" is the docs folder itself)
-	path string
-	// outside is true if the path leaves the docs folder
-	outside bool
+	// Path is the resolved path relative to the docs folder ("" is the docs folder itself)
+	Path string
+	// Outside is true if the path leaves the docs folder
+	Outside bool
 }
 
-// parseDestination classifies and resolves a destination of a reference in the document at
+// ParseDestination classifies and resolves a destination of a reference in the document at
 // fromPath. ok is false for external destinations and same-document anchors.
-func parseDestination(fromPath string, raw string) (destination, bool) {
-	d := destination{raw: raw}
+func ParseDestination(fromPath string, raw string) (Destination, bool) {
+	d := Destination{raw: raw}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || strings.HasPrefix(trimmed, "//") || urlSchemePattern.MatchString(trimmed) {
 		return d, false
@@ -202,7 +202,7 @@ func parseDestination(fromPath string, raw string) (destination, bool) {
 	if i := strings.IndexAny(trimmed, "?#"); i >= 0 {
 		d.target, d.suffix = trimmed[:i], trimmed[i:]
 		if j := strings.IndexByte(d.suffix, '#'); j >= 0 {
-			d.anchor = d.suffix[j+1:]
+			d.Anchor = d.suffix[j+1:]
 		}
 	}
 	if d.target == "" {
@@ -217,9 +217,9 @@ func parseDestination(fromPath string, raw string) (destination, bool) {
 	if !d.absolute {
 		full = path.Dir(fromPath) + "/" + decoded
 	}
-	d.outside = escapesRoot(full)
+	d.Outside = escapesRoot(full)
 	joined := path.Clean("/" + full)
-	d.path = strings.TrimPrefix(joined, "/")
+	d.Path = strings.TrimPrefix(joined, "/")
 	return d, true
 }
 
@@ -256,10 +256,10 @@ func encodingOf(raw string) linkEncoding {
 	return enc
 }
 
-// rewriteDestination returns the destination that points from the document at newFromPath to
+// RewriteDestination returns the destination that points from the document at newFromPath to
 // the item at newTargetPath, in the style of the old destination d (see docs/references.md
 // section 6). Folder destinations stay folder destinations.
-func rewriteDestination(d destination, newFromPath string, newTargetPath string) string {
+func RewriteDestination(d Destination, newFromPath string, newTargetPath string) string {
 	enc := encodingOf(d.target)
 	var target string
 	switch {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
@@ -142,25 +143,25 @@ func (rs *RedirectStore) Resolve(id string, epoch string, r redirectResolver) (r
 
 // resolveRedirect returns the current item of an old id. With epoch set, only a document whose
 // Automerge state has that epoch matches.
-func (s *SyncServer) resolveRedirect(id string, epoch string) (*ItemRef, RedirectEntry, bool) {
-	return s.resolveRedirectIn(newTreeLookup(s.treeManager.Root()), id, epoch)
+func (s *SyncServer) resolveRedirect(id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
+	return s.resolveRedirectIn(references.NewTreeLookup(s.treeManager.Root()), id, epoch)
 }
 
 // resolveRedirectIn is resolveRedirect on an existing lookup of the tree
-func (s *SyncServer) resolveRedirectIn(lookup *treeLookup, id string, epoch string) (*ItemRef, RedirectEntry, bool) {
-	itemAt := func(itemType string, p string) *ItemRef {
+func (s *SyncServer) resolveRedirectIn(lookup *references.TreeLookup, id string, epoch string) (*references.ItemRef, RedirectEntry, bool) {
+	itemAt := func(itemType string, p string) *references.ItemRef {
 		switch itemType {
 		case wiki.TypeDocument:
-			if d := lookup.documents[p]; d != nil {
-				return documentRef(d)
+			if d := lookup.Documents[p]; d != nil {
+				return references.DocumentRef(d)
 			}
 		case wiki.TypeResource:
-			if r := lookup.resources[p]; r != nil {
-				return resourceRef(r)
+			if r := lookup.Resources[p]; r != nil {
+				return references.ResourceRef(r)
 			}
 		case wiki.TypeSection:
-			if sec := lookup.sections[p]; sec != nil {
-				return sectionRef(sec)
+			if sec := lookup.Sections[p]; sec != nil {
+				return references.SectionRef(sec)
 			}
 		}
 		return nil

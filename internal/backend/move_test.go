@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	automerge "github.com/automerge/automerge-go"
@@ -21,7 +22,7 @@ func TestReferenceEditsKeepTheMarkup(t *testing.T) {
 	root.Documents = append(root.Documents, &wiki.Document{RelPath: "index.md", Name: "index"})
 	guide.Documents = append(guide.Documents, &wiki.Document{RelPath: "guide/setup.md", Name: "setup"})
 	guide.Resources = append(guide.Resources, &wiki.Resource{RelPath: "guide/Bild 1.png", Name: "Bild 1.png"})
-	lookup := newTreeLookup(root)
+	lookup := references.NewTreeLookup(root)
 	op := &moveOp{oldRel: "guide", newRel: "Anleitungen/guide"}
 
 	text := "# Start\n" +
@@ -29,8 +30,8 @@ func TestReferenceEditsKeepTheMarkup(t *testing.T) {
 		"<img alt=\"x\" src='guide/Bild%201.png'> [Mappe](guide/) [extern](https://example.org/guide/setup.md)\n" +
 		"`[code](guide/setup.md)` [kaputt](guide/fehlt.md) [abs](/guide/setup.md)\n" +
 		"[def]: ./guide/setup.md\n"
-	edits := referenceEdits(text, "index.md", "index.md", lookup, op.mapPath)
-	got := applyEdits(text, edits)
+	edits := references.ReferenceEdits(text, "index.md", "index.md", lookup, op.mapPath)
+	got := references.ApplyEdits(text, edits)
 	want := "# Start\n" +
 		"Siehe [die Einrichtung](Anleitungen/guide/setup.md#install \"Name\") und ![Bild](<Anleitungen/guide/Bild 1.png>){ width=300 }.\n" +
 		"<img alt=\"x\" src='Anleitungen/guide/Bild%201.png'> [Mappe](Anleitungen/guide/) [extern](https://example.org/guide/setup.md)\n" +
@@ -39,14 +40,14 @@ func TestReferenceEditsKeepTheMarkup(t *testing.T) {
 	if got != want {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
-	lines := lineEdits(text, edits)
+	lines := references.LineEdits(text, edits)
 	if len(lines) != 4 || lines[0].Line != 2 || lines[3].Line != 5 || lines[3].After != "[def]: ./Anleitungen/guide/setup.md" {
 		t.Errorf("line edits: %+v", lines)
 	}
 
 	// references inside the moved section to the outside change, those within it do not
 	inside := "[Start](../index.md) [Bild](Bild%201.png) [selbst](setup.md#a)\n"
-	got = applyEdits(inside, referenceEdits(inside, "guide/setup.md", "Anleitungen/guide/setup.md", lookup, op.mapPath))
+	got = references.ApplyEdits(inside, references.ReferenceEdits(inside, "guide/setup.md", "Anleitungen/guide/setup.md", lookup, op.mapPath))
 	if got != "[Start](../../index.md) [Bild](Bild%201.png) [selbst](setup.md#a)\n" {
 		t.Errorf("inside: %s", got)
 	}
@@ -56,7 +57,7 @@ func TestReferenceEditsKeepTheMarkup(t *testing.T) {
 	if err := doc.Path(contentKey).Set(automerge.NewText(text)); err != nil {
 		t.Fatal(err)
 	}
-	if err := spliceEdits(doc.Path(contentKey).Text(), text, edits); err != nil {
+	if err := references.SpliceEdits(doc.Path(contentKey).Text(), text, edits); err != nil {
 		t.Fatal(err)
 	}
 	if s, _ := contentText(doc); s != want {
@@ -77,7 +78,7 @@ func TestConfigEdits(t *testing.T) {
 		"extra_javascript:\n  - guide/x.js\n  - path: guide/y.js\n    defer: true\n" +
 		"markdown_extensions:\n  - pymdownx.emoji:\n      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
 	op := &moveOp{oldRel: "guide", newRel: "Hand buch: neu"}
-	got, edits := configEdits(content, "mkdocs.yml", op.mapPath)
+	got, edits := references.ConfigEdits(content, "mkdocs.yml", op.mapPath)
 	want := "site_name: Wiki # Kommentar\n" +
 		"theme:\n  name: material\n  logo: \"Hand buch: neu/logo.png\"\n" +
 		"nav:\n" +
@@ -97,7 +98,7 @@ func TestConfigEdits(t *testing.T) {
 	}
 
 	op = &moveOp{oldRel: "guide/setup.md", newRel: "Anleitung/Einrichtung.md"}
-	got, _ = configEdits(content, "mkdocs.yml", op.mapPath)
+	got, _ = references.ConfigEdits(content, "mkdocs.yml", op.mapPath)
 	if !strings.Contains(got, "    - 'Einrichtung': 'Anleitung/Einrichtung.md'   # bleibt\n") {
 		t.Errorf("single file:\n%s", got)
 	}
@@ -154,7 +155,7 @@ func TestMoveSection(t *testing.T) {
 	}
 	setup, index := preview.Documents[0], preview.Documents[1]
 	if setup.Path != "guide/setup.md" || setup.NewPath != "Handbuch/guide/setup.md" || len(setup.Edits) != 2 ||
-		setup.Edits[0] != (LineEdit{Line: 3, Before: "Zurück zur [Startseite](../index.md).", After: "Zurück zur [Startseite](../../index.md)."}) ||
+		setup.Edits[0] != (references.LineEdit{Line: 3, Before: "Zurück zur [Startseite](../index.md).", After: "Zurück zur [Startseite](../../index.md)."}) ||
 		setup.Edits[1].After != "<img src=\"../../img/Strand%20(2).png\" alt=\"Strand\">" {
 		t.Errorf("setup: %+v", setup)
 	}
