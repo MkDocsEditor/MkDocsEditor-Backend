@@ -17,6 +17,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v4"
@@ -63,7 +64,7 @@ type RestService struct {
 	authenticator  *auth.Service
 	treeManager    *wiki.TreeManager
 	sync           *SyncServer
-	git            *GitCommitter
+	git            *gitstore.Committer
 	refs           *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
 	knownRoutes map[string]struct{}
@@ -97,7 +98,7 @@ func NewRestService(
 }
 
 // SetGitCommitter makes tree changes over REST commit to git. Call it before Start.
-func (rs *RestService) SetGitCommitter(c *GitCommitter) {
+func (rs *RestService) SetGitCommitter(c *gitstore.Committer) {
 	rs.git = c
 }
 

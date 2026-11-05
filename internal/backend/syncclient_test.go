@@ -15,6 +15,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
 	automerge "github.com/automerge/automerge-go"
@@ -35,8 +36,8 @@ type syncEnv struct {
 	stateDir string
 
 	// gitOpts enables the git committer when set
-	gitOpts *GitCommitterOptions
-	git     *GitCommitter
+	gitOpts *gitstore.CommitterOptions
+	git     *gitstore.Committer
 }
 
 var testPasswords = map[string]string{"alice": "alice-pw", "bob": "bob-pw", "carol": "carol-pw"}
@@ -76,14 +77,15 @@ func (e *syncEnv) start() {
 	e.ss = ss
 	e.rs = NewRestService(configuration.CurrentConfig.Server, e.tm, ss, e.authn)
 	if e.gitOpts != nil {
-		repo, err := OpenGitRepo(filepath.Join(e.project, "docs"), GitSignature{Name: "Backend", Email: "backend@example.com"})
+		repo, err := gitstore.Open(filepath.Join(e.project, "docs"), gitstore.Signature{Name: "Backend", Email: "backend@example.com"})
 		if err != nil {
 			e.t.Fatal(err)
 		}
-		e.git, err = NewGitCommitter(repo, e.authn, e.stateDir, *e.gitOpts)
+		e.git, err = gitstore.NewCommitter(repo, e.authn, e.stateDir, *e.gitOpts)
 		if err != nil {
 			e.t.Fatal(err)
 		}
+		ss.SetChangeRecorder(e.git)
 		e.git.Start(ss)
 		e.rs.SetGitCommitter(e.git)
 	}

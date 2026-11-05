@@ -15,6 +15,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/backend"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/fatih/color"
@@ -170,15 +171,15 @@ func startMetricsServer(conf configuration.Configuration) (*metrics.Server, erro
 }
 
 // startGitCommitter starts committing changes if git is enabled. It returns nil if not.
-func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *backend.SyncServer) (*backend.GitCommitter, error) {
+func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *backend.SyncServer) (*gitstore.Committer, error) {
 	if !conf.Git.Enabled {
 		return nil, nil
 	}
-	repo, err := backend.OpenGitRepo(conf.MkDocs.DocsPath, backend.GitSignature{Name: conf.Git.CommitterName, Email: conf.Git.CommitterEmail})
+	repo, err := gitstore.Open(conf.MkDocs.DocsPath, gitstore.Signature{Name: conf.Git.CommitterName, Email: conf.Git.CommitterEmail})
 	if err != nil {
 		return nil, fmt.Errorf("git is enabled, but: %w", err)
 	}
-	gitCommitter, err := backend.NewGitCommitter(repo, authenticator, conf.MkDocs.StateDir, backend.GitCommitterOptions{
+	gitCommitter, err := gitstore.NewCommitter(repo, authenticator, conf.MkDocs.StateDir, gitstore.CommitterOptions{
 		AfterLeave:  time.Duration(conf.Git.CommitAfterLeave) * time.Minute,
 		AfterIdle:   time.Duration(conf.Git.CommitAfterIdle) * time.Minute,
 		MaxInterval: time.Duration(conf.Git.CommitMaxInterval) * time.Minute,
@@ -189,6 +190,7 @@ func startGitCommitter(conf configuration.Configuration, authenticator *auth.Ser
 	if err != nil {
 		return nil, fmt.Errorf("unable to start the git committer: %w", err)
 	}
+	syncServer.SetChangeRecorder(gitCommitter)
 	gitCommitter.Start(syncServer)
 	log.Printf("git commits enabled")
 	return gitCommitter, nil

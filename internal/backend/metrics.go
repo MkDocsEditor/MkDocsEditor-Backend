@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/gorilla/websocket"
@@ -117,27 +118,13 @@ func countTree(section *wiki.Section) (sections int, documents int, resources in
 	return sections, documents, resources
 }
 
-// pendingStats returns the number of documents with uncommitted changes and the number of
-// those changes
-func (c *GitCommitter) pendingStats() (documents int, changes int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, e := range c.pending {
-		documents++
-		for _, n := range e.Changes {
-			changes += n
-		}
-	}
-	return documents, changes
-}
-
 // MetricsCollector reports the current state of the backend at scrape time, so these values
 // cannot drift away from it
 type MetricsCollector struct {
 	sync *SyncServer
 	tree *wiki.TreeManager
 	// git is nil if git is disabled
-	git *GitCommitter
+	git *gitstore.Committer
 
 	loadedDocuments *prometheus.Desc
 	dirtyDocuments  *prometheus.Desc
@@ -150,7 +137,7 @@ type MetricsCollector struct {
 }
 
 // NewMetricsCollector creates the collector. git may be nil.
-func NewMetricsCollector(syncServer *SyncServer, tree *wiki.TreeManager, git *GitCommitter) *MetricsCollector {
+func NewMetricsCollector(syncServer *SyncServer, tree *wiki.TreeManager, git *gitstore.Committer) *MetricsCollector {
 	desc := func(name string, help string, labels ...string) *prometheus.Desc {
 		return prometheus.NewDesc(metrics.Namespace+"_"+name, help, labels, nil)
 	}
@@ -198,7 +185,7 @@ func (m *MetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	gauge(m.treeItems, resources, "resource")
 
 	if m.git != nil {
-		pendingDocuments, pendingChanges := m.git.pendingStats()
+		pendingDocuments, pendingChanges := m.git.PendingStats()
 		gauge(m.gitPendingDocs, pendingDocuments)
 		gauge(m.gitPendingEdits, pendingChanges)
 	}

@@ -1,4 +1,4 @@
-package backend
+package gitstore
 
 import (
 	"encoding/json"
@@ -16,10 +16,10 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
-const gitPendingFile = "git-pending.json"
+const PendingFile = "git-pending.json"
 
-// GitCommitterOptions are the commit triggers, see docs/sync-protocol.md section 10
-type GitCommitterOptions struct {
+// CommitterOptions are the commit triggers, see docs/sync-protocol.md section 10
+type CommitterOptions struct {
 	// AfterLeave commits a document when no client has been connected to it for this long
 	AfterLeave time.Duration
 	// AfterIdle commits a document when it has not changed for this long
@@ -42,13 +42,23 @@ type pendingEdits struct {
 	leftAt time.Time
 }
 
-// GitCommitter batches the user changes of each document into git commits
-type GitCommitter struct {
-	repo      *GitRepo
+// DocumentSync is what the committer needs from the sync server
+type DocumentSync interface {
+	// FlushPath writes a loaded document (path relative to the docs folder) to disk now
+	FlushPath(relPath string)
+	// FlushAll writes all loaded documents to disk now
+	FlushAll()
+	// HasConnections reports whether clients are connected to a document
+	HasConnections(relPath string) bool
+}
+
+// Committer batches the user changes of each document into git commits
+type Committer struct {
+	repo      *Repo
 	authn     *auth.Service
-	opts      GitCommitterOptions
+	opts      CommitterOptions
 	statePath string
-	sync      *SyncServer
+	sync      DocumentSync
 
 	mu      sync.Mutex
 	pending map[string]*pendingEdits
@@ -59,16 +69,16 @@ type GitCommitter struct {
 	stopOnce sync.Once
 }
 
-// NewGitCommitter creates the committer and loads the uncommitted changes of the last run
-func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts GitCommitterOptions) (*GitCommitter, error) {
+// NewCommitter creates the committer and loads the uncommitted changes of the last run
+func NewCommitter(repo *Repo, authn *auth.Service, stateDir string, opts CommitterOptions) (*Committer, error) {
 	if opts.CheckInterval <= 0 {
 		opts.CheckInterval = 15 * time.Second
 	}
-	c := &GitCommitter{
+	c := &Committer{
 		repo:      repo,
 		authn:     authn,
 		opts:      opts,
-		statePath: filepath.Join(stateDir, gitPendingFile),
+		statePath: filepath.Join(stateDir, PendingFile),
 		pending:   map[string]*pendingEdits{},
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
@@ -93,16 +103,16 @@ func NewGitCommitter(repo *GitRepo, authn *auth.Service, stateDir string, opts G
 	return c, nil
 }
 
-// Start registers the committer with the sync server and starts checking the triggers
-func (c *GitCommitter) Start(syncServer *SyncServer) {
-	c.sync = syncServer
-	syncServer.SetChangeRecorder(c)
+// Start starts checking the triggers. The committer learns about changes through RecordChanges,
+// so register it with the sync server first.
+func (c *Committer) Start(documents DocumentSync) {
+	c.sync = documents
 	go c.loop()
 }
 
 // RecordChanges implements ChangeRecorder. Changes of the server's own actors (:disk, :server)
 // do not count.
-func (c *GitCommitter) RecordChanges(relPath string, countsByUser map[string]int) {
+func (c *Committer) RecordChanges(relPath string, countsByUser map[string]int) {
 	now := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -121,7 +131,7 @@ func (c *GitCommitter) RecordChanges(relPath string, countsByUser map[string]int
 	}
 }
 
-func (c *GitCommitter) loop() {
+func (c *Committer) loop() {
 	defer close(c.done)
 	ticker := time.NewTicker(c.opts.CheckInterval)
 	defer ticker.Stop()
@@ -136,7 +146,7 @@ func (c *GitCommitter) loop() {
 }
 
 // check commits every document whose trigger fired
-func (c *GitCommitter) check(now time.Time) {
+func (c *Committer) check(now time.Time) {
 	c.mu.Lock()
 	paths := make([]string, 0, len(c.pending))
 	for p := range c.pending {
@@ -178,7 +188,7 @@ func (c *GitCommitter) check(now time.Time) {
 }
 
 // takePending removes and returns the pending edits of the given paths and everything below them
-func (c *GitCommitter) takePending(paths ...string) map[string]int {
+func (c *Committer) takePending(paths ...string) map[string]int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	total := map[string]int{}
@@ -198,7 +208,7 @@ func (c *GitCommitter) takePending(paths ...string) map[string]int {
 }
 
 // restorePending puts back changes whose commit failed
-func (c *GitCommitter) restorePending(relPath string, changes map[string]int) {
+func (c *Committer) restorePending(relPath string, changes map[string]int) {
 	if len(changes) == 0 {
 		return
 	}
@@ -206,7 +216,7 @@ func (c *GitCommitter) restorePending(relPath string, changes map[string]int) {
 }
 
 // commitEdits commits the uncommitted user changes of one document
-func (c *GitCommitter) commitEdits(relPath string) {
+func (c *Committer) commitEdits(relPath string) {
 	if c.sync != nil {
 		c.sync.FlushPath(relPath)
 	}
@@ -216,7 +226,7 @@ func (c *GitCommitter) commitEdits(relPath string) {
 	}
 	users := c.rankUsers(changes)
 	author := c.signature(users[0])
-	var coAuthors []GitSignature
+	var coAuthors []Signature
 	for _, u := range users[1:] {
 		coAuthors = append(coAuthors, c.signature(u))
 	}
@@ -227,19 +237,19 @@ func (c *GitCommitter) commitEdits(relPath string) {
 
 // CommitTreeChange commits a create, rename, delete or upload over REST right away, together
 // with the pending edits below the affected paths. The requesting user is the author.
-func (c *GitCommitter) CommitTreeChange(user *auth.User, subject string, paths ...string) {
+func (c *Committer) CommitTreeChange(user *auth.User, subject string, paths ...string) {
 	c.CommitTreeChangeWithBody(user, subject, "", paths...)
 }
 
 // CommitTreeChangeWithBody is CommitTreeChange with a message body. It returns the abbreviated
 // hash of the commit, or "" if nothing was committed.
-func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string, body string, paths ...string) string {
+func (c *Committer) CommitTreeChangeWithBody(user *auth.User, subject string, body string, paths ...string) string {
 	if c.sync != nil {
 		c.sync.FlushAll()
 	}
 	changes := c.takePending(paths...)
 	author := c.signature(user.ID)
-	var coAuthors []GitSignature
+	var coAuthors []Signature
 	for _, u := range c.rankUsers(changes) {
 		if u != user.ID {
 			coAuthors = append(coAuthors, c.signature(u))
@@ -254,7 +264,7 @@ func (c *GitCommitter) CommitTreeChangeWithBody(user *auth.User, subject string,
 	return hash
 }
 
-func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []GitSignature, subject string, body string) (string, error) {
+func (c *Committer) commit(paths []string, author Signature, coAuthors []Signature, subject string, body string) (string, error) {
 	start := time.Now()
 	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body)
 	metrics.GitCommitDuration.Observe(time.Since(start).Seconds())
@@ -283,7 +293,7 @@ func (c *GitCommitter) commit(paths []string, author GitSignature, coAuthors []G
 
 // rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the
 // name in the git signature, so the order does not depend on the random account ids.
-func (c *GitCommitter) rankUsers(changes map[string]int) []string {
+func (c *Committer) rankUsers(changes map[string]int) []string {
 	users := make([]string, 0, len(changes))
 	names := make(map[string]string, len(changes))
 	for u := range changes {
@@ -305,7 +315,7 @@ func (c *GitCommitter) rankUsers(changes map[string]int) []string {
 
 // migrateSubjects maps the usernames of a pending file written before the account database
 // to account ids
-func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
+func (c *Committer) migrateSubjects(changes map[string]int) map[string]int {
 	out := make(map[string]int, len(changes))
 	for subject, n := range changes {
 		if c.authn.UserByID(subject) == nil {
@@ -319,7 +329,7 @@ func (c *GitCommitter) migrateSubjects(changes map[string]int) map[string]int {
 }
 
 // signature returns the git author of a subject (account id)
-func (c *GitCommitter) signature(subject string) GitSignature {
+func (c *Committer) signature(subject string) Signature {
 	name, email, username := subject, "", subject
 	if u := c.authn.UserByID(subject); u != nil {
 		name, email, username = u.DisplayName, u.Email, u.Username
@@ -327,7 +337,7 @@ func (c *GitCommitter) signature(subject string) GitSignature {
 	if email == "" {
 		email = username + "@mkdocseditor.invalid"
 	}
-	return GitSignature{Name: sanitizeSignature(name), Email: sanitizeSignature(email)}
+	return Signature{Name: sanitizeSignature(name), Email: sanitizeSignature(email)}
 }
 
 // sanitizeSignature removes the characters git does not allow in names and emails
@@ -346,7 +356,7 @@ func sanitizeSignature(s string) string {
 	return s
 }
 
-func (c *GitCommitter) saveIfDirty() {
+func (c *Committer) saveIfDirty() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.dirty {
@@ -365,7 +375,7 @@ func (c *GitCommitter) saveIfDirty() {
 
 // Close stops the triggers and commits all pending changes. Close the sync server first, so
 // every document is on disk.
-func (c *GitCommitter) Close() {
+func (c *Committer) Close() {
 	c.stopOnce.Do(func() {
 		close(c.stop)
 		if c.sync != nil {
@@ -383,4 +393,30 @@ func (c *GitCommitter) Close() {
 		}
 		c.saveIfDirty()
 	})
+}
+
+// Repo returns the repository the committer works on
+func (c *Committer) Repo() *Repo {
+	return c.repo
+}
+
+// PendingStats returns the number of documents with uncommitted changes and the number of those
+// changes
+func (c *Committer) PendingStats() (documents int, changes int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.pending {
+		documents++
+		for _, n := range e.Changes {
+			changes += n
+		}
+	}
+	return documents, changes
+}
+
+// Abandon stops the committer without committing anything, as a crash would. The pending changes
+// stay in the state folder. Do not call Close afterwards.
+func (c *Committer) Abandon() {
+	close(c.stop)
+	<-c.done
 }
