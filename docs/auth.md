@@ -474,8 +474,9 @@ rely on the sender being online: without a match it opens the document at the st
    `POST /admin/access-requests/{id}/reject/`. Approving creates a normal invite link with
    the name as its note. Its `url` can also be sent to the person directly.
 5. The client polls `POST /auth/access-requests/status/` with `{"token": "mda_…"}` at most
-   every 30 seconds, and only while it is in the foreground. While the response holds an
-   `inviteToken`, the client redeems it like any invite link (section 7).
+   every 30 seconds in the foreground, and far less often in the background (Android: every
+   15 minutes). While the response holds an `inviteToken`, the client redeems it like any
+   invite link (section 7).
 
 | `status` | Meaning |
 |---|---|
