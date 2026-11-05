@@ -274,8 +274,9 @@ left out. `client` is free text for logs.
 
 **`presence-snapshot`**: sent once after `initial-content`. It holds the current presence
 of every other connection on this document:
-`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …]}`. A peer that
-connected but has not sent presence yet appears with `"selections": []`.
+`{"type":"presence-snapshot","documentId":"…","peers":[<presence>, …],"lastPositions":[…]}`.
+A peer that connected but has not sent presence yet appears with `"selections": []`.
+`lastPositions` says where accounts last had a cursor, see [Presence](#6-presence).
 
 **`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18"}`. Sent
 when a connection closes or times out.
@@ -405,6 +406,14 @@ Presence is ephemeral. The server relays it and never stores it.
   connected if it has not sent one. Servers that have it list `join-presence` in `features`
   of `GET /server-info/`. A join link picks the sender's connection with the newest value,
   see [auth.md](auth.md#access-request-and-join-link).
+- `lastPositions` in `presence-snapshot` holds, per account, the last non-empty selections
+  in this document, newest first, also for accounts that are offline or online without a
+  cursor: `{"accountId", "username", "displayName", "color", "selections", "lastActiveAt"}`.
+  `lastActiveAt` is the time of those selections. Entries are kept for 30 days, survive
+  restarts and moves, and end with the epoch, because cursors are only valid in their epoch.
+  Selections over 4 KiB are not kept, and deleted accounts are left out. The list can be
+  empty, and servers from before this field do not send it. A cursor can point into text
+  that was deleted since, so the client falls back to the start if it cannot resolve it.
 - The server sends a `presence-snapshot` on join and `presence-leave` on disconnect or
   timeout.
 - One user can have several connections (two devices, two tabs). The list of online
@@ -514,7 +523,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
   auth.db                     accounts and actor id -> account bindings (SQLite, see auth.md)
   documents/
     <uuid>.automerge          Automerge save() of the document
-    <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "diskBaseHeads": [...], "diskBaseHash": "…"}
+    <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "lastPositions": {...}, "diskBaseHeads": [...], "diskBaseHash": "…"}
 ```
 
 - Documents have a stable internal uuid. The REST `documentId` is derived from the path

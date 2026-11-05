@@ -577,6 +577,7 @@ func (s *SyncServer) leave(conn *wsConn) {
 		return
 	}
 	delete(session.conns, conn)
+	session.savePositionsLocked()
 	s.logSyncEvent(SyncEvent{
 		Kind: SyncEventLeft, Path: session.meta.Path, User: conn.user.Username, ClientID: conn.clientID,
 		Client: conn.clientName, Access: conn.access(), Connections: len(session.conns),
@@ -940,7 +941,7 @@ func (c *wsConn) attachLocked(session *docSession) error {
 	for other := range session.conns {
 		peers = append(peers, other.presenceLocked())
 	}
-	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers})
+	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked()})
 	session.conns[c] = struct{}{}
 	session.announceActorLocked(c.actorID, c.user.ID, c)
 	session.broadcastLocked(c.presenceLocked(), c)
@@ -1126,6 +1127,7 @@ func (c *wsConn) handlePresence(selections json.RawMessage) {
 	defer session.mu.Unlock()
 	c.selections = selections
 	c.lastActive = time.Now()
+	session.rememberPositionLocked(c.user.ID, selections, c.lastActive)
 	session.broadcastLocked(c.presenceLocked(), c)
 }
 

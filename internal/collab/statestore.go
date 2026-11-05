@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,15 @@ type DocumentMeta struct {
 	DiskBaseHeads []string `json:"diskBaseHeads"`
 	// LastChange is the time of the last change by a user
 	LastChange time.Time `json:"lastChange"`
+	// LastPositions holds where accounts last had a cursor in this document, by account id.
+	// Cursors are only valid in their epoch, and a new epoch has a new meta.
+	LastPositions map[string]LastPosition `json:"lastPositions,omitempty"`
+}
+
+// LastPosition is the last non-empty selections of an account in a document
+type LastPosition struct {
+	Selections json.RawMessage `json:"selections"`
+	Time       time.Time       `json:"time"`
 }
 
 // StateStore persists Automerge documents outside the docs folder.
@@ -198,6 +208,22 @@ func (s *StateStore) Save(meta *DocumentMeta, doc []byte) error {
 	return nil
 }
 
+// SaveMeta writes only the meta of a saved document. It does nothing if the document was
+// deleted or moved since, so it cannot bring back a sidecar.
+func (s *StateStore) SaveMeta(meta *DocumentMeta) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	current, ok := s.index[meta.Path]
+	if !ok || current.UUID != meta.UUID {
+		return nil
+	}
+	if err := s.writeMeta(s.activeDir(), meta); err != nil {
+		return err
+	}
+	s.index[meta.Path] = copyMeta(meta)
+	return nil
+}
+
 func (s *StateStore) writeMeta(dir string, meta *DocumentMeta) error {
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -264,6 +290,7 @@ func (s *StateStore) MarkCorrupt(meta *DocumentMeta) error {
 func copyMeta(m *DocumentMeta) *DocumentMeta {
 	c := *m
 	c.DiskBaseHeads = append([]string(nil), m.DiskBaseHeads...)
+	c.LastPositions = maps.Clone(m.LastPositions)
 	return &c
 }
 
