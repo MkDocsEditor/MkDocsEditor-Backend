@@ -72,10 +72,14 @@ type SyncServer struct {
 	workerDone    chan struct{}
 
 	// events websocket
-	eventsMu      sync.Mutex
-	eventConns    map[*wsConn]struct{}
-	eventsClosed  bool
-	treeEvents    chan struct{}
+	eventsMu     sync.Mutex
+	eventConns   map[*wsConn]struct{}
+	eventsClosed bool
+	treeEvents   chan struct{}
+	// accessRequests wakes the events worker when the pending access requests changed
+	accessRequests chan struct{}
+	// lastPending is the number of pending access requests admins know. Guarded by eventsMu.
+	lastPending   int
 	onlineChanges chan struct{}
 	eventsDone    chan struct{}
 }
@@ -120,6 +124,8 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 		workerDone:       make(chan struct{}),
 		eventConns:       map[*wsConn]struct{}{},
 		treeEvents:       make(chan struct{}, 1),
+		accessRequests:   make(chan struct{}, 1),
+		lastPending:      -1,
 		onlineChanges:    make(chan struct{}, 1),
 		eventsDone:       make(chan struct{}),
 	}
@@ -137,6 +143,7 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 	go s.treeWorker()
 	go s.eventsWorker()
 	authenticator.OnRevoke(s.onRevoke)
+	authenticator.OnAccessRequestsChanged(s.accessRequestsChanged)
 	return s, nil
 }
 
@@ -613,6 +620,9 @@ type wsConn struct {
 	// sessionID is the session the connection authenticated with, if any. user and
 	// sessionID are set before the connection is added to a session or the events list.
 	sessionID string
+	// lastActive is the time of the last presence message, or of the connect. Guarded by
+	// session.mu once the connection is in a session.
+	lastActive time.Time
 
 	outgoing   chan outgoingMessage
 	closeOnce  sync.Once
@@ -644,6 +654,7 @@ func newWsConn(s *SyncServer, ws *websocket.Conn, user *auth.User, sessionID str
 		outgoing:   make(chan outgoingMessage, sendQueueSize),
 		done:       make(chan struct{}),
 		writerDone: make(chan struct{}),
+		lastActive: time.Now(),
 	}
 }
 
@@ -943,15 +954,16 @@ func (c *wsConn) userInfo() UserInfo {
 
 func (c *wsConn) presenceLocked() PresenceMessage {
 	return PresenceMessage{
-		Type:        MsgPresence,
-		DocumentID:  c.session.docID,
-		ClientID:    c.clientID,
-		AccountID:   c.user.ID,
-		Username:    c.user.Username,
-		DisplayName: c.user.DisplayName,
-		Color:       c.user.Color,
-		ActorID:     c.actorID,
-		Selections:  c.selections,
+		Type:         MsgPresence,
+		DocumentID:   c.session.docID,
+		ClientID:     c.clientID,
+		AccountID:    c.user.ID,
+		Username:     c.user.Username,
+		DisplayName:  c.user.DisplayName,
+		Color:        c.user.Color,
+		ActorID:      c.actorID,
+		LastActiveAt: c.lastActive.UTC().Format(time.RFC3339Nano),
+		Selections:   c.selections,
 	}
 }
 
@@ -1113,6 +1125,7 @@ func (c *wsConn) handlePresence(selections json.RawMessage) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	c.selections = selections
+	c.lastActive = time.Now()
 	session.broadcastLocked(c.presenceLocked(), c)
 }
 

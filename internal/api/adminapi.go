@@ -27,7 +27,8 @@ type (
 	}
 
 	SettingsUpdateRequest struct {
-		Require2FA *bool `json:"require2FA"`
+		Require2FA            *bool `json:"require2FA"`
+		AccessRequestsEnabled *bool `json:"accessRequestsEnabled"`
 	}
 
 	AuditResponse struct {
@@ -186,6 +187,11 @@ func (rs *RestService) adminUpdateSettings(c echo.Context) error {
 	}
 	if r.Require2FA != nil && *r.Require2FA != rs.authenticator.Require2FA() {
 		if err := rs.authenticator.SetRequire2FA(*r.Require2FA, UserFromContext(c), requestInfo(c)); err != nil {
+			return rs.authError(c, err)
+		}
+	}
+	if r.AccessRequestsEnabled != nil && *r.AccessRequestsEnabled != rs.authenticator.AccessRequestsEnabled() {
+		if err := rs.authenticator.SetAccessRequestsEnabled(*r.AccessRequestsEnabled, UserFromContext(c), requestInfo(c)); err != nil {
 			return rs.authError(c, err)
 		}
 	}

@@ -25,7 +25,17 @@ func (e *RateLimitError) Seconds() int {
 type bucket struct {
 	tokens float64
 	last   time.Time
+	// full is how long the bucket takes to fill up
+	full time.Duration
 }
+
+// Limits of the public access request endpoints, stricter than the ones of the login
+const (
+	accessRequestCreateBurst  = 5
+	accessRequestCreateRefill = 12 * time.Minute
+	accessRequestStatusBurst  = 10
+	accessRequestStatusRefill = 15 * time.Second
+)
 
 type failures struct {
 	count int
@@ -47,7 +57,21 @@ func newLimiter() *limiter {
 // AllowIP takes a token from the bucket of a client address
 func (s *Service) AllowIP(ip string) error {
 	rl := s.cfg.rateLimits
-	if rl.Disabled {
+	return s.allowBucket("ip:", ip, rl.PerIPBurst, rl.PerIPRefill)
+}
+
+// AllowAccessRequestCreate takes a token for a new access request of a client address
+func (s *Service) AllowAccessRequestCreate(ip string) error {
+	return s.allowBucket("access-request:", ip, accessRequestCreateBurst, accessRequestCreateRefill)
+}
+
+// AllowAccessRequestStatus takes a token for a status request of a client address
+func (s *Service) AllowAccessRequestStatus(ip string) error {
+	return s.allowBucket("access-request-status:", ip, accessRequestStatusBurst, accessRequestStatusRefill)
+}
+
+func (s *Service) allowBucket(prefix, ip string, burst int, refill time.Duration) error {
+	if s.cfg.rateLimits.Disabled {
 		return nil
 	}
 	now := s.now()
@@ -57,21 +81,22 @@ func (s *Service) AllowIP(ip string) error {
 	if len(l.buckets) > 10000 {
 		// forget full buckets
 		for k, b := range l.buckets {
-			if now.Sub(b.last) > time.Duration(rl.PerIPBurst)*rl.PerIPRefill {
+			if now.Sub(b.last) > b.full {
 				delete(l.buckets, k)
 			}
 		}
 	}
-	b := l.buckets[ip]
+	key := prefix + ip
+	b := l.buckets[key]
 	if b == nil {
-		b = &bucket{tokens: float64(rl.PerIPBurst), last: now}
-		l.buckets[ip] = b
+		b = &bucket{tokens: float64(burst), last: now, full: time.Duration(burst) * refill}
+		l.buckets[key] = b
 	}
-	b.tokens = math.Min(float64(rl.PerIPBurst), b.tokens+now.Sub(b.last).Seconds()/rl.PerIPRefill.Seconds())
+	b.tokens = math.Min(float64(burst), b.tokens+now.Sub(b.last).Seconds()/refill.Seconds())
 	b.last = now
 	if b.tokens < 1 {
-		wait := time.Duration((1 - b.tokens) * float64(rl.PerIPRefill))
-		s.logLimitLocked("ip:"+ip, RequestInfo{IP: ip}, "")
+		wait := time.Duration((1 - b.tokens) * float64(refill))
+		s.logLimitLocked(key, RequestInfo{IP: ip}, "")
 		return &RateLimitError{RetryAfter: wait}
 	}
 	b.tokens--

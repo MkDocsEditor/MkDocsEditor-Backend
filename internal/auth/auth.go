@@ -109,8 +109,9 @@ type Service struct {
 
 	limiter *limiter
 
-	listenersMu sync.Mutex
-	listeners   []func(RevokeEvent)
+	listenersMu            sync.Mutex
+	listeners              []func(RevokeEvent)
+	accessRequestListeners []func()
 
 	challengesMu sync.Mutex
 	challenges   map[string]*challenge

@@ -113,6 +113,10 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 		}
 		methods = append(methods, "device-link")
 	}
+	features := []string{FeatureMovedLookup, FeatureJoinPresence}
+	if rs.authenticator.AccessRequestsAvailable() {
+		features = append(features, FeatureAccessRequests)
+	}
 	return c.JSONPretty(http.StatusOK, &ServerInfoResponse{
 		Name:            name,
 		Version:         global.Version,
@@ -125,7 +129,7 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 		Passkeys:        PasskeyStatus{Enabled: rs.authenticator.PasskeysEnabled(), RPID: rs.authenticator.RPID()},
 		LoginMethods:    methods,
 		Require2FA:      enabled && rs.authenticator.Require2FA(),
-		Features:        []string{FeatureMovedLookup},
+		Features:        features,
 	}, jsonIndent)
 }
 

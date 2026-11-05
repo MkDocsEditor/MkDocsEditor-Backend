@@ -97,15 +97,17 @@ type (
 	}
 
 	PresenceMessage struct {
-		Type        string          `json:"type"`
-		DocumentID  string          `json:"documentId"`
-		ClientID    string          `json:"clientId,omitempty"`
-		AccountID   string          `json:"accountId,omitempty"`
-		Username    string          `json:"username,omitempty"`
-		DisplayName string          `json:"displayName,omitempty"`
-		Color       string          `json:"color,omitempty"`
-		ActorID     string          `json:"actorId,omitempty"`
-		Selections  json.RawMessage `json:"selections"`
+		Type        string `json:"type"`
+		DocumentID  string `json:"documentId"`
+		ClientID    string `json:"clientId,omitempty"`
+		AccountID   string `json:"accountId,omitempty"`
+		Username    string `json:"username,omitempty"`
+		DisplayName string `json:"displayName,omitempty"`
+		Color       string `json:"color,omitempty"`
+		ActorID     string `json:"actorId,omitempty"`
+		// LastActiveAt is stamped by the server, see docs/sync-protocol.md section 6
+		LastActiveAt string          `json:"lastActiveAt,omitempty"`
+		Selections   json.RawMessage `json:"selections"`
 	}
 
 	PresenceSnapshotMessage struct {

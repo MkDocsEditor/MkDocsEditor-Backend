@@ -15,6 +15,8 @@ import (
 const (
 	MsgTreeChanged = "tree-changed"
 	MsgOnline      = "online"
+	// MsgAccessRequests is only sent to admins with a session
+	MsgAccessRequests = "access-requests"
 )
 
 type (
@@ -28,6 +30,12 @@ type (
 		DocumentID string     `json:"documentId"`
 		Users      []UserInfo `json:"users"`
 	}
+
+	// AccessRequestsMessage holds the number of pending access requests
+	AccessRequestsMessage struct {
+		Type    string `json:"type"`
+		Pending int    `json:"pending"`
+	}
 )
 
 const (
@@ -35,6 +43,8 @@ const (
 	onlineDebounce = 100 * time.Millisecond
 	// maxEventMessageSize limits messages from clients: they only send hello and heartbeats
 	maxEventMessageSize = 64 << 10
+	// accessRequestCheckInterval notices access requests that expired, which nothing announces
+	accessRequestCheckInterval = time.Minute
 )
 
 // HandleEventsWebsocket serves GET /events/ws/. user and sessionID are those of the upgrade request
@@ -76,6 +86,16 @@ func (c *wsConn) runEvents() {
 	s.eventConns[c] = struct{}{}
 	s.eventsMu.Unlock()
 	c.send(s.onlineSnapshot())
+	if c.seesAccessRequests() {
+		// counted under the lock, so this cannot overwrite a newer number of the worker
+		s.eventsMu.Lock()
+		if pending, err := s.authenticator.PendingAccessRequests(); err != nil {
+			log.Printf("Unable to count the access requests: %v", err)
+		} else {
+			c.send(&AccessRequestsMessage{Type: MsgAccessRequests, Pending: pending})
+		}
+		s.eventsMu.Unlock()
+	}
 	log.Printf("%s: %s (%s) subscribed to events", c.clientID, c.user.Username, hello.Client)
 
 	for {
@@ -98,6 +118,40 @@ func (s *SyncServer) broadcastEvent(msg any) {
 	defer s.eventsMu.Unlock()
 	for c := range s.eventConns {
 		c.send(msg)
+	}
+}
+
+// seesAccessRequests reports whether a connection may know about access requests: the same
+// rule as for the /admin/ endpoints, which need a session of an admin
+func (c *wsConn) seesAccessRequests() bool {
+	return c.sessionID != "" && c.user != nil && c.user.IsAdmin()
+}
+
+// accessRequestsChanged schedules sending the pending access requests. It never blocks.
+func (s *SyncServer) accessRequestsChanged() {
+	select {
+	case s.accessRequests <- struct{}{}:
+	default:
+	}
+}
+
+// broadcastAccessRequests tells the admins the number of pending access requests, if it changed
+func (s *SyncServer) broadcastAccessRequests() {
+	s.eventsMu.Lock()
+	defer s.eventsMu.Unlock()
+	pending, err := s.authenticator.PendingAccessRequests()
+	if err != nil {
+		log.Printf("Unable to count the access requests: %v", err)
+		return
+	}
+	if pending == s.lastPending {
+		return
+	}
+	s.lastPending = pending
+	for c := range s.eventConns {
+		if c.seesAccessRequests() {
+			c.send(&AccessRequestsMessage{Type: MsgAccessRequests, Pending: pending})
+		}
 	}
 }
 
@@ -141,6 +195,8 @@ func (s *SyncServer) onlineSnapshot() *OnlineMessage {
 func (s *SyncServer) eventsWorker() {
 	defer close(s.eventsDone)
 	var timer <-chan time.Time
+	accessRequestCheck := time.NewTicker(accessRequestCheckInterval)
+	defer accessRequestCheck.Stop()
 	for {
 		select {
 		case <-s.stop:
@@ -153,6 +209,10 @@ func (s *SyncServer) eventsWorker() {
 			return
 		case <-s.treeEvents:
 			s.broadcastEvent(&MessageBase{Type: MsgTreeChanged})
+		case <-s.accessRequests:
+			s.broadcastAccessRequests()
+		case <-accessRequestCheck.C:
+			s.broadcastAccessRequests()
 		case <-s.onlineChanges:
 			if timer == nil {
 				timer = time.After(onlineDebounce)
