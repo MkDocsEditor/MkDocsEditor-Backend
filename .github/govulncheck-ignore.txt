@@ -1,0 +1,13 @@
+# Vulnerabilities that govulncheck reports but that do not affect this backend. One id per line,
+# then the reason. Remove an entry as soon as a fixed version is in go.mod.
+#
+# Both affect echo v4 as a whole (no fixed v4 version, no symbols listed), so every use of echo
+# is reported. The fixes are only in echo v5.
+#
+# Only with the default Echo#IPExtractor: c.RealIP() then trusts X-Forwarded-For from anyone.
+# The backend always sets its own IPExtractor (internal/api/clientip.go), which trusts the
+# headers only from server.trustedProxies, and it does not use echo's rate limiter.
+GO-2026-6872
+# Only for the proxy middleware with the default IPExtractor, which forwards a client's
+# X-Real-IP upstream. The backend uses no proxy middleware and sets its own IPExtractor.
+GO-2026-6875

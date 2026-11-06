@@ -131,8 +131,10 @@ jobs:
           key: go-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: go-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
 
+      # Fails on every vulnerability the code calls, except the reviewed ones in
+      # .github/govulncheck-ignore.txt
       - name: Check for known vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: .github/scripts/govulncheck.sh
 
   openapi:
     name: OpenAPI lint
