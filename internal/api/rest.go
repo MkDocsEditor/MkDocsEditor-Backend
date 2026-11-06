@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"io"
 	"log"
@@ -23,8 +24,8 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,6 +62,7 @@ type (
 
 type RestService struct {
 	echoRest       *echo.Echo
+	httpServer     *http.Server
 	server         configuration.ServerConfiguration
 	allowedOrigins []string
 	trustedProxies []*net.IPNet
@@ -97,6 +99,12 @@ func NewRestService(
 	}
 	treeManager.AddTreeChangeListener(func(_, newTree *wiki.Section) { rs.pruneThumbnails(newTree) })
 	rs.echoRest = rs.createRestService()
+	rs.httpServer = &http.Server{
+		Addr:    net.JoinHostPort(rs.server.Host, strconv.Itoa(rs.server.Port)),
+		Handler: rs.echoRest,
+		// a client that never finishes its headers does not keep a connection forever
+		ReadHeaderTimeout: 30 * time.Second,
+	}
 	return rs
 }
 
@@ -107,7 +115,7 @@ func (rs *RestService) SetGitCommitter(c *gitstore.Committer) {
 
 // commitTree commits a tree change of the requesting user, if git is enabled.
 // format gets the paths relative to the docs folder.
-func (rs *RestService) commitTree(c echo.Context, format string, absPaths ...string) {
+func (rs *RestService) commitTree(c *echo.Context, format string, absPaths ...string) {
 	if rs.git == nil {
 		return
 	}
@@ -129,31 +137,30 @@ func (rs *RestService) commitTree(c echo.Context, format string, absPaths ...str
 // unescapePathParams decodes percent-encoded path parameters. Echo matches routes on the raw
 // path when it contains escapes, so "Strand%20(2).png" would otherwise arrive as is.
 func unescapePathParams(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		values := c.ParamValues()
-		decoded := make([]string, len(values))
+	return func(c *echo.Context) error {
+		values := c.PathValues()
+		decoded := make(echo.PathValues, len(values))
 		for i, v := range values {
-			d, err := url.PathUnescape(v)
+			d, err := url.PathUnescape(v.Value)
 			if err != nil {
 				return apiError(c, http.StatusBadRequest, CodeBadRequest, "invalid percent-encoding in the path", nil)
 			}
-			decoded[i] = d
+			decoded[i] = echo.PathValue{Name: v.Name, Value: d}
 		}
-		c.SetParamValues(decoded...)
+		c.SetPathValues(decoded)
 		return next(c)
 	}
 }
 
 func (rs *RestService) createRestService() *echo.Echo {
 	echoRest := echo.New()
-	echoRest.HideBanner = true
 	echoRest.IPExtractor = rs.ipExtractor()
-	defaultErrorHandler := echoRest.DefaultHTTPErrorHandler
-	echoRest.HTTPErrorHandler = func(err error, c echo.Context) {
+	defaultErrorHandler := echo.DefaultHTTPErrorHandler(false)
+	echoRest.HTTPErrorHandler = func(c *echo.Context, err error) {
 		if errors.Is(err, errResponded) {
 			return
 		}
-		defaultErrorHandler(err, c)
+		defaultErrorHandler(c, err)
 	}
 
 	// Root level middleware
@@ -175,9 +182,8 @@ func (rs *RestService) createRestService() *echo.Echo {
 		LogURIPath:  true,
 		LogStatus:   true,
 		LogLatency:  true,
-		LogError:    true,
 		HandleError: true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
 			if v.Error != nil && !errors.Is(v.Error, errResponded) {
 				log.Printf("%s %s %d %v error=%v", v.Method, v.URIPath, v.Status, v.Latency, v.Error)
 			} else {
@@ -352,7 +358,8 @@ func (rs *RestService) Start() error {
 	rs.refs.Warm()
 	// resources may have changed while the server was not running
 	go rs.pruneThumbnails(rs.treeManager.Root())
-	err := rs.echoRest.Start(net.JoinHostPort(rs.server.Host, strconv.Itoa(rs.server.Port)))
+	log.Printf("Serving the API at http://%s", rs.httpServer.Addr)
+	err := rs.httpServer.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -361,17 +368,17 @@ func (rs *RestService) Start() error {
 
 // Shutdown stops the REST service gracefully
 func (rs *RestService) Shutdown(ctx context.Context) {
-	if err := rs.echoRest.Shutdown(ctx); err != nil {
+	if err := rs.httpServer.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown: %v", err)
 	}
 }
 
 // returns an empty "ok" answer
-func (rs *RestService) isAlive(c echo.Context) error {
+func (rs *RestService) isAlive(c *echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-func (rs *RestService) getMkDocsConfig(c echo.Context) error {
+func (rs *RestService) getMkDocsConfig(c *echo.Context) error {
 	data, err := os.ReadFile(rs.treeManager.ConfigFile())
 	if err != nil {
 		return rs.ReturnError(c, err)
@@ -385,13 +392,13 @@ func (rs *RestService) getMkDocsConfig(c echo.Context) error {
 }
 
 // returns the complete file tree
-func (rs *RestService) getTree(c echo.Context) error {
+func (rs *RestService) getTree(c *echo.Context) error {
 	return c.JSONPretty(http.StatusOK, rs.treeManager.Root(), jsonIndent)
 }
 
 // describeItem returns the description of a single item of the given type (if found)
 func (rs *RestService) describeItem(itemType string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		id := c.Param(urlParamID)
 		var result any
 		switch itemType {
@@ -416,7 +423,7 @@ func (rs *RestService) describeItem(itemType string) echo.HandlerFunc {
 }
 
 // returns the content of the document with the given id (if found)
-func (rs *RestService) getDocumentContent(c echo.Context) error {
+func (rs *RestService) getDocumentContent(c *echo.Context) error {
 	id := c.Param(urlParamID)
 
 	d := rs.treeManager.GetDocument(id)
@@ -435,7 +442,7 @@ func (rs *RestService) getDocumentContent(c echo.Context) error {
 
 // bindItemRequest reads a new item request and checks that the parent section exists. It answers
 // the request itself on failure, see errResponded.
-func (rs *RestService) bindItemRequest(c echo.Context) (*NewItemRequest, error) {
+func (rs *RestService) bindItemRequest(c *echo.Context) (*NewItemRequest, error) {
 	r := new(NewItemRequest)
 	if err := c.Bind(r); err != nil {
 		return nil, responded(rs.ReturnError(c, err))
@@ -447,7 +454,7 @@ func (rs *RestService) bindItemRequest(c echo.Context) (*NewItemRequest, error) 
 }
 
 // creates a new section with the given data
-func (rs *RestService) createSection(c echo.Context) error {
+func (rs *RestService) createSection(c *echo.Context) error {
 	r, err := rs.bindItemRequest(c)
 	if err != nil {
 		return err
@@ -460,7 +467,7 @@ func (rs *RestService) createSection(c echo.Context) error {
 }
 
 // creates a new document with the given data
-func (rs *RestService) createDocument(c echo.Context) error {
+func (rs *RestService) createDocument(c *echo.Context) error {
 	r, err := rs.bindItemRequest(c)
 	if err != nil {
 		return err
@@ -475,7 +482,7 @@ func (rs *RestService) createDocument(c echo.Context) error {
 
 // renameItem renames an item of the given type, with reference rewriting (see docs/references.md)
 func (rs *RestService) renameItem(itemType string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		r := new(RenameRequest)
 		if err := c.Bind(r); err != nil {
 			return rs.ReturnError(c, err)
@@ -487,7 +494,7 @@ func (rs *RestService) renameItem(itemType string) echo.HandlerFunc {
 // deleteItem deletes an item of the given type.
 // Documents (or sections containing documents) with connected clients are only deleted with ?force=true.
 func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		id := c.Param(urlParamID)
 		path := rs.treeManager.ItemPath(id, itemType)
 		if path == "" {
@@ -514,20 +521,21 @@ func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
 }
 
 // returns the content of a single resource with the given id (if found)
-func (rs *RestService) getResourceContent(c echo.Context) error {
+func (rs *RestService) getResourceContent(c *echo.Context) error {
 	id := c.Param(urlParamID)
 
 	d := rs.treeManager.GetResource(id)
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
-	return c.File(d.Path)
+	// echo serves files from a fs.FS, which takes no absolute paths
+	return c.FileFS(filepath.Base(d.Path), os.DirFS(filepath.Dir(d.Path)))
 }
 
 // uploads a new resource file.
 // The content is taken from the multipart form field "file", either as a file part (binary safe)
 // or, for older clients, as a plain form value.
-func (rs *RestService) uploadNewResource(c echo.Context) error {
+func (rs *RestService) uploadNewResource(c *echo.Context) error {
 	parentID := c.Param(urlParamParentID)
 	name := c.Param(urlParamName)
 
@@ -554,9 +562,22 @@ func (rs *RestService) uploadNewResource(c echo.Context) error {
 	return c.JSONPretty(http.StatusOK, resource, jsonIndent)
 }
 
+// bindErrorMessage describes an error of c.Bind. The detail, like the position of a JSON syntax
+// error, is in the wrapped error.
+func bindErrorMessage(err *echo.HTTPError) string {
+	msg := err.Message
+	if msg == "" {
+		msg = http.StatusText(err.Code)
+	}
+	if inner := err.Unwrap(); inner != nil {
+		msg += ": " + inner.Error()
+	}
+	return msg
+}
+
 // ReturnError writes an error response. Known errors are mapped to matching status codes. The
 // text of other errors can name server paths, so it is only logged.
-func (rs *RestService) ReturnError(c echo.Context, e error) error {
+func (rs *RestService) ReturnError(c *echo.Context, e error) error {
 	var httpErr *echo.HTTPError
 	switch {
 	case errors.Is(e, wiki.ErrInvalidName):
@@ -567,19 +588,19 @@ func (rs *RestService) ReturnError(c echo.Context, e error) error {
 		return notFoundError(c, e.Error())
 	case errors.As(e, &httpErr) && httpErr.Code < http.StatusInternalServerError:
 		// c.Bind failed: a malformed body or an unsupported content type
-		return apiError(c, httpErr.Code, CodeBadRequest, fmt.Sprint(httpErr.Message), nil)
+		return apiError(c, httpErr.Code, CodeBadRequest, bindErrorMessage(httpErr), nil)
 	}
 	log.Printf("%s %s: %v", c.Request().Method, c.Request().URL.Path, e)
 	return c.JSONPretty(http.StatusInternalServerError, &ErrorResult{Name: "Unknown Error", Code: CodeInternal, Message: "internal error"}, jsonIndent)
 }
 
 // notFoundError writes a 404 response
-func notFoundError(c echo.Context, message string) error {
+func notFoundError(c *echo.Context, message string) error {
 	return c.JSONPretty(http.StatusNotFound, &ErrorResult{Name: "Not found", Code: CodeNotFound, Message: message}, jsonIndent)
 }
 
 // return a "not found" message. For an old id of a moved item, details.movedTo names the item now.
-func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
+func (rs *RestService) ReturnNotFound(c *echo.Context, id string) (err error) {
 	result := &ErrorResult{
 		Name:    "Not found",
 		Code:    CodeNotFound,
@@ -594,7 +615,7 @@ func (rs *RestService) ReturnNotFound(c echo.Context, id string) (err error) {
 }
 
 // GET /moved/:id/: where the item with an old id is now
-func (rs *RestService) getMoved(c echo.Context) error {
+func (rs *RestService) getMoved(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	moved := rs.movedItem(references.NewTreeLookup(rs.treeManager.Root()), id)
 	if moved == nil {
@@ -605,7 +626,7 @@ func (rs *RestService) getMoved(c echo.Context) error {
 
 // GET /moved/?id=…&id=…: GET /moved/:id/ for several ids in one request. Ids that have not
 // moved are left out of the answer.
-func (rs *RestService) getMovedList(c echo.Context) error {
+func (rs *RestService) getMovedList(c *echo.Context) error {
 	ids := c.QueryParams()["id"]
 	if len(ids) > maxMovedLookupIDs {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "too many ids", map[string]any{
@@ -640,7 +661,7 @@ func (rs *RestService) movedItem(lookup *references.TreeLookup, id string) *Move
 }
 
 // returns the per-character authorship of a document
-func (rs *RestService) getDocumentAuthorship(c echo.Context) error {
+func (rs *RestService) getDocumentAuthorship(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -654,15 +675,15 @@ func (rs *RestService) getDocumentAuthorship(c echo.Context) error {
 }
 
 // returns the actor map (Automerge actor id -> user)
-func (rs *RestService) getActors(c echo.Context) error {
+func (rs *RestService) getActors(c *echo.Context) error {
 	return c.JSONPretty(http.StatusOK, rs.sync.Actors(), jsonIndent)
 }
 
-func (rs *RestService) handleEventsWebsocket(c echo.Context) error {
+func (rs *RestService) handleEventsWebsocket(c *echo.Context) error {
 	return rs.sync.HandleEventsWebsocket(c.Response(), c.Request(), UserFromContext(c), sessionIDFromContext(c))
 }
 
-func (rs *RestService) handleWebsocket(c echo.Context) error {
+func (rs *RestService) handleWebsocket(c *echo.Context) error {
 	err := rs.sync.HandleWebsocket(c.Response(), c.Request(), UserFromContext(c), sessionIDFromContext(c), c.Param(urlParamID))
 	if errors.Is(err, wiki.ErrNotFound) {
 		return echo.ErrNotFound

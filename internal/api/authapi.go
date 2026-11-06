@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of the account endpoints, see docs/auth.md sections 8 and 9
@@ -108,7 +108,7 @@ type (
 )
 
 // decodeJSON reads a JSON request body of at most 64 KiB. An empty body is an empty object.
-func decodeJSON(c echo.Context, v any) error {
+func decodeJSON(c *echo.Context, v any) error {
 	data, err := io.ReadAll(io.LimitReader(c.Request().Body, 64<<10+1))
 	if err != nil {
 		return responded(apiError(c, http.StatusBadRequest, CodeBadRequest, "unable to read the request body", nil))
@@ -125,7 +125,7 @@ func decodeJSON(c echo.Context, v any) error {
 	return nil
 }
 
-func (rs *RestService) sessionParams(c echo.Context, f sessionRequestFields) auth.SessionParams {
+func (rs *RestService) sessionParams(c *echo.Context, f sessionRequestFields) auth.SessionParams {
 	return auth.SessionParams{Type: f.SessionType, DeviceName: f.DeviceName, RequestInfo: requestInfo(c)}
 }
 
@@ -139,7 +139,7 @@ func (rs *RestService) userView(u *auth.User) *UserView {
 
 // writeLoginResult answers with a session (setting the cookie for cookie sessions) or the
 // second factor challenge
-func (rs *RestService) writeLoginResult(c echo.Context, r *auth.LoginResult) error {
+func (rs *RestService) writeLoginResult(c *echo.Context, r *auth.LoginResult) error {
 	if r.Session == nil {
 		return c.JSONPretty(http.StatusOK, &SecondFactorRequiredResponse{Status: "second-factor-required",
 			Challenge: r.Challenge, Methods: r.Methods, ExpiresAt: r.ExpiresAt}, jsonIndent)
@@ -155,7 +155,7 @@ func (rs *RestService) writeLoginResult(c echo.Context, r *auth.LoginResult) err
 }
 
 // GET /auth/status/
-func (rs *RestService) authStatus(c echo.Context) error {
+func (rs *RestService) authStatus(c *echo.Context) error {
 	return c.JSONPretty(http.StatusOK, &AuthStatusResponse{
 		SetupRequired:  rs.authenticator.SetupRequired(),
 		AuthDisabled:   !rs.authenticator.Enabled(),
@@ -165,7 +165,7 @@ func (rs *RestService) authStatus(c echo.Context) error {
 }
 
 // POST /auth/login/
-func (rs *RestService) login(c echo.Context) error {
+func (rs *RestService) login(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (rs *RestService) login(c echo.Context) error {
 }
 
 // POST /auth/logout/
-func (rs *RestService) logout(c echo.Context) error {
+func (rs *RestService) logout(c *echo.Context) error {
 	if sess := SessionFromContext(c); sess != nil {
 		rs.authenticator.Logout(sess, requestInfo(c))
 	}
@@ -193,7 +193,7 @@ func (rs *RestService) logout(c echo.Context) error {
 }
 
 // GET /auth/whoami/
-func (rs *RestService) whoAmI(c echo.Context) error {
+func (rs *RestService) whoAmI(c *echo.Context) error {
 	user := UserFromContext(c)
 	resp := &WhoAmIResponse{UserView: *rs.userView(user), AuthMethod: authMethodFromContext(c)}
 	if sess := SessionFromContext(c); sess != nil {
@@ -203,7 +203,7 @@ func (rs *RestService) whoAmI(c echo.Context) error {
 }
 
 // POST /auth/ws-ticket/ issues a single-use ticket for a websocket connection
-func (rs *RestService) issueWsTicket(c echo.Context) error {
+func (rs *RestService) issueWsTicket(c *echo.Context) error {
 	user := UserFromContext(c)
 	if user == nil {
 		return rs.unauthorized(c)
@@ -216,7 +216,7 @@ func (rs *RestService) issueWsTicket(c echo.Context) error {
 }
 
 // POST /auth/link/inspect/
-func (rs *RestService) inspectLink(c echo.Context) error {
+func (rs *RestService) inspectLink(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (rs *RestService) inspectLink(c echo.Context) error {
 }
 
 // POST /auth/link/redeem/
-func (rs *RestService) redeemLink(c echo.Context) error {
+func (rs *RestService) redeemLink(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -258,11 +258,11 @@ func (rs *RestService) redeemLink(c echo.Context) error {
 }
 
 // GET /account/sessions/
-func (rs *RestService) accountSessions(c echo.Context) error {
+func (rs *RestService) accountSessions(c *echo.Context) error {
 	return rs.writeSessions(c, UserFromContext(c).ID)
 }
 
-func (rs *RestService) writeSessions(c echo.Context, accountID string) error {
+func (rs *RestService) writeSessions(c *echo.Context, accountID string) error {
 	sessions, err := rs.authenticator.Sessions(accountID)
 	if err != nil {
 		return rs.authError(c, err)
@@ -282,7 +282,7 @@ func (rs *RestService) writeSessions(c echo.Context, accountID string) error {
 }
 
 // DELETE /account/sessions/{id}/
-func (rs *RestService) revokeAccountSession(c echo.Context) error {
+func (rs *RestService) revokeAccountSession(c *echo.Context) error {
 	user := UserFromContext(c)
 	id := c.Param(urlParamID)
 	if err := rs.authenticator.RevokeSession(user.ID, id, user, requestInfo(c)); err != nil {
@@ -295,7 +295,7 @@ func (rs *RestService) revokeAccountSession(c echo.Context) error {
 }
 
 // POST /account/sessions/revoke-others/
-func (rs *RestService) revokeOtherSessions(c echo.Context) error {
+func (rs *RestService) revokeOtherSessions(c *echo.Context) error {
 	user := UserFromContext(c)
 	n, err := rs.authenticator.RevokeSessions(user.ID, SessionFromContext(c).ID, user, requestInfo(c))
 	if err != nil {
@@ -305,11 +305,11 @@ func (rs *RestService) revokeOtherSessions(c echo.Context) error {
 }
 
 // GET /admin/invites/
-func (rs *RestService) listInvites(c echo.Context) error {
+func (rs *RestService) listInvites(c *echo.Context) error {
 	return rs.listLinks(c, auth.LinkInvite)
 }
 
-func (rs *RestService) listLinks(c echo.Context, kind string) error {
+func (rs *RestService) listLinks(c *echo.Context, kind string) error {
 	links, err := rs.authenticator.Links(kind, c.QueryParam("status"))
 	if err != nil {
 		return rs.authError(c, err)
@@ -318,7 +318,7 @@ func (rs *RestService) listLinks(c echo.Context, kind string) error {
 }
 
 // POST /admin/invites/
-func (rs *RestService) createInvite(c echo.Context) error {
+func (rs *RestService) createInvite(c *echo.Context) error {
 	var r CreateInviteRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -338,7 +338,7 @@ func (rs *RestService) createInvite(c echo.Context) error {
 }
 
 // DELETE /admin/invites/{id}/
-func (rs *RestService) revokeInvite(c echo.Context) error {
+func (rs *RestService) revokeInvite(c *echo.Context) error {
 	if err := rs.authenticator.RevokeLink(auth.LinkInvite, c.Param(urlParamID), UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}

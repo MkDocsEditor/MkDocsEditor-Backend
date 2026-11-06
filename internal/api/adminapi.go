@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of the admin and app token endpoints, see docs/auth.md section 9
@@ -49,7 +49,7 @@ type (
 )
 
 // GET /admin/users/
-func (rs *RestService) adminListUsers(c echo.Context) error {
+func (rs *RestService) adminListUsers(c *echo.Context) error {
 	var statuses []string
 	for s := range strings.SplitSeq(c.QueryParam("status"), ",") {
 		if s = strings.TrimSpace(s); s != "" {
@@ -64,7 +64,7 @@ func (rs *RestService) adminListUsers(c echo.Context) error {
 }
 
 // PATCH /admin/users/{id}/
-func (rs *RestService) adminUpdateUser(c echo.Context) error {
+func (rs *RestService) adminUpdateUser(c *echo.Context) error {
 	var r AdminUserUpdateRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -89,7 +89,7 @@ func (rs *RestService) adminUpdateUser(c echo.Context) error {
 }
 
 // DELETE /admin/users/{id}/
-func (rs *RestService) adminDeleteUser(c echo.Context) error {
+func (rs *RestService) adminDeleteUser(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (rs *RestService) adminDeleteUser(c echo.Context) error {
 }
 
 // GET /admin/users/{id}/sessions/
-func (rs *RestService) adminUserSessions(c echo.Context) error {
+func (rs *RestService) adminUserSessions(c *echo.Context) error {
 	if _, err := rs.authenticator.AdminUser(c.Param(urlParamID)); err != nil {
 		return rs.authError(c, err)
 	}
@@ -108,7 +108,7 @@ func (rs *RestService) adminUserSessions(c echo.Context) error {
 }
 
 // POST /admin/users/{id}/sessions/revoke/
-func (rs *RestService) adminRevokeUserSessions(c echo.Context) error {
+func (rs *RestService) adminRevokeUserSessions(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	if _, err := rs.authenticator.AdminUser(id); err != nil {
 		return rs.authError(c, err)
@@ -126,7 +126,7 @@ func (rs *RestService) adminRevokeUserSessions(c echo.Context) error {
 }
 
 // DELETE /admin/sessions/{id}/
-func (rs *RestService) adminRevokeSession(c echo.Context) error {
+func (rs *RestService) adminRevokeSession(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	if err := rs.authenticator.RevokeSession("", id, UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
@@ -138,7 +138,7 @@ func (rs *RestService) adminRevokeSession(c echo.Context) error {
 }
 
 // POST /admin/users/{id}/reset-link/
-func (rs *RestService) adminCreateResetLink(c echo.Context) error {
+func (rs *RestService) adminCreateResetLink(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -159,12 +159,12 @@ func (rs *RestService) adminCreateResetLink(c echo.Context) error {
 }
 
 // GET /admin/reset-links/
-func (rs *RestService) adminListResetLinks(c echo.Context) error {
+func (rs *RestService) adminListResetLinks(c *echo.Context) error {
 	return rs.listLinks(c, auth.LinkReset)
 }
 
 // DELETE /admin/reset-links/{id}/
-func (rs *RestService) adminRevokeResetLink(c echo.Context) error {
+func (rs *RestService) adminRevokeResetLink(c *echo.Context) error {
 	if err := rs.authenticator.RevokeLink(auth.LinkReset, c.Param(urlParamID), UserFromContext(c), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
@@ -172,12 +172,12 @@ func (rs *RestService) adminRevokeResetLink(c echo.Context) error {
 }
 
 // GET /admin/settings/
-func (rs *RestService) adminSettings(c echo.Context) error {
+func (rs *RestService) adminSettings(c *echo.Context) error {
 	return c.JSONPretty(http.StatusOK, rs.authenticator.Settings(), jsonIndent)
 }
 
 // PATCH /admin/settings/
-func (rs *RestService) adminUpdateSettings(c echo.Context) error {
+func (rs *RestService) adminUpdateSettings(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func (rs *RestService) adminUpdateSettings(c echo.Context) error {
 }
 
 // GET /admin/audit/
-func (rs *RestService) adminAudit(c echo.Context) error {
+func (rs *RestService) adminAudit(c *echo.Context) error {
 	q := auth.AuditQuery{Type: c.QueryParam("type"), AccountID: c.QueryParam("account")}
 	if v := c.QueryParam("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -227,7 +227,7 @@ func (rs *RestService) adminAudit(c echo.Context) error {
 }
 
 // GET /account/tokens/
-func (rs *RestService) listAppTokens(c echo.Context) error {
+func (rs *RestService) listAppTokens(c *echo.Context) error {
 	tokens, err := rs.authenticator.AppTokens(UserFromContext(c).ID)
 	if err != nil {
 		return rs.authError(c, err)
@@ -236,7 +236,7 @@ func (rs *RestService) listAppTokens(c echo.Context) error {
 }
 
 // POST /account/tokens/
-func (rs *RestService) createAppToken(c echo.Context) error {
+func (rs *RestService) createAppToken(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (rs *RestService) createAppToken(c echo.Context) error {
 }
 
 // DELETE /account/tokens/{id}/
-func (rs *RestService) revokeAppToken(c echo.Context) error {
+func (rs *RestService) revokeAppToken(c *echo.Context) error {
 	if err := rs.authenticator.RevokeAppToken(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}

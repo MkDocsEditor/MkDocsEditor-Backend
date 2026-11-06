@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -9,7 +10,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -75,24 +76,24 @@ type TicketResponse struct {
 }
 
 // UserFromContext returns the authenticated user of a request, or nil
-func UserFromContext(c echo.Context) *auth.User {
+func UserFromContext(c *echo.Context) *auth.User {
 	u, _ := c.Get(contextKeyUser).(*auth.User)
 	return u
 }
 
 // SessionFromContext returns the session of a request authenticated by a session, or nil
-func SessionFromContext(c echo.Context) *auth.Session {
+func SessionFromContext(c *echo.Context) *auth.Session {
 	s, _ := c.Get(contextKeySession).(*auth.Session)
 	return s
 }
 
 // AppTokenFromContext returns the app token of a request authenticated by one, or nil
-func AppTokenFromContext(c echo.Context) *auth.AppToken {
+func AppTokenFromContext(c *echo.Context) *auth.AppToken {
 	t, _ := c.Get(contextKeyAppToken).(*auth.AppToken)
 	return t
 }
 
-func (rs *RestService) authenticateAppToken(c echo.Context, token string, username string) error {
+func (rs *RestService) authenticateAppToken(c *echo.Context, token string, username string) error {
 	user, t, err := rs.authenticator.AuthenticateAppToken(token)
 	if err != nil || (username != "" && !strings.EqualFold(username, user.Username)) {
 		if err := rs.limitIP(c); err != nil {
@@ -113,7 +114,7 @@ func (rs *RestService) authenticateAppToken(c echo.Context, token string, userna
 	return nil
 }
 
-func authMethodFromContext(c echo.Context) string {
+func authMethodFromContext(c *echo.Context) string {
 	m, _ := c.Get(contextKeyAuthMethod).(string)
 	return m
 }
@@ -169,7 +170,7 @@ func stop(err error) error {
 }
 
 // apiError writes an error response with a machine-readable code
-func apiError(c echo.Context, status int, code string, message string, details map[string]any) error {
+func apiError(c *echo.Context, status int, code string, message string, details map[string]any) error {
 	return c.JSONPretty(status, &ErrorResult{Name: http.StatusText(status), Code: code, Message: message, Details: details}, jsonIndent)
 }
 
@@ -177,7 +178,7 @@ func apiError(c echo.Context, status int, code string, message string, details m
 // applies the CSRF checks and enforces the role of the user. See docs/auth.md
 // sections 4 and 5.
 func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		req := c.Request()
 		path := req.URL.Path
 		if req.Method == http.MethodOptions || path == EndpointPathAlive {
@@ -237,7 +238,7 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 
 // authenticateHeader handles the Authorization header. An invalid header is a 401, the
 // cookie is not tried.
-func (rs *RestService) authenticateHeader(c echo.Context, authorization string) error {
+func (rs *RestService) authenticateHeader(c *echo.Context, authorization string) error {
 	scheme, value, _ := strings.Cut(authorization, " ")
 	value = strings.TrimSpace(value)
 	switch strings.ToLower(scheme) {
@@ -272,7 +273,7 @@ func (rs *RestService) authenticateHeader(c echo.Context, authorization string) 
 }
 
 // authorize applies the route group rules of docs/auth.md section 4
-func (rs *RestService) authorize(c echo.Context, user *auth.User) error {
+func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	req := c.Request()
 	path := req.URL.Path
 	method := authMethodFromContext(c)
@@ -302,7 +303,7 @@ func (rs *RestService) authorize(c echo.Context, user *auth.User) error {
 
 // checkCSRF requires X-Requested-With and an allowed Origin on state-changing requests that
 // are not authenticated by an Authorization header
-func (rs *RestService) checkCSRF(c echo.Context, hasAuthorization bool, hasCookie bool) error {
+func (rs *RestService) checkCSRF(c *echo.Context, hasAuthorization bool, hasCookie bool) error {
 	req := c.Request()
 	if isReadOnlyMethod(req.Method) || hasAuthorization {
 		return nil
@@ -325,7 +326,7 @@ func (rs *RestService) checkCSRF(c echo.Context, hasAuthorization bool, hasCooki
 
 // originAllowed reports whether an Origin is the backend's own origin or a configured one.
 // An empty origin (native clients) is allowed.
-func (rs *RestService) originAllowed(c echo.Context, origin string) bool {
+func (rs *RestService) originAllowed(c *echo.Context, origin string) bool {
 	if origin == "" {
 		return true
 	}
@@ -340,7 +341,7 @@ func (rs *RestService) originAllowed(c echo.Context, origin string) bool {
 	return false
 }
 
-func (rs *RestService) ownOrigin(c echo.Context) string {
+func (rs *RestService) ownOrigin(c *echo.Context) string {
 	scheme := "http"
 	if rs.isHTTPS(c) {
 		scheme = "https"
@@ -349,7 +350,7 @@ func (rs *RestService) ownOrigin(c echo.Context) string {
 }
 
 // isHTTPS reports whether the client uses HTTPS: directly, or through a trusted proxy
-func (rs *RestService) isHTTPS(c echo.Context) bool {
+func (rs *RestService) isHTTPS(c *echo.Context) bool {
 	req := c.Request()
 	if req.TLS != nil {
 		return true
@@ -375,7 +376,7 @@ func (rs *RestService) fromTrustedProxy(req *http.Request) bool {
 }
 
 // cookieSecure decides the Secure flag (and the cookie name) of the session cookie
-func (rs *RestService) cookieSecure(c echo.Context) bool {
+func (rs *RestService) cookieSecure(c *echo.Context) bool {
 	switch rs.authenticator.CookieSecure() {
 	case auth.CookieSecureAlways:
 		return true
@@ -386,7 +387,7 @@ func (rs *RestService) cookieSecure(c echo.Context) bool {
 }
 
 // sessionCookie returns the session token of the request cookie, or ""
-func (rs *RestService) sessionCookie(c echo.Context) string {
+func (rs *RestService) sessionCookie(c *echo.Context) string {
 	for _, name := range []string{cookieNameSecure, cookieNameInsecure} {
 		if ck, err := c.Cookie(name); err == nil && ck.Value != "" {
 			return ck.Value
@@ -395,7 +396,7 @@ func (rs *RestService) sessionCookie(c echo.Context) string {
 	return ""
 }
 
-func (rs *RestService) setSessionCookie(c echo.Context, token string, expires time.Time) {
+func (rs *RestService) setSessionCookie(c *echo.Context, token string, expires time.Time) {
 	secure := rs.cookieSecure(c)
 	name := cookieNameInsecure
 	if secure {
@@ -409,7 +410,7 @@ func (rs *RestService) setSessionCookie(c echo.Context, token string, expires ti
 	})
 }
 
-func (rs *RestService) clearSessionCookie(c echo.Context) {
+func (rs *RestService) clearSessionCookie(c *echo.Context) {
 	for _, name := range []string{cookieNameSecure, cookieNameInsecure} {
 		if _, err := c.Cookie(name); err == nil {
 			c.SetCookie(&http.Cookie{ //nolint:gosec // clears a cookie
@@ -421,17 +422,17 @@ func (rs *RestService) clearSessionCookie(c echo.Context) {
 }
 
 // unauthorized writes a 401 response
-func (rs *RestService) unauthorized(c echo.Context) error {
+func (rs *RestService) unauthorized(c *echo.Context) error {
 	return apiError(c, http.StatusUnauthorized, CodeUnauthenticated, "missing or invalid credentials", nil)
 }
 
 // requestInfo describes the client for audit events and rate limits
-func requestInfo(c echo.Context) auth.RequestInfo {
+func requestInfo(c *echo.Context) auth.RequestInfo {
 	return auth.RequestInfo{IP: c.RealIP(), UserAgent: c.Request().UserAgent()}
 }
 
 // limitIP applies the per-IP rate limit of the login endpoints
-func (rs *RestService) limitIP(c echo.Context) error {
+func (rs *RestService) limitIP(c *echo.Context) error {
 	if err := rs.authenticator.AllowIP(c.RealIP()); err != nil {
 		return responded(rs.authError(c, err))
 	}
@@ -477,7 +478,7 @@ var authErrorResponses = []struct {
 }
 
 // authError maps errors of the auth package to responses
-func (rs *RestService) authError(c echo.Context, err error) error {
+func (rs *RestService) authError(c *echo.Context, err error) error {
 	var rl *auth.RateLimitError
 	var weak *auth.WeakPasswordError
 	var second *auth.SecondFactorError
@@ -503,12 +504,12 @@ func (rs *RestService) authError(c echo.Context, err error) error {
 			return apiError(c, r.status, r.code, err.Error(), nil)
 		}
 	}
-	c.Logger().Errorf("auth: %v", err)
+	log.Printf("auth: %v", err)
 	return apiError(c, http.StatusInternalServerError, CodeInternal, "internal error", nil)
 }
 
 // sessionIDFromContext returns the id of the session that authenticated a request, or ""
-func sessionIDFromContext(c echo.Context) string {
+func sessionIDFromContext(c *echo.Context) string {
 	if sess := SessionFromContext(c); sess != nil {
 		return sess.ID
 	}

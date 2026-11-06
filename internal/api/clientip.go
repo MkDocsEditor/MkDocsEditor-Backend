@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // ParseTrustedProxies parses server.trustedProxies (CIDRs or single addresses)
@@ -49,7 +49,7 @@ func (rs *RestService) ipExtractor() echo.IPExtractor {
 
 // securityHeaders adds the headers of docs/auth.md section 11 that middleware.Secure does not set
 func (rs *RestService) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		h := c.Response().Header()
 		h.Set("Cross-Origin-Resource-Policy", "same-site")
 		if rs.isHTTPS(c) {

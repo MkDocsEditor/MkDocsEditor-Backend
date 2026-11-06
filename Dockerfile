@@ -28,8 +28,8 @@ RUN go build \
     github.com/go-webauthn/webauthn/webauthn \
     github.com/google/uuid \
     github.com/gorilla/websocket \
-    github.com/labstack/echo/v4 \
-    github.com/labstack/echo/v4/middleware \
+    github.com/labstack/echo/v5 \
+    github.com/labstack/echo/v5/middleware \
     github.com/prometheus/client_golang/prometheus \
     github.com/prometheus/client_golang/prometheus/collectors \
     github.com/prometheus/client_golang/prometheus/promauto \

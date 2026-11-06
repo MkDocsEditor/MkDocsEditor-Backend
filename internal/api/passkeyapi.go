@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of the passkey endpoints, see docs/auth.md section 8
@@ -50,7 +50,7 @@ type (
 	}
 )
 
-func (rs *RestService) writeCeremony(c echo.Context, id string, options any, err error) error {
+func (rs *RestService) writeCeremony(c *echo.Context, id string, options any, err error) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
@@ -58,7 +58,7 @@ func (rs *RestService) writeCeremony(c echo.Context, id string, options any, err
 	return c.JSONPretty(http.StatusOK, &CeremonyResponse{CeremonyID: id, PublicKey: options}, jsonIndent)
 }
 
-func requireCredential(c echo.Context, id string, credential json.RawMessage) error {
+func requireCredential(c *echo.Context, id string, credential json.RawMessage) error {
 	if id == "" || len(credential) == 0 || string(credential) == "null" {
 		return responded(apiError(c, http.StatusBadRequest, CodeBadRequest, "ceremonyId and credential are required", nil))
 	}
@@ -66,7 +66,7 @@ func requireCredential(c echo.Context, id string, credential json.RawMessage) er
 }
 
 // POST /auth/passkey/login/begin/
-func (rs *RestService) passkeyLoginBegin(c echo.Context) error {
+func (rs *RestService) passkeyLoginBegin(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (rs *RestService) passkeyLoginBegin(c echo.Context) error {
 }
 
 // POST /auth/passkey/login/finish/
-func (rs *RestService) passkeyLoginFinish(c echo.Context) error {
+func (rs *RestService) passkeyLoginFinish(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (rs *RestService) passkeyLoginFinish(c echo.Context) error {
 }
 
 // POST /auth/link/passkey/begin/
-func (rs *RestService) linkPasskeyBegin(c echo.Context) error {
+func (rs *RestService) linkPasskeyBegin(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (rs *RestService) linkPasskeyBegin(c echo.Context) error {
 }
 
 // POST /auth/link/passkey/finish/
-func (rs *RestService) linkPasskeyFinish(c echo.Context) error {
+func (rs *RestService) linkPasskeyFinish(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -130,13 +130,13 @@ func (rs *RestService) linkPasskeyFinish(c echo.Context) error {
 }
 
 // POST /auth/reauth/passkey/begin/
-func (rs *RestService) reauthPasskeyBegin(c echo.Context) error {
+func (rs *RestService) reauthPasskeyBegin(c *echo.Context) error {
 	id, options, err := rs.authenticator.BeginReauthPasskey(UserFromContext(c), SessionFromContext(c))
 	return rs.writeCeremony(c, id, options, err)
 }
 
 // POST /auth/reauth/passkey/finish/
-func (rs *RestService) reauthPasskeyFinish(c echo.Context) error {
+func (rs *RestService) reauthPasskeyFinish(c *echo.Context) error {
 	var r PasskeyFinishRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -152,7 +152,7 @@ func (rs *RestService) reauthPasskeyFinish(c echo.Context) error {
 }
 
 // GET /account/passkeys/
-func (rs *RestService) listPasskeys(c echo.Context) error {
+func (rs *RestService) listPasskeys(c *echo.Context) error {
 	passkeys, err := rs.authenticator.Passkeys(UserFromContext(c).ID)
 	if err != nil {
 		return rs.authError(c, err)
@@ -161,7 +161,7 @@ func (rs *RestService) listPasskeys(c echo.Context) error {
 }
 
 // POST /account/passkeys/begin/
-func (rs *RestService) addPasskeyBegin(c echo.Context) error {
+func (rs *RestService) addPasskeyBegin(c *echo.Context) error {
 	// a new session may add a passkey without step-up (passkey right after sign-in)
 	if !rs.authenticator.RecentlyCreated(SessionFromContext(c)) {
 		if err := rs.requireReauth(c); err != nil {
@@ -173,7 +173,7 @@ func (rs *RestService) addPasskeyBegin(c echo.Context) error {
 }
 
 // POST /account/passkeys/finish/
-func (rs *RestService) addPasskeyFinish(c echo.Context) error {
+func (rs *RestService) addPasskeyFinish(c *echo.Context) error {
 	var r PasskeyFinishRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -189,7 +189,7 @@ func (rs *RestService) addPasskeyFinish(c echo.Context) error {
 }
 
 // PATCH /account/passkeys/{id}/
-func (rs *RestService) renamePasskey(c echo.Context) error {
+func (rs *RestService) renamePasskey(c *echo.Context) error {
 	var r PasskeyRenameRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -202,7 +202,7 @@ func (rs *RestService) renamePasskey(c echo.Context) error {
 }
 
 // DELETE /account/passkeys/{id}/
-func (rs *RestService) deletePasskey(c echo.Context) error {
+func (rs *RestService) deletePasskey(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -213,7 +213,7 @@ func (rs *RestService) deletePasskey(c echo.Context) error {
 }
 
 // GET /.well-known/assetlinks.json
-func (rs *RestService) assetLinks(c echo.Context) error {
+func (rs *RestService) assetLinks(c *echo.Context) error {
 	data := rs.authenticator.AssetLinks()
 	if data == nil {
 		return apiError(c, http.StatusNotFound, CodeNotFound, "not found", nil)
