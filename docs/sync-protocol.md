@@ -73,6 +73,17 @@ username, a bcrypt password hash, an optional display name and email, and a role
 The server assigns every user a stable colour (derived from the username, overridable in
 the configuration). Clients use it for cursors, selections and authorship.
 
+Accounts can have a profile picture. Everywhere the protocol has `color` for an account, it
+also has `avatar`: the version of the picture, or `null` without one (also for `:disk` and
+`:server`). Clients load it from `GET /avatars/{accountId}/{avatar}/`, see
+[auth.md](auth.md#avatars). Servers with avatars list `avatars` in `features` of
+`GET /server-info/`.
+
+**Profile changes.** When an account changes its display name, colour or avatar, the server
+sends, in every open document, an `actor` message for each actor of the account and a
+`presence` of each connection of the account (to the other connections), and a new `online`
+list on the events websocket. Clients replace what they show for that account.
+
 Future work: per-document or per-section permissions like CodiMD (owner, "editable by
 signed-in users", "locked", "private"). The role check is one function in the backend,
 so permissions can be added there without changing the protocol.
@@ -118,7 +129,7 @@ connection joins (its actor) and when a new actor id appears in a document (a ne
 actor, or a `:disk` change). Entry:
 
 ```json
-{ "actorId": "5f3c…", "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa", "username": "markus", "displayName": "Markus", "color": "#e8590c" }
+{ "actorId": "5f3c…", "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa", "username": "markus", "displayName": "Markus", "color": "#e8590c", "avatar": "3f9a1c0b7d2e4a68" }
 ```
 
 `accountId` is the stable id of the account (empty for `:disk` and `:server`).
@@ -238,8 +249,8 @@ left out. `client` is free text for logs.
   "documentState": "<base64 of Automerge save()>",
   "content": "# Plain text of the document\n",
   "readOnly": false,
-  "you": { "clientId": "c-17", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c" },
-  "actors": [ { "actorId": "…", "username": "…", "displayName": "…", "color": "…" } ]
+  "you": { "clientId": "c-17", "accountId": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "avatar": null },
+  "actors": [ { "actorId": "…", "username": "…", "displayName": "…", "color": "…", "avatar": null } ]
 }
 ```
 
@@ -266,6 +277,7 @@ left out. `client` is free text for logs.
   "username": "anna",
   "displayName": "Anna",
   "color": "#1971c2",
+  "avatar": "3f9a1c0b7d2e4a68",
   "actorId": "…",
   "instanceId": "0f8a…",
   "deviceName": "Pixel",
@@ -285,10 +297,11 @@ instances that left recently, see [Ghosts](#ghosts).
 **`presence-leave`**: `{"type":"presence-leave","documentId":"…","clientId":"c-18","instanceId":"…"}`.
 Sent when a connection closes or times out. If this was the last connection of its client
 instance, it can also have `accountId`, `selections`, `viewport`, `deviceName`,
-`instanceColor` and `ghostMs`, see [Ghosts](#ghosts).
+`instanceColor`, `avatar` and `ghostMs`, see [Ghosts](#ghosts).
 
 **`actor`**: a new actor binding (the same fields as the entries in `actors`). It is
-broadcast to all connections of the document when a new actor id is bound.
+broadcast to all connections of the document when a new actor id is bound, and again when
+the profile of its account changes.
 
 **`heartbeat`**: `{"type":"heartbeat"}`.
 
@@ -405,7 +418,7 @@ Presence is ephemeral. The server relays it and never stores it.
   cursor lookup: `"start"` resolves to 0, `"end"` to the current text length. A client
   may send them in other cases too (for example `"start"` for index 0 of a non-empty
   text), so receivers always handle both.
-- The server overwrites `clientId`, `instanceId`, `deviceName`, `accountId`, `username`, `displayName`, `color` and `actorId`
+- The server overwrites `clientId`, `instanceId`, `deviceName`, `accountId`, `username`, `displayName`, `color`, `avatar` and `actorId`
   with the values of the authenticated connection, so presence cannot be forged.
 - `lastActiveAt` (RFC 3339, in presence and in the peers of `presence-snapshot`) is stamped
   by the server: the time of the last presence message of this connection, also one that only
@@ -414,7 +427,7 @@ Presence is ephemeral. The server relays it and never stores it.
   see [auth.md](auth.md#access-request-and-join-link).
 - `lastPositions` in `presence-snapshot` holds, per account, the last non-empty selections
   and the last viewport in this document, newest first, also for accounts that are offline or
-  online without a cursor: `{"accountId", "username", "displayName", "color", "selections",
+  online without a cursor: `{"accountId", "username", "displayName", "color", "avatar", "selections",
   "viewport"?, "lastActiveAt"}`. `selections` is empty if the account only sent
   a viewport. `lastActiveAt` is the time of the newest selections or viewport in this entry.
   Entries are kept for 30 days, survive restarts and moves, and end with the epoch, because
@@ -475,18 +488,18 @@ a network problem or a quick switch to another app. This also holds for other in
 same account and the same login session.
 
 ```json
-{ "type": "presence-leave", "documentId": "…", "clientId": "c-18", "instanceId": "…", "accountId": "…", "selections": [ … ], "viewport": { … }, "deviceName": "Pixel", "instanceColor": "#2b8a3e", "ghostMs": 60000 }
+{ "type": "presence-leave", "documentId": "…", "clientId": "c-18", "instanceId": "…", "accountId": "…", "selections": [ … ], "viewport": { … }, "deviceName": "Pixel", "instanceColor": "#2b8a3e", "avatar": "3f9a1c0b7d2e4a68", "ghostMs": 60000 }
 ```
 
 - `accountId`, `selections` and `ghostMs` are only present when the last connection of the
   instance left, and that connection sent a cursor or a viewport. Otherwise there is no ghost,
   for example if another connection of the instance is still there because of a half-open socket.
-  `viewport`, `deviceName` and `instanceColor` are present if there are any.
+  `viewport`, `deviceName`, `instanceColor` and `avatar` are present if there are any.
 - The position is the last non-empty cursor and viewport of that connection. A client that clears
   its position when it goes to the background keeps its ghost where it was.
 - `ghostMs` is a duration and counts from receipt, so differing clocks do not matter. A
   client that joins during that time finds the ghost in `ghosts` of `presence-snapshot`:
-  `{"instanceId", "accountId", "username", "displayName", "color", "instanceColor"?,
+  `{"instanceId", "accountId", "username", "displayName", "color", "avatar", "instanceColor"?,
   "deviceName"?, "selections", "viewport"?, "ghostMs"}`, the most recent first. `ghostMs` is the
   remaining time. The list can be empty, ghosts survive unloading the document, and
   deleted accounts are left out. The ghost of the joining instance is not in it.
@@ -509,11 +522,11 @@ first message. The first message is always `hello`:
 
 Every role may connect. The server then sends:
 
-- `{"type": "online", "documents": [{"documentId": "…", "users": [{"username", "displayName", "color"}]}]}`:
+- `{"type": "online", "documents": [{"documentId": "…", "users": [{"accountId", "username", "displayName", "color", "avatar"}]}]}`:
   the users connected to each document. Each user is listed once per document, even
   with several connections, and documents without users are left out. The server
   sends this list right after `hello` and again whenever someone opens or leaves a
-  document (collected for 100 ms). Each message is the complete list, so the client
+  document or changes their profile (collected for 100 ms). Each message is the complete list, so the client
   replaces its copy.
 - `{"type": "tree-changed"}`: the tree changed (create, rename, delete, upload, or a
   change on disk). The client fetches the tree (`GET /section/`) again. Events can be lost

@@ -43,7 +43,7 @@ func (u AdminUser) MarshalJSON() ([]byte, error) {
 	}{plain(u), last})
 }
 
-const adminUserQuery = `SELECT a.id, a.username, a.display_name, a.email, a.color, a.role, a.status, a.created_at, a.last_login_at, a.password_hash != '',
+const adminUserQuery = `SELECT a.id, a.username, a.display_name, a.email, a.color, a.avatar, a.role, a.status, a.created_at, a.last_login_at, a.password_hash != '',
 	COALESCE((SELECT enabled FROM totp WHERE account_id = a.id), 0),
 	(SELECT COUNT(*) FROM passkeys WHERE account_id = a.id),
 	(SELECT COUNT(*) FROM sessions WHERE account_id = a.id AND expires_at > ? AND last_used_at > ?)
@@ -53,10 +53,12 @@ func (s *Service) scanAdminUser(row interface{ Scan(...any) error }) (*AdminUser
 	var u AdminUser
 	var created, last int64
 	var totp int
-	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Color, &u.Role, &u.Status, &created, &last, &u.HasPassword,
+	var avatar string
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Color, &avatar, &u.Role, &u.Status, &created, &last, &u.HasPassword,
 		&totp, &u.PasskeyCount, &u.SessionCount); err != nil {
 		return nil, err
 	}
+	u.Avatar = avatarOrNil(avatar)
 	u.User.Email, u.User.Status = u.Email, u.Status
 	u.CreatedAt, u.LastLoginAt, u.TOTPEnabled = fromMillis(created), fromMillis(last), totp == 1
 	return &u, nil
@@ -228,7 +230,7 @@ func revokeAccess(tx *sql.Tx, accountID string, now time.Time) error {
 }
 
 // DeleteUser turns an account into a tombstone: id, username, display name and colour stay
-// for authorship and history, all credentials go
+// for authorship and history, all credentials and the profile picture go
 func (s *Service) DeleteUser(by *User, id string, ri RequestInfo) error {
 	target, err := s.AdminUser(id)
 	if err != nil {
@@ -261,12 +263,13 @@ func (s *Service) DeleteUser(by *User, id string, ri RequestInfo) error {
 	if err = deleteTOTP(tx, id); err != nil {
 		return err
 	}
-	for _, q := range []string{"DELETE FROM passkeys WHERE account_id = ?", "DELETE FROM webauthn_handles WHERE account_id = ?"} {
+	for _, q := range []string{"DELETE FROM passkeys WHERE account_id = ?", "DELETE FROM webauthn_handles WHERE account_id = ?",
+		"DELETE FROM avatars WHERE account_id = ?"} {
 		if _, err = tx.Exec(q, id); err != nil {
 			return err
 		}
 	}
-	if _, err = tx.Exec("UPDATE accounts SET status = 'deleted', password_hash = '', email = '', deleted_at = ?, updated_at = ? WHERE id = ?",
+	if _, err = tx.Exec("UPDATE accounts SET status = 'deleted', password_hash = '', email = '', avatar = '', deleted_at = ?, updated_at = ? WHERE id = ?",
 		toMillis(now), toMillis(now), id); err != nil {
 		return err
 	}

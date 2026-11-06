@@ -75,6 +75,8 @@ type (
 		DisplayName string `json:"displayName"`
 		Role        string `json:"role,omitempty"`
 		Color       string `json:"color"`
+		// Avatar is the version of the profile picture, null without one
+		Avatar *string `json:"avatar"`
 	}
 
 	// ActorInfo maps an actor id to its user
@@ -86,6 +88,8 @@ type (
 		Username    string `json:"username"`
 		DisplayName string `json:"displayName"`
 		Color       string `json:"color"`
+		// Avatar is null for pseudo users and accounts without a profile picture
+		Avatar *string `json:"avatar"`
 	}
 
 	InitialContentMessage struct {
@@ -113,7 +117,9 @@ type (
 		Username    string `json:"username,omitempty"`
 		DisplayName string `json:"displayName,omitempty"`
 		Color       string `json:"color,omitempty"`
-		ActorID     string `json:"actorId,omitempty"`
+		// Avatar is stamped by the server like Color
+		Avatar  *string `json:"avatar"`
+		ActorID string  `json:"actorId,omitempty"`
 		// InstanceID and DeviceName are stamped by the server, see docs/sync-protocol.md section 6
 		InstanceID string `json:"instanceId,omitempty"`
 		DeviceName string `json:"deviceName,omitempty"`
@@ -144,6 +150,7 @@ type (
 		Username      string          `json:"username"`
 		DisplayName   string          `json:"displayName"`
 		Color         string          `json:"color"`
+		Avatar        *string         `json:"avatar"`
 		InstanceColor string          `json:"instanceColor,omitempty"`
 		DeviceName    string          `json:"deviceName,omitempty"`
 		Selections    json.RawMessage `json:"selections"`
@@ -157,6 +164,7 @@ type (
 		Username     string          `json:"username"`
 		DisplayName  string          `json:"displayName"`
 		Color        string          `json:"color"`
+		Avatar       *string         `json:"avatar"`
 		Selections   json.RawMessage `json:"selections"`
 		Viewport     json.RawMessage `json:"viewport,omitempty"`
 		LastActiveAt string          `json:"lastActiveAt"`
@@ -173,6 +181,7 @@ type (
 		Viewport      json.RawMessage `json:"viewport,omitempty"`
 		DeviceName    string          `json:"deviceName,omitempty"`
 		InstanceColor string          `json:"instanceColor,omitempty"`
+		Avatar        *string         `json:"avatar,omitempty"`
 		GhostMs       int64           `json:"ghostMs,omitempty"`
 	}
 

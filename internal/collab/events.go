@@ -177,7 +177,8 @@ func (s *SyncServer) onlineSnapshot() *OnlineMessage {
 				continue
 			}
 			seen[c.user.ID] = true
-			users = append(users, UserInfo{AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Color: c.user.Color})
+			u := s.currentUser(c.user)
+			users = append(users, UserInfo{AccountID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color, Avatar: u.Avatar})
 		}
 		docID := session.docID
 		session.mu.Unlock()

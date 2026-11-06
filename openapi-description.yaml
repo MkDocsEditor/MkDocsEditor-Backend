@@ -620,6 +620,74 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /account/avatar/:
+    put:
+      summary: "Set the profile picture"
+      description: "Clients find the new version in `avatar` and load it from `/avatars/{accountId}/{avatar}/`. Connected clients get the new avatar in presence, actors and the online list."
+      operationId: putAccountAvatar
+      tags: [ Account ]
+      requestBody:
+        required: true
+        description: "The image, at most 5 MB, any size and aspect ratio. The server applies the EXIF orientation, cuts out the center square, scales it to 256x256 and stores it as JPEG without metadata."
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/webp:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: "The changed account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          description: "`invalid-image`: not a readable JPEG, PNG or WebP, or over 50 megapixels"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: "`payload-too-large`: the image has more than 5 MB"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: "`unsupported-media-type`: the content type is not image/jpeg, image/png or image/webp"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: "Remove the profile picture"
+      description: "An account without one is no error."
+      operationId: deleteAccountAvatar
+      tags: [ Account ]
+      responses:
+        "200":
+          description: "The changed account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /account/password/:
     put:
       summary: "Change the password"
@@ -1183,6 +1251,79 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /admin/users/{userId}/avatar/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+    put:
+      summary: "Set the profile picture of an account"
+      operationId: adminPutAvatar
+      tags: [ Admin ]
+      requestBody:
+        required: true
+        description: "The image, at most 5 MB, any size and aspect ratio. The server applies the EXIF orientation, cuts out the center square, scales it to 256x256 and stores it as JPEG without metadata."
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/webp:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: "The account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          description: "`invalid-image`: not a readable JPEG, PNG or WebP, or over 50 megapixels"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          description: "`payload-too-large`: the image has more than 5 MB"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: "`unsupported-media-type`: the content type is not image/jpeg, image/png or image/webp"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: "Remove the profile picture of an account"
+      description: "An account without one is no error."
+      operationId: adminDeleteAvatar
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "The account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/users/{userId}/sessions/:
     parameters:
       - $ref: "#/components/parameters/userId"
@@ -1514,6 +1655,46 @@ paths:
                   $ref: "#/components/schemas/Actor"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /avatars/{userId}/{avatar}/:
+    parameters:
+      - $ref: "#/components/parameters/userId"
+      - name: avatar
+        in: path
+        required: true
+        description: "The `avatar` of the account"
+        schema:
+          type: string
+    get:
+      summary: "A profile picture"
+      description: |
+        The URL changes with every new picture, so the response may be cached forever. A
+        version that is no longer the current one gives 404. Web clients load it with
+        `<img crossorigin="use-credentials">`.
+      operationId: getAvatar
+      tags: [ Auth ]
+      responses:
+        "200":
+          description: "256x256 JPEG"
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "private, max-age=31536000, immutable"
+            ETag:
+              schema:
+                type: string
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: "Not modified (If-None-Match)"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /events/ws/:
     get:
@@ -2960,7 +3141,7 @@ components:
 
     User:
       type: object
-      required: [ id, username, displayName, role, color ]
+      required: [ id, username, displayName, role, color, avatar ]
       properties:
         id:
           type: string
@@ -2976,6 +3157,11 @@ components:
         color:
           type: string
           example: "#1971c2"
+        avatar:
+          type: string
+          nullable: true
+          description: "Version of the profile picture, at `/avatars/{id}/{avatar}/`; null without one"
+          example: "3f9a1c0b7d2e4a68"
 
     WhoAmI:
       allOf:
@@ -3908,7 +4094,7 @@ components:
 
     Actor:
       type: object
-      required: [ actorId, username, displayName, color ]
+      required: [ actorId, username, displayName, color, avatar ]
       properties:
         actorId:
           type: string
@@ -3923,6 +4109,10 @@ components:
           type: string
         color:
           type: string
+        avatar:
+          type: string
+          nullable: true
+          description: "Version of the profile picture of the account, null for pseudo users and without one"
 
     Authorship:
       type: object

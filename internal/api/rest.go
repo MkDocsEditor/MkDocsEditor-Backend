@@ -235,6 +235,8 @@ func (rs *RestService) registerAuthRoutes(echoRest *echo.Echo) {
 func (rs *RestService) registerAccountRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/account/", rs.getAccount)
 	echoRest.PATCH("/account/", rs.updateAccount)
+	echoRest.PUT("/account/avatar/", rs.putAccountAvatar)
+	echoRest.DELETE("/account/avatar/", rs.deleteAccountAvatar)
 	echoRest.PUT("/account/password/", rs.changePassword)
 	echoRest.DELETE("/account/password/", rs.removePassword)
 	echoRest.POST("/account/totp/", rs.beginTOTP)
@@ -266,6 +268,8 @@ func (rs *RestService) registerAdminRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/admin/users/", rs.adminListUsers)
 	echoRest.PATCH("/admin/users/:"+urlParamID+"/", rs.adminUpdateUser)
 	echoRest.DELETE("/admin/users/:"+urlParamID+"/", rs.adminDeleteUser)
+	echoRest.PUT("/admin/users/:"+urlParamID+"/avatar/", rs.adminPutAvatar)
+	echoRest.DELETE("/admin/users/:"+urlParamID+"/avatar/", rs.adminDeleteAvatar)
 	echoRest.GET("/admin/users/:"+urlParamID+"/sessions/", rs.adminUserSessions)
 	echoRest.POST("/admin/users/:"+urlParamID+"/sessions/revoke/", rs.adminRevokeUserSessions)
 	echoRest.POST("/admin/users/:"+urlParamID+"/reset-link/", rs.adminCreateResetLink)
@@ -285,6 +289,7 @@ func (rs *RestService) registerAdminRoutes(echoRest *echo.Echo) {
 // registerContentRoutes adds the endpoints of the wiki content
 func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/actors/", rs.getActors)
+	echoRest.GET("/avatars/:"+urlParamID+"/:"+urlParamAvatar+"/", rs.getAvatar)
 	echoRest.GET("/events/ws/", rs.handleEventsWebsocket)
 	echoRest.GET(EndpointPathAlive, rs.isAlive)
 	echoRest.GET("/references/broken/", rs.getBrokenReferences)

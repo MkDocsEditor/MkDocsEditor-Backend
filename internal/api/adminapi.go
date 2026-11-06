@@ -85,6 +85,7 @@ func (rs *RestService) adminUpdateUser(c *echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
+	rs.sync.AccountChanged(u.ID)
 	return c.JSONPretty(http.StatusOK, u, jsonIndent)
 }
 

@@ -139,6 +139,7 @@ func (rs *RestService) updateAccount(c *echo.Context) error {
 	if err != nil {
 		return rs.authError(c, err)
 	}
+	rs.sync.AccountChanged(u.ID)
 	return rs.writeAccount(c, u)
 }
 
