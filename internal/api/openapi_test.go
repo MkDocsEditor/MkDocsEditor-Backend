@@ -44,7 +44,7 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 
 	echoParam := regexp.MustCompile(`:[A-Za-z]+`)
 	implemented := map[string]bool{}
-	for _, r := range e.rs.echoRest.Routes() {
+	for _, r := range e.rs.echoRest.Router().Routes() {
 		if r.Method == "echo_route_not_found" || r.Method == http.MethodOptions {
 			continue
 		}

@@ -15,7 +15,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type (
@@ -38,7 +38,7 @@ type (
 const maxMovedLookupIDs = 200
 
 // POST /move/
-func (rs *RestService) postMove(c echo.Context) error {
+func (rs *RestService) postMove(c *echo.Context) error {
 	req := new(collab.MoveRequest)
 	if err := c.Bind(req); err != nil {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "invalid JSON", nil)
@@ -51,7 +51,7 @@ func (rs *RestService) postMove(c echo.Context) error {
 }
 
 // moveFailed answers a failed move
-func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
+func (rs *RestService) moveFailed(c *echo.Context, id string, err error) error {
 	var me *collab.MoveError
 	switch {
 	case errors.As(err, &me):
@@ -71,7 +71,7 @@ func (rs *RestService) moveFailed(c echo.Context, id string, err error) error {
 
 // renameViaMove renames an item in place with reference rewriting and answers the renamed
 // item, like the rename endpoints always did
-func (rs *RestService) renameViaMove(c echo.Context, itemType string, name string) error {
+func (rs *RestService) renameViaMove(c *echo.Context, itemType string, name string) error {
 	id := c.Param(urlParamID)
 	lookup := references.NewTreeLookup(rs.treeManager.Root())
 	item := lookup.Item(id)
@@ -93,7 +93,7 @@ func (rs *RestService) renameViaMove(c echo.Context, itemType string, name strin
 }
 
 // performMove runs a move and, unless it is a dry run, commits and audits it
-func (rs *RestService) performMove(c echo.Context, req *collab.MoveRequest) (*collab.MoveResult, error) {
+func (rs *RestService) performMove(c *echo.Context, req *collab.MoveRequest) (*collab.MoveResult, error) {
 	result, completed, err := rs.sync.Move(req, UserFromContext(c))
 	if err != nil || completed == nil {
 		return result, err
@@ -137,7 +137,7 @@ func (rs *RestService) commitMove(m *collab.CompletedMove, configChanged bool) s
 }
 
 // auditMove writes the audit log entry of a move
-func (rs *RestService) auditMove(c echo.Context, m *collab.CompletedMove, result *collab.MoveResult) {
+func (rs *RestService) auditMove(c *echo.Context, m *collab.CompletedMove, result *collab.MoveResult) {
 	eventType := auth.AuditItemMoved
 	if m.Rename {
 		eventType = auth.AuditItemRenamed

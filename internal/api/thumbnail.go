@@ -22,7 +22,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/OneOfOne/xxhash"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/webp"
 )
@@ -59,7 +59,7 @@ func thumbnailSize(param string) (int, error) {
 }
 
 // GET /resource/:id/thumbnail/?size=
-func (rs *RestService) getResourceThumbnail(c echo.Context) error {
+func (rs *RestService) getResourceThumbnail(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	r := rs.treeManager.GetResource(id)
 	if r == nil {
@@ -102,7 +102,7 @@ func (rs *RestService) getResourceThumbnail(c echo.Context) error {
 	}
 	if err != nil {
 		// serving it matters more than caching it
-		c.Logger().Warnf("Unable to cache the thumbnail of %s: %v", r.RelPath, err)
+		log.Printf("Unable to cache the thumbnail of %s: %v", r.RelPath, err)
 	}
 	return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
 }

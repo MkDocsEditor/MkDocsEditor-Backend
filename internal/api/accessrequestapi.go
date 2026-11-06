@@ -7,7 +7,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of access requests, see docs/auth.md section 8
@@ -71,12 +71,12 @@ const (
 	FeatureInstancePresence = "instance-presence"
 )
 
-func (rs *RestService) accessRequestsDisabled(c echo.Context) error {
+func (rs *RestService) accessRequestsDisabled(c *echo.Context) error {
 	return apiError(c, http.StatusForbidden, CodeAccessRequestsDisabled, "access requests are not accepted", nil)
 }
 
 // POST /auth/access-requests/
-func (rs *RestService) createAccessRequest(c echo.Context) error {
+func (rs *RestService) createAccessRequest(c *echo.Context) error {
 	if !rs.authenticator.AccessRequestsAvailable() {
 		return rs.accessRequestsDisabled(c)
 	}
@@ -95,7 +95,7 @@ func (rs *RestService) createAccessRequest(c echo.Context) error {
 }
 
 // POST /auth/access-requests/status/
-func (rs *RestService) accessRequestStatus(c echo.Context) error {
+func (rs *RestService) accessRequestStatus(c *echo.Context) error {
 	if !rs.authenticator.AccessRequestsAvailable() {
 		return rs.accessRequestsDisabled(c)
 	}
@@ -141,7 +141,7 @@ func (rs *RestService) accessRequestView(a *auth.AccessRequest) *AccessRequestVi
 }
 
 // GET /admin/access-requests/
-func (rs *RestService) adminAccessRequests(c echo.Context) error {
+func (rs *RestService) adminAccessRequests(c *echo.Context) error {
 	status := c.QueryParam("status")
 	switch status {
 	case "", auth.AccessRequestPending, auth.AccessRequestApproved, auth.AccessRequestRejected, auth.AccessRequestExpired:
@@ -160,7 +160,7 @@ func (rs *RestService) adminAccessRequests(c echo.Context) error {
 }
 
 // POST /admin/access-requests/{id}/approve/
-func (rs *RestService) adminApproveAccessRequest(c echo.Context) error {
+func (rs *RestService) adminApproveAccessRequest(c *echo.Context) error {
 	var r ApproveAccessRequestRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -179,7 +179,7 @@ func (rs *RestService) adminApproveAccessRequest(c echo.Context) error {
 }
 
 // POST /admin/access-requests/{id}/reject/
-func (rs *RestService) adminRejectAccessRequest(c echo.Context) error {
+func (rs *RestService) adminRejectAccessRequest(c *echo.Context) error {
 	if err := rs.authenticator.RejectAccessRequest(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}

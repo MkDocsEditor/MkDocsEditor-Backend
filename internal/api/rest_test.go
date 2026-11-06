@@ -18,7 +18,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -448,6 +448,10 @@ func TestRestMalformedBodyIsABadRequest(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), `"code": "`+CodeBadRequest+`"`) {
 			t.Errorf("POST %s: no error code: %s", path, rec.Body)
+		}
+		// the message says what is wrong with the body
+		if !strings.Contains(rec.Body.String(), `"message": "Bad Request: `) {
+			t.Errorf("POST %s: no detail in the message: %s", path, rec.Body)
 		}
 	}
 }

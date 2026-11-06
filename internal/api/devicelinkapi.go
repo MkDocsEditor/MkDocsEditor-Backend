@@ -11,7 +11,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/cmd/global"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of server info and device pairing, see docs/auth.md
@@ -80,7 +80,7 @@ func hostOf(rawURL string) string {
 }
 
 // backendURL is server.backendUrl, else the scheme and host of the request
-func (rs *RestService) backendURL(c echo.Context) string {
+func (rs *RestService) backendURL(c *echo.Context) string {
 	if u := strings.TrimRight(rs.server.BackendURL, "/"); u != "" {
 		return u
 	}
@@ -88,7 +88,7 @@ func (rs *RestService) backendURL(c echo.Context) string {
 }
 
 // GET /server-info/
-func (rs *RestService) serverInfo(c echo.Context) error {
+func (rs *RestService) serverInfo(c *echo.Context) error {
 	srv := rs.server
 	wikiURL := strings.TrimRight(srv.WikiURL, "/")
 	clientURL := rs.authenticator.ClientURL()
@@ -134,7 +134,7 @@ func (rs *RestService) serverInfo(c echo.Context) error {
 }
 
 // connectURL builds {clientUrl}/connect#<payload>, nil without clientUrl
-func (rs *RestService) connectURL(c echo.Context, u *auth.User, token string, expiresAt time.Time) *string {
+func (rs *RestService) connectURL(c *echo.Context, u *auth.User, token string, expiresAt time.Time) *string {
 	clientURL := rs.authenticator.ClientURL()
 	if clientURL == "" {
 		return nil
@@ -148,7 +148,7 @@ func (rs *RestService) connectURL(c echo.Context, u *auth.User, token string, ex
 }
 
 // GET /account/device-links/
-func (rs *RestService) listDeviceLinks(c echo.Context) error {
+func (rs *RestService) listDeviceLinks(c *echo.Context) error {
 	links, err := rs.authenticator.DeviceLinks(UserFromContext(c).ID)
 	if err != nil {
 		return rs.authError(c, err)
@@ -157,7 +157,7 @@ func (rs *RestService) listDeviceLinks(c echo.Context) error {
 }
 
 // POST /account/device-links/
-func (rs *RestService) createDeviceLink(c echo.Context) error {
+func (rs *RestService) createDeviceLink(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (rs *RestService) createDeviceLink(c echo.Context) error {
 }
 
 // GET /account/device-links/{id}/
-func (rs *RestService) getDeviceLink(c echo.Context) error {
+func (rs *RestService) getDeviceLink(c *echo.Context) error {
 	l, err := rs.authenticator.DeviceLink(UserFromContext(c).ID, c.Param(urlParamID))
 	if err != nil {
 		return rs.authError(c, err)
@@ -185,7 +185,7 @@ func (rs *RestService) getDeviceLink(c echo.Context) error {
 }
 
 // DELETE /account/device-links/{id}/
-func (rs *RestService) revokeDeviceLink(c echo.Context) error {
+func (rs *RestService) revokeDeviceLink(c *echo.Context) error {
 	if err := rs.authenticator.RevokeDeviceLink(UserFromContext(c), c.Param(urlParamID), requestInfo(c)); err != nil {
 		return rs.authError(c, err)
 	}
@@ -193,7 +193,7 @@ func (rs *RestService) revokeDeviceLink(c echo.Context) error {
 }
 
 // POST /auth/device-link/redeem/
-func (rs *RestService) redeemDeviceLink(c echo.Context) error {
+func (rs *RestService) redeemDeviceLink(c *echo.Context) error {
 	if !rs.authenticator.Enabled() {
 		return apiError(c, http.StatusForbidden, CodeForbidden, "authentication is disabled (server.auth.disabled), there are no accounts", nil)
 	}

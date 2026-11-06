@@ -7,7 +7,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // Statuses of references
@@ -103,7 +103,7 @@ func (rs *RestService) toReference(r references.ResolvedRef) *Reference {
 }
 
 // GET /document/:id/references/
-func (rs *RestService) getDocumentReferences(c echo.Context) error {
+func (rs *RestService) getDocumentReferences(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -118,7 +118,7 @@ func (rs *RestService) getDocumentReferences(c echo.Context) error {
 }
 
 // GET /document/:id/backlinks/
-func (rs *RestService) getDocumentBacklinks(c echo.Context) error {
+func (rs *RestService) getDocumentBacklinks(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -128,7 +128,7 @@ func (rs *RestService) getDocumentBacklinks(c echo.Context) error {
 }
 
 // GET /resource/:id/backlinks/
-func (rs *RestService) getResourceBacklinks(c echo.Context) error {
+func (rs *RestService) getResourceBacklinks(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	r := rs.treeManager.GetResource(id)
 	if r == nil {
@@ -138,7 +138,7 @@ func (rs *RestService) getResourceBacklinks(c echo.Context) error {
 }
 
 // GET /section/:id/backlinks/: references to the section and everything inside it
-func (rs *RestService) getSectionBacklinks(c echo.Context) error {
+func (rs *RestService) getSectionBacklinks(c *echo.Context) error {
 	id := c.Param(urlParamID)
 	s := rs.treeManager.GetSection(id)
 	if s == nil {
@@ -149,7 +149,7 @@ func (rs *RestService) getSectionBacklinks(c echo.Context) error {
 
 // backlinks answers the references whose target matches. Sources inside section (a path,
 // "" for none) are marked as internal.
-func (rs *RestService) backlinks(c echo.Context, item *references.ItemRef, section string, match func(*references.ItemRef) bool) error {
+func (rs *RestService) backlinks(c *echo.Context, item *references.ItemRef, section string, match func(*references.ItemRef) bool) error {
 	snap := rs.refs.Snapshot()
 	result := &Backlinks{Item: item, Backlinks: []*Backlink{}}
 	for _, r := range snap.Backlinks(match) {
@@ -168,7 +168,7 @@ func (rs *RestService) backlinks(c echo.Context, item *references.ItemRef, secti
 }
 
 // GET /references/broken/
-func (rs *RestService) getBrokenReferences(c echo.Context) error {
+func (rs *RestService) getBrokenReferences(c *echo.Context) error {
 	snap := rs.refs.Snapshot()
 	result := &BrokenReferences{Broken: []*BrokenReference{}}
 	for _, r := range snap.All() {
@@ -180,7 +180,7 @@ func (rs *RestService) getBrokenReferences(c echo.Context) error {
 }
 
 // GET /references/unused-resources/
-func (rs *RestService) getUnusedResources(c echo.Context) error {
+func (rs *RestService) getUnusedResources(c *echo.Context) error {
 	snap := rs.refs.Snapshot()
 	result := &UnusedResources{Resources: snap.UnusedResources()}
 	if result.Resources == nil {
@@ -190,7 +190,7 @@ func (rs *RestService) getUnusedResources(c echo.Context) error {
 }
 
 // GET /link/?from=&to=&anchor=
-func (rs *RestService) getLink(c echo.Context) error {
+func (rs *RestService) getLink(c *echo.Context) error {
 	fromID, toID := c.QueryParam("from"), c.QueryParam("to")
 	if fromID == "" || toID == "" {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "from and to are required", map[string]any{"field": "from"})

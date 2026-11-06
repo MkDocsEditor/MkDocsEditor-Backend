@@ -10,7 +10,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -21,14 +21,14 @@ const unmatchedRoute = "unmatched"
 // isAliveCheck reports whether the request is a check of GET /alive/, which a readiness probe
 // sends every few seconds. Logs and request metrics leave these out: they would drown the requests
 // of real clients.
-func isAliveCheck(c echo.Context) bool {
+func isAliveCheck(c *echo.Context) bool {
 	return c.Request().Method == http.MethodGet && c.Path() == EndpointPathAlive
 }
 
 // httpMetrics counts the requests by route pattern, except for checks of GET /alive/. It must run
 // outside the middleware that turns errors into responses, so it sees the final status.
 func (rs *RestService) httpMetrics(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
+	return func(c *echo.Context) error {
 		if isAliveCheck(c) {
 			return next(c)
 		}
@@ -40,7 +40,7 @@ func (rs *RestService) httpMetrics(next echo.HandlerFunc) echo.HandlerFunc {
 		if _, ok := rs.knownRoutes[route]; !ok {
 			route = unmatchedRoute
 		}
-		status := c.Response().Status
+		_, status := echo.ResolveResponseStatus(c.Response(), err)
 		isWebsocket := websocket.IsWebSocketUpgrade(req)
 		if isWebsocket && status == http.StatusOK {
 			// a successful upgrade hijacks the connection and leaves the status untouched
@@ -68,7 +68,7 @@ func metricsMethod(method string) string {
 // knownRoutesOf returns the route patterns of a server
 func knownRoutesOf(e *echo.Echo) map[string]struct{} {
 	known := map[string]struct{}{}
-	for _, r := range e.Routes() {
+	for _, r := range e.Router().Routes() {
 		known[r.Path] = struct{}{}
 	}
 	return known

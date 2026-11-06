@@ -13,7 +13,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // RevisionCurrent names the live text in a diff
@@ -64,7 +64,7 @@ func (rs *RestService) historyAuthor(sig gitstore.Signature) HistoryAuthor {
 }
 
 // historyContext resolves the document and the repository of a history request
-func (rs *RestService) historyContext(c echo.Context) (*wiki.Document, string, *gitstore.Repo, error) {
+func (rs *RestService) historyContext(c *echo.Context) (*wiki.Document, string, *gitstore.Repo, error) {
 	id := c.Param(urlParamID)
 	d := rs.treeManager.GetDocument(id)
 	if d == nil {
@@ -93,12 +93,12 @@ func findRevision(repo *gitstore.Repo, rel string, revision string) (*gitstore.C
 	return nil, ErrUnknownRevision
 }
 
-func (rs *RestService) returnUnknownRevision(c echo.Context, revision string) error {
+func (rs *RestService) returnUnknownRevision(c *echo.Context, revision string) error {
 	return notFoundError(c, fmt.Sprintf("revision %q is not in the history of this document", revision))
 }
 
 // GET /document/:id/history/
-func (rs *RestService) getDocumentHistory(c echo.Context) error {
+func (rs *RestService) getDocumentHistory(c *echo.Context) error {
 	d, rel, repo, err := rs.historyContext(c)
 	if d == nil {
 		return err
@@ -149,7 +149,7 @@ func (rs *RestService) revisionText(d *wiki.Document, rel string, repo *gitstore
 }
 
 // GET /document/:id/history/:revision/content/
-func (rs *RestService) getDocumentRevisionContent(c echo.Context) error {
+func (rs *RestService) getDocumentRevisionContent(c *echo.Context) error {
 	d, rel, repo, err := rs.historyContext(c)
 	if d == nil {
 		return err
@@ -169,7 +169,7 @@ func (rs *RestService) getDocumentRevisionContent(c echo.Context) error {
 }
 
 // GET /document/:id/history/diff/?from=&to=
-func (rs *RestService) getDocumentRevisionDiff(c echo.Context) error {
+func (rs *RestService) getDocumentRevisionDiff(c *echo.Context) error {
 	d, rel, repo, err := rs.historyContext(c)
 	if d == nil {
 		return err
@@ -210,7 +210,7 @@ func shortRevision(r string) string {
 }
 
 // POST /document/:id/history/:revision/restore/
-func (rs *RestService) restoreDocumentRevision(c echo.Context) error {
+func (rs *RestService) restoreDocumentRevision(c *echo.Context) error {
 	d, rel, repo, err := rs.historyContext(c)
 	if d == nil {
 		return err

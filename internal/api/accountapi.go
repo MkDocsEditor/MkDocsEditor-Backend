@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 // request and response bodies of the account endpoints, see docs/auth.md section 9
@@ -60,7 +60,7 @@ type (
 )
 
 // requireReauth answers 403 reauth-required unless the session authenticated recently
-func (rs *RestService) requireReauth(c echo.Context) error {
+func (rs *RestService) requireReauth(c *echo.Context) error {
 	if !rs.authenticator.RecentlyAuthenticated(SessionFromContext(c)) {
 		return responded(apiError(c, http.StatusForbidden, CodeReauthRequired, "confirm your identity again (POST /auth/reauth/)", nil))
 	}
@@ -68,7 +68,7 @@ func (rs *RestService) requireReauth(c echo.Context) error {
 }
 
 // POST /auth/login/second-factor/
-func (rs *RestService) loginSecondFactor(c echo.Context) error {
+func (rs *RestService) loginSecondFactor(c *echo.Context) error {
 	if err := rs.limitIP(c); err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (rs *RestService) loginSecondFactor(c echo.Context) error {
 }
 
 // POST /auth/reauth/
-func (rs *RestService) reauth(c echo.Context) error {
+func (rs *RestService) reauth(c *echo.Context) error {
 	var r ReauthRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -103,11 +103,11 @@ func (rs *RestService) reauth(c echo.Context) error {
 }
 
 // GET /account/
-func (rs *RestService) getAccount(c echo.Context) error {
+func (rs *RestService) getAccount(c *echo.Context) error {
 	return rs.writeAccount(c, UserFromContext(c))
 }
 
-func (rs *RestService) writeAccount(c echo.Context, u *auth.User) error {
+func (rs *RestService) writeAccount(c *echo.Context, u *auth.User) error {
 	d, err := rs.authenticator.AccountDetails(u.ID)
 	if err != nil {
 		return rs.authError(c, err)
@@ -123,7 +123,7 @@ func (rs *RestService) writeAccount(c echo.Context, u *auth.User) error {
 }
 
 // PATCH /account/
-func (rs *RestService) updateAccount(c echo.Context) error {
+func (rs *RestService) updateAccount(c *echo.Context) error {
 	var r AccountUpdateRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -143,7 +143,7 @@ func (rs *RestService) updateAccount(c echo.Context) error {
 }
 
 // PUT /account/password/
-func (rs *RestService) changePassword(c echo.Context) error {
+func (rs *RestService) changePassword(c *echo.Context) error {
 	var r PasswordChangeRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -163,7 +163,7 @@ func (rs *RestService) changePassword(c echo.Context) error {
 }
 
 // DELETE /account/password/
-func (rs *RestService) removePassword(c echo.Context) error {
+func (rs *RestService) removePassword(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (rs *RestService) removePassword(c echo.Context) error {
 }
 
 // POST /account/totp/
-func (rs *RestService) beginTOTP(c echo.Context) error {
+func (rs *RestService) beginTOTP(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (rs *RestService) beginTOTP(c echo.Context) error {
 }
 
 // POST /account/totp/confirm/
-func (rs *RestService) confirmTOTP(c echo.Context) error {
+func (rs *RestService) confirmTOTP(c *echo.Context) error {
 	var r TOTPConfirmRequest
 	if err := decodeJSON(c, &r); err != nil {
 		return err
@@ -199,7 +199,7 @@ func (rs *RestService) confirmTOTP(c echo.Context) error {
 }
 
 // DELETE /account/totp/
-func (rs *RestService) disableTOTP(c echo.Context) error {
+func (rs *RestService) disableTOTP(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func (rs *RestService) disableTOTP(c echo.Context) error {
 }
 
 // POST /account/recovery-codes/
-func (rs *RestService) regenerateRecoveryCodes(c echo.Context) error {
+func (rs *RestService) regenerateRecoveryCodes(c *echo.Context) error {
 	if err := rs.requireReauth(c); err != nil {
 		return err
 	}
