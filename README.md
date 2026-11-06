@@ -143,6 +143,8 @@ The realtime sync protocol (websocket, Automerge, presence, authorship, history)
 storage and git architecture are specified in [docs/sync-protocol.md](docs/sync-protocol.md).
 References between pages, moving and renaming with automatic link updates, and the link
 path algorithm the clients share are specified in [docs/references.md](docs/references.md).
+The pinned documents and the change feed of the dashboard are specified in
+[docs/dashboard.md](docs/dashboard.md).
 
 The REST API is described in the [OpenAPI file](openapi-description.yaml), which you can
 [browse in Swagger Editor](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml).

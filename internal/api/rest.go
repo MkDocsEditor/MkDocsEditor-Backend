@@ -298,6 +298,12 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.POST("/move/", rs.postMove)
 	echoRest.GET("/moved/", rs.getMovedList)
 	echoRest.GET("/moved/:"+urlParamID+"/", rs.getMoved)
+	echoRest.GET("/pins/", rs.getPins)
+	echoRest.PUT("/pins/family/:"+urlParamID+"/", rs.changePin(true, true))
+	echoRest.DELETE("/pins/family/:"+urlParamID+"/", rs.changePin(true, false))
+	echoRest.PUT("/pins/personal/:"+urlParamID+"/", rs.changePin(false, true))
+	echoRest.DELETE("/pins/personal/:"+urlParamID+"/", rs.changePin(false, false))
+	echoRest.GET("/feed/", rs.getFeed)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")
@@ -468,6 +474,7 @@ func (rs *RestService) createSection(c *echo.Context) error {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	rs.itemCreated(c, wiki.TypeSection, section.Path)
 	return c.JSONPretty(http.StatusOK, section, jsonIndent)
 }
 
@@ -482,6 +489,7 @@ func (rs *RestService) createDocument(c *echo.Context) error {
 		return rs.ReturnError(c, err)
 	}
 	rs.commitTree(c, "Create %s", document.Path)
+	rs.itemCreated(c, wiki.TypeDocument, document.Path)
 	return c.JSONPretty(http.StatusOK, document, jsonIndent)
 }
 
@@ -521,6 +529,7 @@ func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
 			return rs.ReturnNotFound(c, id)
 		}
 		rs.commitTree(c, "Delete %s", path)
+		rs.itemDeleted(c, itemType, path)
 		return c.NoContent(http.StatusOK)
 	}
 }

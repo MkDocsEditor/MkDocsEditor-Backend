@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"time"
 
@@ -17,6 +18,9 @@ const (
 	MsgOnline      = "online"
 	// MsgAccessRequests is only sent to admins with a session
 	MsgAccessRequests = "access-requests"
+	// MsgPinsChanged is sent to everyone for family pins, to the account for personal pins
+	MsgPinsChanged = "pins-changed"
+	MsgFeedChanged = "feed-changed"
 )
 
 type (
@@ -45,6 +49,8 @@ const (
 	maxEventMessageSize = 64 << 10
 	// accessRequestCheckInterval notices access requests that expired, which nothing announces
 	accessRequestCheckInterval = time.Minute
+	// feedChangedInterval is the shortest time between two feed-changed messages
+	feedChangedInterval = 10 * time.Second
 )
 
 // HandleEventsWebsocket serves GET /events/ws/. user and sessionID are those of the upgrade request
@@ -155,6 +161,27 @@ func (s *SyncServer) broadcastAccessRequests() {
 	}
 }
 
+// feedChanged schedules a feed-changed message. It never blocks.
+func (s *SyncServer) feedChanged() {
+	select {
+	case s.feedChanges <- struct{}{}:
+	default:
+	}
+}
+
+// PinsChanged tells the events connections that pins changed: everyone for the family pins,
+// only the connections of the accounts for their personal pins
+func (s *SyncServer) PinsChanged(family bool, accountIDs ...string) {
+	msg := &MessageBase{Type: MsgPinsChanged}
+	s.eventsMu.Lock()
+	defer s.eventsMu.Unlock()
+	for c := range s.eventConns {
+		if family || c.user != nil && slices.Contains(accountIDs, c.user.ID) {
+			c.send(msg)
+		}
+	}
+}
+
 // onlineChanged schedules sending the online list. It never blocks.
 func (s *SyncServer) onlineChanged() {
 	select {
@@ -195,7 +222,8 @@ func (s *SyncServer) onlineSnapshot() *OnlineMessage {
 // eventsWorker sends tree changes and the online list to the events connections
 func (s *SyncServer) eventsWorker() {
 	defer close(s.eventsDone)
-	var timer <-chan time.Time
+	var timer, feedTimer <-chan time.Time
+	var lastFeedChanged time.Time
 	accessRequestCheck := time.NewTicker(accessRequestCheckInterval)
 	defer accessRequestCheck.Stop()
 	for {
@@ -221,6 +249,14 @@ func (s *SyncServer) eventsWorker() {
 		case <-timer:
 			timer = nil
 			s.broadcastEvent(s.onlineSnapshot())
+		case <-s.feedChanges:
+			if feedTimer == nil {
+				feedTimer = time.After(time.Until(lastFeedChanged.Add(feedChangedInterval)))
+			}
+		case <-feedTimer:
+			feedTimer = nil
+			lastFeedChanged = time.Now()
+			s.broadcastEvent(&MessageBase{Type: MsgFeedChanged})
 		}
 	}
 }
