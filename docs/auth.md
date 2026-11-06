@@ -79,6 +79,7 @@ All timestamps are UTC, RFC 3339 in JSON. Ids are 26 lower-case base32 character
 | `displayName` | 1–64 characters, shown to others and used as git author name |
 | `email` | optional, only used as git author email. The backend never sends email. |
 | `color` | `#rrggbb`, default derived from the username |
+| `avatar` | version of the profile picture or `null`, see [Avatars](#avatars) |
 | `role` | `admin`, `editor`, `reader` |
 | `status` | `active`, `disabled` (cannot log in, sessions revoked), `deleted` (tombstone) |
 | password | Argon2id hash, optional (passkey-only accounts have none) |
@@ -93,9 +94,28 @@ All timestamps are UTC, RFC 3339 in JSON. Ids are 26 lower-case base32 character
 
 **Deletion is a tombstone.** A deleted account keeps its id, username, display name and
 colour, so authorship, history and the audit log still show who wrote what. Everything
-else is removed: password, TOTP, recovery codes, passkeys, sessions, app tokens. The
+else is removed: password, TOTP, recovery codes, passkeys, sessions, app tokens, the avatar. The
 username stays reserved. Deleted accounts are listed by the admin API with
 `status: "deleted"` and cannot be restored.
+
+### Avatars
+
+Each account can have one profile picture. The server stores every upload normalized: the
+EXIF orientation is applied, the center square is cut out and scaled to 256x256, and the
+result is encoded as JPEG (quality 85) without metadata. Transparent parts become white.
+Uploads may have any size and aspect ratio up to 5 MB and 50 megapixels, as JPEG, PNG or
+WebP. The images are in `auth.db` (table `avatars`), so the backup of the database has them.
+
+`avatar` on the user object is the first 16 hex characters of the sha256 of the stored
+image, `null` without one. It changes with every new image. Clients treat it as an opaque
+version and load the image from `GET /avatars/{accountId}/{avatar}/`. That URL never changes
+its content, so the response says `Cache-Control: private, max-age=31536000, immutable`.
+An old version gives 404. The endpoint takes the same authentication as all others, so web
+clients load it with `<img crossorigin="use-credentials">`.
+
+A changed profile (name, colour, avatar) reaches connected clients: the server sends the
+presence of every connection of the account and its actors again, and a new `online` list,
+see `sync-protocol.md`.
 
 ### Session
 
@@ -746,8 +766,10 @@ responses use the format of [Errors](#10-errors).
 **User object** (also in `whoami`, admin lists add more fields):
 
 ```json
-{"id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c"}
+{"id": "k3x8…", "username": "markus", "displayName": "Markus", "role": "admin", "color": "#e8590c", "avatar": "3f9a1c0b7d2e4a68"}
 ```
+
+`avatar` is `null` without a profile picture.
 
 **Session object:**
 
@@ -850,6 +872,7 @@ give 400 `invalid-link`.
 | POST | `/auth/reauth/` | `{password?, code?}` | `{reauthenticatedUntil}` |
 | POST | `/auth/reauth/passkey/begin/` | `{}` | `{ceremonyId, publicKey}` |
 | POST | `/auth/reauth/passkey/finish/` | `{ceremonyId, credential}` | `{reauthenticatedUntil}` |
+| GET | `/avatars/{accountId}/{avatar}/` | | the JPEG; 404 for an old version, see [Avatars](#avatars) |
 
 ### Account (sessions only)
 
@@ -857,6 +880,8 @@ give 400 `invalid-link`.
 |---|---|---|---|---|
 | GET | `/account/` | | | `{user…, "email", "createdAt", "hasPassword", "totpEnabled", "recoveryCodesLeft", "passkeyCount", "secondFactorSetupRequired", "require2FA", "reauthenticatedUntil"}` |
 | PATCH | `/account/` | only for `username` | `{displayName?, color?, email?, username?}` (`email: ""` removes it) | as `GET /account/` |
+| PUT | `/account/avatar/` | | the image as body, `Content-Type` `image/jpeg`, `image/png` or `image/webp` | as `GET /account/`; 413 `payload-too-large` over 5 MB, 415 `unsupported-media-type`, 400 `invalid-image` |
+| DELETE | `/account/avatar/` | | | as `GET /account/`, also without an avatar |
 | PUT | `/account/password/` | unless `currentPassword` is sent | `{currentPassword?, newPassword}` | 204 |
 | DELETE | `/account/password/` | yes | | 204; 409 `last-login-method` without a passkey |
 | POST | `/account/totp/` | yes | `{}` | `{"secret": "JBSW…", "otpauthUri": "otpauth://totp/MkDocsEditor:markus?secret=…&issuer=MkDocsEditor&algorithm=SHA1&digits=6&period=30", "expiresAt": "…"}`; 409 `totp-already-enabled` |
@@ -892,6 +917,8 @@ a pending secret (never started or expired), confirm answers 409 `conflict`.
 | GET | `/admin/users/` | | `?status=active,disabled,deleted` (default: all) | `[{user…, "email", "status", "createdAt", "lastLoginAt", "hasPassword", "totpEnabled", "passkeyCount", "sessionCount"}]` |
 | PATCH | `/admin/users/{id}/` | for `role` and `status` | `{role?, status? ("active"/"disabled"), username?, displayName?, color?, email?}` | the user entry |
 | DELETE | `/admin/users/{id}/` | yes | | 204 (tombstone) |
+| PUT | `/admin/users/{id}/avatar/` | | as `PUT /account/avatar/` | the user entry |
+| DELETE | `/admin/users/{id}/avatar/` | | | the user entry |
 | GET | `/admin/users/{id}/sessions/` | | | `[session object]` |
 | POST | `/admin/users/{id}/sessions/revoke/` | | | `{"revoked": n}` |
 | DELETE | `/admin/sessions/{id}/` | | | 204 |
@@ -947,6 +974,7 @@ Every error response is JSON:
 | 400 | `invalid-access-request` | access request token unknown |
 | 400 | `invalid-second-factor` | wrong TOTP code during enrollment confirmation |
 | 400 | `passkey-registration-failed` | attestation could not be verified |
+| 400 | `invalid-image` | an avatar upload that is not a readable JPEG, PNG or WebP, or has over 50 megapixels |
 | 401 | `unauthenticated` | no credentials, or the session/app token is invalid, expired or revoked |
 | 401 | `invalid-credentials` | wrong username or password (also unknown user), wrong step-up credentials |
 | 401 | `invalid-second-factor` | wrong TOTP or recovery code at login (`details.attemptsLeft`) |
@@ -966,6 +994,8 @@ Every error response is JSON:
 | 409 | `last-login-method` | the action would leave the account without password and passkey |
 | 409 | `second-factor-required` | the action would leave the account without a second factor while `require2FA` is on |
 | 409 | `conflict` | other conflicts (last admin, self-demotion; existing document conflicts keep their old body) |
+| 413 | `payload-too-large` | an avatar upload over 5 MB |
+| 415 | `unsupported-media-type` | an avatar upload with another content type |
 | 429 | `rate-limited` | `Retry-After` header (seconds) and `details.retryAfter` |
 | 429 | `too-many-access-requests` | 50 access requests are pending |
 | 500 | `internal` | |
@@ -1239,7 +1269,7 @@ Additive only; existing clients keep working.
 - Handle `second-factor-setup-required`: route to the 2FA setup screen.
 - Handle 401 `unauthenticated`: drop local session state and show the login.
 - Handle 429 with `Retry-After`.
-- Account screens: profile (display name, colour, git email), password change, TOTP
+- Account screens: profile (display name, colour, avatar when `features` has `avatars`, git email), password change, TOTP
   enroll (QR from `otpauthUri`, secret for manual entry, confirm, show recovery codes
   once), recovery codes regenerate, passkeys (list, add, rename, delete), sessions (list,
   revoke, revoke others), app tokens (optional).

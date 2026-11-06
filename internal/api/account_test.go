@@ -74,20 +74,29 @@ func (r *response) code(t *testing.T) string {
 
 func (c *client) do(method, path string, body any) *response {
 	c.env.t.Helper()
+	if body == nil {
+		return c.doRaw(method, path, nil, "")
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		c.env.t.Fatal(err)
+	}
+	return c.doRaw(method, path, data, "application/json")
+}
+
+// doRaw sends body as it is, with contentType if it is not empty
+func (c *client) doRaw(method, path string, body []byte, contentType string) *response {
+	c.env.t.Helper()
 	var reader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			c.env.t.Fatal(err)
-		}
-		reader = bytes.NewReader(data)
+		reader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, c.env.srv.URL+path, reader)
 	if err != nil {
 		c.env.t.Fatal(err)
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "test-agent")
 	if c.browser {

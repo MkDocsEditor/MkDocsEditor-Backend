@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -304,11 +305,57 @@ func (s *SyncServer) actorInfo(actorID string, subject string) ActorInfo {
 			info.Username = u.Username
 			info.DisplayName = u.DisplayName
 			info.Color = u.Color
+			info.Avatar = u.Avatar
 		} else {
 			info.Color = auth.ColorForUsername(subject)
 		}
 	}
 	return info
+}
+
+// currentUser returns the account of a connection as it is now. The user of a connection is
+// the one of its login, so a later change of the name, colour or avatar is not in it.
+func (s *SyncServer) currentUser(u *auth.User) *auth.User {
+	if s.authenticator != nil {
+		if current := s.authenticator.UserByID(u.ID); current != nil {
+			return current
+		}
+	}
+	return u
+}
+
+// AccountChanged tells the clients about a changed profile (name, colour, avatar): every open
+// document gets the presence of each connection of the account and its actors again, and the
+// events connections a new online list.
+func (s *SyncServer) AccountChanged(accountID string) {
+	actorIDs := []string{}
+	for id, binding := range s.actors.All() {
+		if binding.Subject == accountID {
+			actorIDs = append(actorIDs, id)
+		}
+	}
+	sort.Strings(actorIDs)
+	s.mu.Lock()
+	sessions := make([]*docSession, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	s.mu.Unlock()
+	for _, session := range sessions {
+		session.mu.Lock()
+		if !session.closed {
+			for _, id := range actorIDs {
+				session.announceActorLocked(id, accountID, nil)
+			}
+			for c := range session.conns {
+				if c.user.ID == accountID {
+					session.broadcastLocked(c.presenceLocked(), c)
+				}
+			}
+		}
+		session.mu.Unlock()
+	}
+	s.onlineChanged()
 }
 
 // subjectUsername returns the current username of a subject (account id or pseudo user)
@@ -1013,18 +1060,22 @@ func (c *wsConn) attachLocked(session *docSession) error {
 }
 
 func (c *wsConn) userInfo() UserInfo {
-	return UserInfo{ClientID: c.clientID, InstanceID: c.instanceID, AccountID: c.user.ID, Username: c.user.Username, DisplayName: c.user.DisplayName, Role: c.user.Role, Color: c.user.Color}
+	u := c.server.currentUser(c.user)
+	return UserInfo{ClientID: c.clientID, InstanceID: c.instanceID, AccountID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Role: c.user.Role,
+		Color: u.Color, Avatar: u.Avatar}
 }
 
 func (c *wsConn) presenceLocked() PresenceMessage {
+	u := c.server.currentUser(c.user)
 	return PresenceMessage{
 		Type:          MsgPresence,
 		DocumentID:    c.session.docID,
 		ClientID:      c.clientID,
-		AccountID:     c.user.ID,
-		Username:      c.user.Username,
-		DisplayName:   c.user.DisplayName,
-		Color:         c.user.Color,
+		AccountID:     u.ID,
+		Username:      u.Username,
+		DisplayName:   u.DisplayName,
+		Color:         u.Color,
+		Avatar:        u.Avatar,
 		ActorID:       c.actorID,
 		InstanceID:    c.instanceID,
 		DeviceName:    c.deviceName,

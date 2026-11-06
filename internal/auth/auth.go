@@ -58,7 +58,9 @@ type User struct {
 	Email       string `json:"-"`
 	Role        string `json:"role"`
 	Color       string `json:"color"`
-	Status      string `json:"-"`
+	// Avatar is the version of the profile picture, nil without one
+	Avatar *string `json:"avatar"`
+	Status string  `json:"-"`
 }
 
 // CanWrite reports whether the user may change documents and the tree
@@ -233,17 +235,18 @@ func (s *Service) readAccounts() (map[string]*User, map[string]string, int, erro
 	byID := map[string]*User{}
 	byUsername := map[string]string{}
 	active := 0
-	rows, err := s.db.Query("SELECT id, username, username_key, display_name, email, color, role, status FROM accounts")
+	rows, err := s.db.Query("SELECT id, username, username_key, display_name, email, color, avatar, role, status FROM accounts")
 	if err != nil {
 		return nil, nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var u User
-		var key string
-		if err = rows.Scan(&u.ID, &u.Username, &key, &u.DisplayName, &u.Email, &u.Color, &u.Role, &u.Status); err != nil {
+		var key, avatar string
+		if err = rows.Scan(&u.ID, &u.Username, &key, &u.DisplayName, &u.Email, &u.Color, &avatar, &u.Role, &u.Status); err != nil {
 			return nil, nil, 0, err
 		}
+		u.Avatar = avatarOrNil(avatar)
 		byID[u.ID] = &u
 		byUsername[key] = u.ID
 		if u.Status != StatusDeleted {

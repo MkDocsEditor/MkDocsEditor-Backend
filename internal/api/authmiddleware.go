@@ -67,6 +67,9 @@ const (
 	CodeInvalidAccessRequest      = "invalid-access-request"
 	CodeAccessRequestsDisabled    = "access-requests-disabled"
 	CodeTooManyAccessRequests     = "too-many-access-requests"
+	CodePayloadTooLarge           = "payload-too-large"
+	CodeUnsupportedMediaType      = "unsupported-media-type"
+	CodeInvalidImage              = "invalid-image"
 )
 
 // TicketResponse is the response of POST /auth/ws-ticket/

@@ -441,6 +441,7 @@ func (ds *docSession) instanceLeftLocked(conn *wsConn, now time.Time) *PresenceL
 	ds.positionsDirty = true
 	msg.AccountID, msg.Selections, msg.Viewport = conn.user.ID, selectionsOrEmpty(conn.ownSelections), conn.ownViewport
 	msg.DeviceName, msg.InstanceColor = conn.deviceName, conn.instanceColor
+	msg.Avatar = ds.server.currentUser(conn.user).Avatar
 	msg.GhostMs = ds.server.GhostLifetime.Milliseconds()
 	return msg
 }
@@ -463,7 +464,7 @@ func (ds *docSession) ghostsLocked(now time.Time) []GhostInfo {
 		if u == nil || u.Status == auth.StatusDeleted {
 			continue
 		}
-		out = append(out, GhostInfo{InstanceID: id, AccountID: g.AccountID, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
+		out = append(out, GhostInfo{InstanceID: id, AccountID: g.AccountID, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color, Avatar: u.Avatar,
 			InstanceColor: g.InstanceColor, DeviceName: g.DeviceName, Selections: g.Selections, Viewport: g.Viewport,
 			GhostMs: max(1, ghostRemaining(g, ds.server.GhostLifetime, now).Milliseconds())})
 	}
@@ -512,7 +513,7 @@ func (ds *docSession) lastPositionsLocked() []LastPositionInfo {
 		if u == nil || u.Status == auth.StatusDeleted {
 			continue
 		}
-		info := LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color,
+		info := LastPositionInfo{AccountID: id, Username: u.Username, DisplayName: u.DisplayName, Color: u.Color, Avatar: u.Avatar,
 			Selections: selectionsOrEmpty(p.Selections), Viewport: p.Viewport, LastActiveAt: p.Time.UTC().Format(time.RFC3339Nano)}
 		out = append(out, info)
 	}

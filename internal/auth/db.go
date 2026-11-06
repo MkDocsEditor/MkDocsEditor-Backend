@@ -182,6 +182,16 @@ CREATE TABLE access_requests (
 );
 CREATE INDEX access_requests_status ON access_requests(status, expires_at);
 `,
+	// 8: profile pictures. accounts.avatar is the hash of the current image, '' for none.
+	`
+ALTER TABLE accounts ADD COLUMN avatar TEXT NOT NULL DEFAULT '';
+CREATE TABLE avatars (
+	account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+	hash       TEXT NOT NULL,
+	image      BLOB NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations
