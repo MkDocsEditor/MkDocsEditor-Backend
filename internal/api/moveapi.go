@@ -100,6 +100,7 @@ func (rs *RestService) performMove(c *echo.Context, req *collab.MoveRequest) (*c
 	}
 	result.Commit = rs.commitMove(completed, len(result.Config) > 0)
 	rs.auditMove(c, completed, result)
+	rs.itemMoved(completed)
 	return result, nil
 }
 

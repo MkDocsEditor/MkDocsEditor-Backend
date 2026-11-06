@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/activity"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -61,6 +62,8 @@ type SyncServer struct {
 
 	// changeRecorder is told which users changed which document (the git committer)
 	changeRecorder ChangeRecorder
+	// activity holds the pins and the feed of the dashboard
+	activity *activity.Store
 
 	// eventLog receives the sync events, nil if they are not logged. See SetEventLog.
 	eventLog *log.Logger
@@ -85,7 +88,9 @@ type SyncServer struct {
 	// lastPending is the number of pending access requests admins know. Guarded by eventsMu.
 	lastPending   int
 	onlineChanges chan struct{}
-	eventsDone    chan struct{}
+	// feedChanges wakes the events worker when the feed changed
+	feedChanges chan struct{}
+	eventsDone  chan struct{}
 
 	// authorshipMu guards the running authorship jobs by document uuid. It is taken while
 	// holding a session lock, never the other way round.
@@ -115,11 +120,16 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 	if err != nil {
 		return nil, err
 	}
+	activityStore, err := activity.Open(stateDir)
+	if err != nil {
+		return nil, err
+	}
 	s := &SyncServer{
 		treeManager:   treeManager,
 		store:         store,
 		redirects:     redirects,
 		actors:        actors,
+		activity:      activityStore,
 		authenticator: authenticator,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
@@ -142,6 +152,7 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 		accessRequests:   make(chan struct{}, 1),
 		lastPending:      -1,
 		onlineChanges:    make(chan struct{}, 1),
+		feedChanges:      make(chan struct{}, 1),
 		eventsDone:       make(chan struct{}),
 	}
 	treeManager.AddTreeChangeListener(func(_, _ *wiki.Section) {
@@ -155,6 +166,7 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 		default:
 		}
 	})
+	activityStore.OnFeedChanged(s.feedChanged)
 	go s.treeWorker()
 	go s.eventsWorker()
 	authenticator.OnRevoke(s.onRevoke)
@@ -536,6 +548,14 @@ func (s *SyncServer) Close() {
 	s.authorshipWorkers.Wait()
 	<-s.workerDone
 	<-s.eventsDone
+	if err := s.activity.Close(); err != nil {
+		log.Printf("Unable to close the activity database: %v", err)
+	}
+}
+
+// Activity returns the store of the pins and the feed
+func (s *SyncServer) Activity() *activity.Store {
+	return s.activity
 }
 
 // HandleWebsocket serves GET /document/{id}/ws/. user and sessionID are those of the upgrade

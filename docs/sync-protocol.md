@@ -540,6 +540,12 @@ Every role may connect. The server then sends:
   requests, and comes right after the first `online` and whenever the number changes, also when a
   request expires (checked once per minute). See
   [auth.md](auth.md#access-request-and-join-link).
+- `{"type": "pins-changed"}`: pins changed, see [dashboard.md](dashboard.md#pins).
+  Changes of the family pins go to everyone, changes of personal pins only to the
+  connections of that account. The client fetches `GET /pins/` again.
+- `{"type": "feed-changed"}`: the feed has new or changed entries, at most once per
+  10 seconds. The client fetches the first page of `GET /feed/` again, see
+  [dashboard.md](dashboard.md#feed).
 - `{"type": "heartbeat"}`, as on the document websocket.
 
 The client sends `{"type": "heartbeat"}` at least every 5 seconds. Without any
@@ -620,6 +626,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
 ```
 .mkdocseditor/
   auth.db                     accounts and actor id -> account bindings (SQLite, see auth.md)
+  activity.db                 pins and the change feed (SQLite, see dashboard.md)
   documents/
     <uuid>.automerge          Automerge save() of the document
     <uuid>.json               {"path": "guide/setup.md", "epoch": "…", "lastPositions": {...}, "diskBaseHeads": [...], "diskBaseHash": "…"}

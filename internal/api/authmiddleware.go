@@ -293,7 +293,9 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	if isAdmin && !user.IsAdmin() {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "only admins may do this", nil))
 	}
-	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !strings.HasPrefix(path, "/auth/") {
+	// readers may change their own pins, the handler checks the family pins
+	isPins := strings.HasPrefix(path, "/pins/")
+	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))
 	}

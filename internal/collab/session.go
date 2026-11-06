@@ -9,7 +9,9 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -55,6 +57,10 @@ type docSession struct {
 	flushTimer *time.Timer
 	dirty      bool
 	closed     bool
+
+	// editors are the accounts whose changes are not on disk yet, in the order of their first
+	// change, for the feed
+	editors []string
 
 	// authorship replay state, advanced on request
 	authorship *authorshipState
@@ -286,8 +292,12 @@ func (ds *docSession) checkDiskLocked() (bool, error) {
 		}
 		return true, err
 	}
-	if string(data) != ds.diskBaseText {
-		return true, ds.ingestExternalLocked(string(data))
+	if fileText := string(data); fileText != ds.diskBaseText {
+		before := ds.diskBaseText
+		if err = ds.ingestExternalLocked(fileText); err != nil {
+			return true, err
+		}
+		ds.server.activity.RecordEdit(ds.meta.Path, before, fileText, []string{ActorUserDisk})
 	}
 	return true, nil
 }
@@ -308,11 +318,15 @@ func (ds *docSession) writeToDiskLocked() error {
 		return err
 	}
 	if text == ds.diskBaseText {
+		ds.editors = nil
 		return nil
 	}
 	if err = wiki.WriteFile(ds.absPath, []byte(text)); err != nil {
 		return err
 	}
+	// changes of the server alone (reference updates) are no edits
+	ds.server.activity.RecordEdit(ds.meta.Path, ds.diskBaseText, text, ds.editors)
+	ds.editors = nil
 	ds.diskBaseText = text
 	ds.diskBaseHeads = ds.doc.Heads()
 	ds.meta.DiskBaseHeads = formatHeads(ds.diskBaseHeads)
@@ -592,12 +606,22 @@ func (ds *docSession) countChangesLocked(changes []*automerge.Change) {
 	for _, ch := range changes {
 		if owner := ds.server.actors.Owner(ch.ActorID()); owner != "" {
 			counts[owner]++
+			ds.addEditorLocked(owner)
 		}
 	}
 	ds.meta.LastChange = time.Now().UTC()
 	if r := ds.server.changeRecorder; r != nil && len(counts) > 0 {
 		r.RecordChanges(ds.meta.Path, counts)
 	}
+}
+
+// addEditorLocked remembers an account that changed the document, for the feed. The server's
+// pseudo users are left out.
+func (ds *docSession) addEditorLocked(subject string) {
+	if strings.HasPrefix(subject, ":") || slices.Contains(ds.editors, subject) {
+		return
+	}
+	ds.editors = append(ds.editors, subject)
 }
 
 func encodeBase64(b []byte) string {
@@ -629,6 +653,7 @@ func (s *SyncServer) ReplaceText(d *wiki.Document, text string, user *auth.User,
 			return err
 		}
 		ds.meta.LastChange = time.Now().UTC()
+		ds.addEditorLocked(user.ID)
 		if s.changeRecorder != nil {
 			s.changeRecorder.RecordChanges(ds.meta.Path, map[string]int{user.ID: 1})
 		}

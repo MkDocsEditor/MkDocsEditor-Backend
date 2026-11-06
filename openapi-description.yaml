@@ -53,6 +53,8 @@ tags:
     description: "Revision history of documents from git (requires git.enabled)"
   - name: References
     description: "Links between items, backlinks and link paths, see docs/references.md"
+  - name: Dashboard
+    description: "Pinned documents and the change feed, see docs/dashboard.md"
 
 paths:
   /alive/:
@@ -2591,6 +2593,120 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /pins/:
+    get:
+      summary: "The family pins and the own pins"
+      description: |
+        Pins of documents that do not exist (deleted or moved outside the API) are left out; they
+        come back with the document. `features` of `GET /server-info/` contains `pins`.
+      operationId: getPins
+      tags: [ Dashboard ]
+      responses:
+        "200":
+          description: "Both lists, newest first"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pins"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /pins/family/{documentId}/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    put:
+      summary: "Pin a document for everyone"
+      description: "Editors and admins. Pinning a pinned document changes nothing."
+      operationId: putFamilyPin
+      tags: [ Dashboard ]
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: "Unpin a document for everyone"
+      description: "Editors and admins. Unpinning a document that is not pinned changes nothing."
+      operationId: deleteFamilyPin
+      tags: [ Dashboard ]
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /pins/personal/{documentId}/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    put:
+      summary: "Pin a document for yourself"
+      description: "Every account, readers too. App tokens with the scope `read` get 403."
+      operationId: putPersonalPin
+      tags: [ Dashboard ]
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: "Unpin a document for yourself"
+      operationId: deletePersonalPin
+      tags: [ Dashboard ]
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /feed/:
+    get:
+      summary: "What changed in the wiki"
+      description: |
+        Edits, created, moved and deleted documents and sections, newest first, for 365 days
+        (docs/dashboard.md). `features` of `GET /server-info/` contains `feed`.
+      operationId: getFeed
+      tags: [ Dashboard ]
+      parameters:
+        - name: before
+          in: query
+          description: "`next` of the previous page; without it the page starts with the newest entry"
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: "One page of the feed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2697,6 +2813,12 @@ components:
         default: false
 
   responses:
+    Pins:
+      description: "The pins after the change, as `GET /pins/` answers"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Pins"
     TooManyRequests:
       description: "Rate limited; retry after the `Retry-After` header (seconds)"
       headers:
@@ -4091,6 +4213,119 @@ components:
         expiresAt:
           type: string
           format: date-time
+
+    Author:
+      type: object
+      required: [ displayName, color, avatar ]
+      description: "An account as it is now, or the server: `External change` for changes of the files, `Server` for the backend itself"
+      properties:
+        accountId:
+          type: string
+          description: "Missing for the server"
+        username:
+          type: string
+          description: "Missing for the server"
+        displayName:
+          type: string
+        color:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+          description: "Version of the profile picture, at `/avatars/{accountId}/{avatar}/`; null for the server and without one"
+
+    Pin:
+      type: object
+      required: [ documentId, path, name, pinnedBy, pinnedAt ]
+      properties:
+        documentId:
+          type: string
+        path:
+          type: string
+          description: "Path relative to the docs folder"
+        name:
+          type: string
+        pinnedBy:
+          $ref: "#/components/schemas/Author"
+        pinnedAt:
+          type: string
+          format: date-time
+
+    Pins:
+      type: object
+      required: [ family, personal ]
+      properties:
+        family:
+          type: array
+          description: "Pinned for everyone, newest first"
+          items:
+            $ref: "#/components/schemas/Pin"
+        personal:
+          type: array
+          description: "Pinned by the requesting account for itself, newest first"
+          items:
+            $ref: "#/components/schemas/Pin"
+
+    FeedEntry:
+      type: object
+      required: [ id, time, kind, itemType, path, authors ]
+      properties:
+        id:
+          type: string
+        time:
+          type: string
+          format: date-time
+          description: "The last change of the entry; an edit entry moves up while its editing session goes on"
+        kind:
+          type: string
+          enum: [ edited, created, moved, deleted ]
+        itemType:
+          type: string
+          enum: [ document, section ]
+        documentId:
+          type: string
+          description: "The current id of the document, if one exists at `path`"
+        path:
+          type: string
+          description: "Path relative to the docs folder; for moves the new path"
+        oldPath:
+          type: string
+          description: "Only for `moved`"
+        authors:
+          type: array
+          description: "In the order of their first change"
+          items:
+            $ref: "#/components/schemas/Author"
+        summary:
+          $ref: "#/components/schemas/FeedSummary"
+
+    FeedSummary:
+      type: object
+      description: "Only for `edited`: the change since the start of the editing session"
+      required: [ linesAdded, linesRemoved, headings ]
+      properties:
+        linesAdded:
+          type: integer
+        linesRemoved:
+          type: integer
+        headings:
+          type: array
+          description: "Up to 5 headings above the changed lines, in document order"
+          items:
+            type: string
+
+    Feed:
+      type: object
+      required: [ entries, next ]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedEntry"
+        next:
+          type: string
+          nullable: true
+          description: "Cursor of the next page, null on the last page"
 
     Actor:
       type: object
