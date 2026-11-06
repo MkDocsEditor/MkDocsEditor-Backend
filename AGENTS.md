@@ -17,6 +17,7 @@ Dependencies point one way, top to bottom:
 | `internal/wiki` | The tree of sections, documents and resources, the file watcher |
 | `internal/auth` | Accounts, sessions, passkeys, audit log |
 | `internal/metrics` | Prometheus metrics and their server |
+| `internal/nativemem` | Limits and releases the malloc memory of Automerge (glibc only) |
 | `internal/configuration` | Configuration file |
 
 `collab`, `gitstore` and `references` do not know about HTTP or echo. They reach each other through

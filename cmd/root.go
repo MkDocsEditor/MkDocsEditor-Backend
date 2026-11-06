@@ -18,6 +18,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/nativemem"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
@@ -63,6 +64,8 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	printStartupInfo()
 
 	conf := configuration.CurrentConfig
+	// before the first document is loaded
+	defer nativemem.Start()()
 	treeManager := wiki.NewTreeManager(conf.MkDocs)
 
 	if err := collab.CheckStateDir(conf.MkDocs.StateDir, conf.MkDocs.DocsPath); err != nil {
