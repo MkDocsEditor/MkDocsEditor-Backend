@@ -43,7 +43,8 @@ nothing. All of them answer the body of `GET /pins/`. An unknown document id ans
 }
 ```
 
-Both lists are newest first. `pinnedBy` is the account as it is now, see [Authors](#authors).
+Both lists are in their order: a new pin goes to the end, and the order can be changed, see
+[Order](#order). `pinnedBy` is the account as it is now, see [Authors](#authors).
 
 The backend stores pins by path, so:
 
@@ -53,6 +54,24 @@ The backend stores pins by path, so:
 - A pinned document that is missing on disk, for example after a change outside the API,
   is left out of the lists, but its pin stays. When the file comes back, the pin
   shows again.
+
+### Order
+
+`PUT /pins/family/order/` and `PUT /pins/personal/order/` set the order of a list, with the
+same rights as pinning in it:
+
+```json
+{ "documentIds": ["17683270065320168437", "4120567934781623001"] }
+```
+
+The listed documents come first, in this order. Ids that are not pinned in that list are
+ignored, and the pins that are not listed follow in their order. The answer is the body of
+`GET /pins/`. `features` of `GET /server-info/` contains `pin-order` on a server with these
+endpoints. Pins keep their place when their document moves.
+
+Pins from before the order existed keep the order they were listed in, newest first.
+
+### Events
 
 After a change the events websocket sends `{"type": "pins-changed"}`. A change of the
 family pins goes to every connection, a change of personal pins only to the connections of

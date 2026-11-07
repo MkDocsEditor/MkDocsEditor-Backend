@@ -2,6 +2,7 @@ package activity
 
 import (
 	"database/sql"
+	"slices"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -43,10 +44,10 @@ func (c *PinChanges) add(accountID string) {
 	c.Accounts = append(c.Accounts, accountID)
 }
 
-// Pins returns the family pins and the personal pins of an account, newest first
+// Pins returns the family pins and the personal pins of an account, in their order
 func (s *Store) Pins(accountID string) (family []Pin, personal []Pin, err error) {
 	rows, err := s.db.Query(`SELECT account_id, path, pinned_by, pinned_at FROM pins WHERE account_id IN (?, ?)
-		ORDER BY pinned_at DESC, path`, Family, accountID)
+		ORDER BY position, pinned_at DESC, path`, Family, accountID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,11 +71,12 @@ func (s *Store) Pins(accountID string) (family []Pin, personal []Pin, err error)
 	return family, personal, rows.Err()
 }
 
-// AddPin pins a document for an account, or for the family with Family. It returns false if
-// the document was pinned already.
+// AddPin pins a document for an account, or for the family with Family, at the end of the
+// list. It returns false if the document was pinned already.
 func (s *Store) AddPin(accountID string, path string, by string) (bool, error) {
-	res, err := s.db.Exec(`INSERT INTO pins (account_id, path, pinned_by, pinned_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT DO NOTHING`, accountID, path, by, s.now().UnixMilli())
+	res, err := s.db.Exec(`INSERT INTO pins (account_id, path, pinned_by, pinned_at, position)
+		VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM pins WHERE account_id = ?))
+		ON CONFLICT DO NOTHING`, accountID, path, by, s.now().UnixMilli(), accountID)
 	if err != nil {
 		return false, err
 	}
@@ -90,6 +92,60 @@ func (s *Store) RemovePin(accountID string, path string) (bool, error) {
 	}
 	n, err := res.RowsAffected()
 	return n > 0, err
+}
+
+// ReorderPins puts the pins of an account (or Family) at the paths first, in that order. Paths
+// that are not pinned are ignored, the other pins follow in their order. It returns false if
+// the order stayed the same.
+func (s *Store) ReorderPins(accountID string, paths []string) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`SELECT path FROM pins WHERE account_id = ? ORDER BY position, pinned_at DESC, path`, accountID)
+	if err != nil {
+		return false, err
+	}
+	var current []string
+	for rows.Next() {
+		var p string
+		if err = rows.Scan(&p); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		current = append(current, p)
+	}
+	_ = rows.Close()
+	if err = rows.Err(); err != nil {
+		return false, err
+	}
+	pinned := map[string]bool{}
+	for _, p := range current {
+		pinned[p] = true
+	}
+	order := make([]string, 0, len(current))
+	placed := map[string]bool{}
+	for _, p := range paths {
+		if pinned[p] && !placed[p] {
+			placed[p] = true
+			order = append(order, p)
+		}
+	}
+	for _, p := range current {
+		if !placed[p] {
+			order = append(order, p)
+		}
+	}
+	if slices.Equal(order, current) {
+		return false, nil
+	}
+	for i, p := range order {
+		if _, err = tx.Exec(`UPDATE pins SET position = ? WHERE account_id = ? AND path = ?`, i, accountID, p); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
 }
 
 // MovePins changes the paths of the pins of a moved item: the item itself and, for a section,

@@ -20,6 +20,8 @@ const (
 	FeaturePins = "pins"
 	// FeatureFeed means the server has the change feed of docs/dashboard.md
 	FeatureFeed = "feed"
+	// FeaturePinOrder means the pins can be reordered, see docs/dashboard.md
+	FeaturePinOrder = "pin-order"
 
 	feedDefaultLimit = 50
 	feedMaxLimit     = 200
@@ -45,6 +47,11 @@ type (
 		Name       string `json:"name"`
 		PinnedBy   Author `json:"pinnedBy"`
 		PinnedAt   string `json:"pinnedAt"`
+	}
+
+	// PinOrderRequest is the body of PUT /pins/{family|personal}/order/
+	PinOrderRequest struct {
+		DocumentIDs []string `json:"documentIds"`
 	}
 
 	// PinsResponse is the answer of GET /pins/ and of the pin changes
@@ -159,6 +166,38 @@ func (rs *RestService) changePin(family bool, add bool) echo.HandlerFunc {
 		} else {
 			changed, err = rs.sync.Activity().RemovePin(owner, d.RelPath)
 		}
+		if err != nil {
+			return rs.ReturnError(c, err)
+		}
+		if changed {
+			rs.sync.PinsChanged(family, user.ID)
+		}
+		return rs.getPins(c)
+	}
+}
+
+// changePinOrder answers PUT /pins/family/order/ and /pins/personal/order/
+func (rs *RestService) changePinOrder(family bool) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		user := UserFromContext(c)
+		if family && !user.CanWrite() {
+			return apiError(c, http.StatusForbidden, CodeForbidden, "only editors and admins may change the family pins", nil)
+		}
+		r := new(PinOrderRequest)
+		if err := c.Bind(r); err != nil {
+			return apiError(c, http.StatusBadRequest, CodeBadRequest, "the body must be {\"documentIds\": [\"…\"]}", nil)
+		}
+		paths := make([]string, 0, len(r.DocumentIDs))
+		for _, id := range r.DocumentIDs {
+			if d := rs.treeManager.GetDocument(id); d != nil {
+				paths = append(paths, d.RelPath)
+			}
+		}
+		owner := user.ID
+		if family {
+			owner = activity.Family
+		}
+		changed, err := rs.sync.Activity().ReorderPins(owner, paths)
 		if err != nil {
 			return rs.ReturnError(c, err)
 		}

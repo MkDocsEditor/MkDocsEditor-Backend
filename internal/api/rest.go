@@ -301,6 +301,8 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/moved/", rs.getMovedList)
 	echoRest.GET("/moved/:"+urlParamID+"/", rs.getMoved)
 	echoRest.GET("/pins/", rs.getPins)
+	echoRest.PUT("/pins/family/order/", rs.changePinOrder(true))
+	echoRest.PUT("/pins/personal/order/", rs.changePinOrder(false))
 	echoRest.PUT("/pins/family/:"+urlParamID+"/", rs.changePin(true, true))
 	echoRest.DELETE("/pins/family/:"+urlParamID+"/", rs.changePin(true, false))
 	echoRest.PUT("/pins/personal/:"+urlParamID+"/", rs.changePin(false, true))

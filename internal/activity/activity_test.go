@@ -1,7 +1,10 @@
 package activity
 
 import (
+	"database/sql"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -172,7 +175,8 @@ func TestPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(family) != 2 || family[0].Path != "index.md" || len(personal) != 1 || personal[0].Path != "guide/sub/deep.md" {
+	// new pins go to the end
+	if len(family) != 2 || family[0].Path != "guide/setup.md" || len(personal) != 1 || personal[0].Path != "guide/sub/deep.md" {
 		t.Fatalf("family %+v personal %+v", family, personal)
 	}
 
@@ -202,5 +206,78 @@ func TestPins(t *testing.T) {
 	}
 	if removed, _ := s.RemovePin(Family, "index.md"); removed {
 		t.Error("removed twice")
+	}
+}
+
+func TestReorderPins(t *testing.T) {
+	s, c := newStore(t)
+	for _, p := range []string{"a.md", "b.md", "c.md", "d.md"} {
+		if _, err := s.AddPin(Family, p, "alice"); err != nil {
+			t.Fatal(err)
+		}
+		c.advance(time.Second)
+	}
+	order := func() string {
+		family, _, err := s.Pins("bob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range family {
+			out = append(out, p.Path)
+		}
+		return strings.Join(out, ",")
+	}
+	// unknown paths are ignored, the missing pins follow in their order
+	changed, err := s.ReorderPins(Family, []string{"c.md", "nope.md", "a.md", "c.md"})
+	if err != nil || !changed || order() != "c.md,a.md,b.md,d.md" {
+		t.Fatalf("changed %v, %v, order %s", changed, err, order())
+	}
+	if changed, _ := s.ReorderPins(Family, []string{"c.md"}); changed {
+		t.Error("the same order changed")
+	}
+	if _, err := s.AddPin(Family, "e.md", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MovePins("a.md", "z.md"); err != nil {
+		t.Fatal(err)
+	}
+	if order() != "c.md,z.md,b.md,d.md,e.md" {
+		t.Errorf("order %s", order())
+	}
+	// personal pins are separate
+	if changed, _ := s.ReorderPins("bob", []string{"c.md"}); changed {
+		t.Error("bob has no pins")
+	}
+}
+
+// The pins of a database from before the order keep the order they were listed in, newest first
+func TestPinOrderMigration(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, DatabaseFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:2] {
+		if _, err = db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.Exec(`PRAGMA user_version = 2;
+		INSERT INTO pins (account_id, path, pinned_by, pinned_at) VALUES ('', 'old.md', 'a', 1), ('', 'new.md', 'a', 3), ('', 'mid.md', 'a', 2), ('bob', 'x.md', 'b', 5)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	family, personal, err := s.Pins("bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(family) != 3 || family[0].Path != "new.md" || family[1].Path != "mid.md" || family[2].Path != "old.md" || len(personal) != 1 {
+		t.Errorf("family %+v personal %+v", family, personal)
 	}
 }
