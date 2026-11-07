@@ -100,6 +100,7 @@ func NewRestService(
 		thumbnailSlots: make(chan struct{}, maxConcurrentThumbnails),
 	}
 	treeManager.AddTreeChangeListener(func(_, newTree *wiki.Section) { rs.pruneThumbnails(newTree) })
+	rs.watchQRCodes()
 	rs.echoRest = rs.createRestService()
 	rs.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(rs.server.Host, strconv.Itoa(rs.server.Port)),
@@ -311,6 +312,8 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/push/subscriptions/", rs.getPushSubscriptions)
 	echoRest.POST("/push/subscriptions/", rs.postPushSubscription)
 	echoRest.DELETE("/push/subscriptions/", rs.deletePushSubscription)
+	echoRest.GET("/qr/", rs.getQRCodes)
+	echoRest.GET("/qr/:"+urlParamKey+"/", rs.getQRCode)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")

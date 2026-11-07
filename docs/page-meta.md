@@ -23,7 +23,8 @@ Every document of the tree (`GET /section/`, `GET /document/{id}/`) has `title` 
     "icon": "material/rocket",
     "status": "new",
     "tags": ["setup", "intro"],
-    "searchExclude": false
+    "searchExclude": false,
+    "qr": [{ "key": "waschmaschine", "label": null }]
   }
 }
 ```
@@ -31,7 +32,8 @@ Every document of the tree (`GET /section/`, `GET /document/{id}/`) has `title` 
 `meta` holds what the front matter says, nothing else: `title`, `description`, `icon` and
 `status` are `null` when it does not set them, `tags` is `[]`, and `searchExclude` is
 `search: {exclude: true}`. A single string in `tags` is one tag, and other values are turned
-into strings. `name` stays the file name without `.md`.
+into strings. `qr` lists the valid QR code keys, `[]` without them ([qr.md](qr.md)). `name`
+stays the file name without `.md`.
 
 ### Front matter
 
