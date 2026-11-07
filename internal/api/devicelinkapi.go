@@ -121,7 +121,7 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 		}
 		methods = append(methods, "device-link")
 	}
-	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig, FeatureFeedRanges, FeatureQRCodes}
+	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig, FeatureFeedRanges, FeatureQRCodes, FeatureForwardAuth}
 	if rs.authenticator.AccessRequestsAvailable() {
 		features = append(features, FeatureAccessRequests)
 	}

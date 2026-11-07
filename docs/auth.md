@@ -291,6 +291,7 @@ Without any method, endpoints that need authentication return 401 `unauthenticat
 | Routes | Who |
 |---|---|
 | `GET /alive/`, `GET /auth/status/`, the pre-login `/auth/…` endpoints, `GET /.well-known/assetlinks.json` | everyone, rate limited |
+| `GET /auth/forward/` | everyone; answers whether the request is logged in (below) |
 | content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, websockets) | any role; app tokens with `read` or `write` |
 | content changes (`POST`, `PUT`, `DELETE` on content routes, history restore) | `editor`, `admin`; app tokens with `write` |
 | `/auth/whoami/`, `/auth/logout/`, `/auth/ws-ticket/`, `/auth/reauth/…` | sessions (any role); `whoami` and `ws-ticket` also app tokens |
@@ -304,6 +305,31 @@ A session of an account that must still set up a second factor (`require2FA`) is
 
 With `server.auth.disabled: true` every request is the anonymous admin (development
 only; the server warns at startup), and the account endpoints return 404.
+
+**Protecting another site with these accounts.** A reverse proxy can let only logged-in
+users reach another site on the host of the web client, such as the MkDocs site at
+`/view/` in Markus' deployment. It asks `GET /auth/forward/` (Traefik `forwardAuth`, nginx
+`auth_request`) for every request to that site, with the browser's headers:
+
+- A session cookie or an app token (header, also Basic with an app token) of an active
+  account of any role: 200 with an empty body and `X-Auth-User: <username>`. The proxy
+  passes the request on.
+- Otherwise, for a page (`X-Forwarded-Method` `GET` or `HEAD`, `Accept` containing
+  `text/html`): 302 to the login page of the web client, `Location: /login?next=<path>`.
+  `next` is the `X-Forwarded-Uri` of the request (path and query, URL-encoded), only if it
+  is a path on the same host: one leading `/`, no `//`, no scheme or host, no backslash,
+  at most 2048 characters. Otherwise `Location: /login`. The web client logs in and goes
+  to `next`. The redirect is relative, so the protected site and the web client must share
+  a host.
+- Everything else (files the page loads, other methods): 401 `login required`.
+- A restricted session (above) counts as not logged in.
+
+`X-Forwarded-Method` and `X-Forwarded-Uri` count only from `server.trustedProxies`.
+An invalid session cookie is cleared in the answer, which the proxy passes to the browser.
+The check is a `GET` without CSRF checks and does not count against the login rate
+limit. The last use of a session is written at most every 5 minutes, so a page with many files costs
+one session lookup per file. Answers of 200 are not logged. `features` of `GET
+/server-info/` contains `forward-auth`.
 
 ## 5. CSRF and CORS
 

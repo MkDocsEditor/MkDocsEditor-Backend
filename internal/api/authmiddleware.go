@@ -135,7 +135,7 @@ func isReadOnlyMethod(method string) bool {
 // isPublicPath reports whether a path is reachable without authentication
 func isPublicPath(path string) bool {
 	switch path {
-	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/", "/server-info/":
+	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/", "/server-info/", EndpointPathForward:
 		return true
 	}
 	return strings.HasPrefix(path, "/auth/login/") || strings.HasPrefix(path, "/auth/passkey/login/") || strings.HasPrefix(path, "/auth/link/") ||
@@ -145,7 +145,7 @@ func isPublicPath(path string) bool {
 // restrictedPaths are reachable by a session that must still set up a second factor
 func isRestrictedAllowed(method, path string) bool {
 	switch path {
-	case EndpointPathWhoAmI, "/auth/logout/", "/auth/status/", "/account/", "/account/totp/", "/account/totp/confirm/",
+	case EndpointPathWhoAmI, EndpointPathForward, "/auth/logout/", "/auth/status/", "/account/", "/account/totp/", "/account/totp/confirm/",
 		"/account/passkeys/", "/account/passkeys/begin/", "/account/passkeys/finish/":
 		return path != "/account/" || method == http.MethodGet
 	}
