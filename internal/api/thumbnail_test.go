@@ -112,7 +112,7 @@ func TestResourceThumbnail(t *testing.T) {
 	if !bytes.Equal(again.Body.Bytes(), rec.Body.Bytes()) {
 		t.Error("the cached thumbnail differs")
 	}
-	req, _ := http.NewRequest(http.MethodGet, "/resource/"+photo.ID+"/thumbnail/?size=128", nil)
+	req, _ := http.NewRequest(http.MethodGet, APIPrefix+"/resource/"+photo.ID+"/thumbnail/?size=128", nil)
 	req.Header.Set("If-None-Match", rec.Header().Get("ETag"))
 	rec304 := e.doRequest(req)
 	expectStatus(t, rec304, http.StatusNotModified)
@@ -224,7 +224,7 @@ func TestThumbnailWaitEndsWithTheRequest(t *testing.T) {
 		e.rs.thumbnailSlots <- struct{}{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/resource/"+icon.ID+"/thumbnail/", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, APIPrefix+"/resource/"+icon.ID+"/thumbnail/", nil).WithContext(ctx)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- e.doRequest(req) }()
 

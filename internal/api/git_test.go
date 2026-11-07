@@ -61,7 +61,7 @@ func (e *syncEnv) commits() []string {
 }
 
 func (e *syncEnv) doBody(method, path, user, body string) *httpRecorder {
-	req, _ := http.NewRequest(method, e.http.URL+path, strings.NewReader(body))
+	req, _ := http.NewRequest(method, e.http.URL+APIPrefix+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader(e.t, e.authn, user, testPasswords[user]))
 	resp, err := http.DefaultClient.Do(req)

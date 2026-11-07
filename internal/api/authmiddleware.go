@@ -198,6 +198,11 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		authorization := req.Header.Get(echo.HeaderAuthorization)
+		if isForeignBasicAuth(req) {
+			// the Basic auth of another app on the same host, such as a protected MkDocs site
+			// next to /api: the browser may send it along, it is no login of this backend
+			authorization = ""
+		}
 		cookie := rs.sessionCookie(c)
 		if err := rs.checkCSRF(c, authorization != "", cookie != ""); err != nil {
 			return stop(err)
@@ -237,6 +242,12 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		return next(c)
 	}
+}
+
+// isForeignBasicAuth reports whether the request has Basic auth whose password is no app token
+func isForeignBasicAuth(req *http.Request) bool {
+	_, password, ok := req.BasicAuth()
+	return ok && !auth.ValidAppToken(password)
 }
 
 // authenticateHeader handles the Authorization header. An invalid header is a 401, the

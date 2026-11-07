@@ -83,7 +83,7 @@ func TestSyncTwoClientsConverge(t *testing.T) {
 
 // do sends an authenticated REST request to the env
 func (e *syncEnv) do(method, path, user string) *httpRecorder {
-	req, _ := http.NewRequest(method, e.http.URL+path, nil)
+	req, _ := http.NewRequest(method, e.http.URL+APIPrefix+path, nil)
 	req.Header.Set("Authorization", authHeader(e.t, e.authn, user, testPasswords[user]))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -821,7 +821,7 @@ func TestSyncRenameAndDelete(t *testing.T) {
 
 	// rename the section above the document
 	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
-	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
+	req, _ := http.NewRequest(http.MethodPut, e.http.URL+APIPrefix+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
 	resp, err := http.DefaultClient.Do(req)
@@ -1297,7 +1297,7 @@ func TestAuthorshipSnapshotFollowsTheDocument(t *testing.T) {
 
 	// rename the section above the document
 	guide := e.tm.GetSection(e.tm.GenerateID(filepath.Join(e.project, "docs", "guide")))
-	req, _ := http.NewRequest(http.MethodPut, e.http.URL+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
+	req, _ := http.NewRequest(http.MethodPut, e.http.URL+APIPrefix+"/section/"+guide.ID+"/", strings.NewReader(`{"name":"handbook"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", authHeader(t, e.authn, "alice", "alice-pw"))
 	resp, err := http.DefaultClient.Do(req)

@@ -41,7 +41,7 @@ websocket sends `tree-changed`.
 ## Sticker URL
 
 The sticker holds a URL of the web client, `https://<web host>/q/<key>`. The web client asks
-`GET /qr/<key>/?scan=1` and opens the page. Stickers hold the host, so a printed sticker
+`GET /api/qr/<key>/?scan=1` and opens the page. Stickers hold the host, so a printed sticker
 breaks when the web client moves to another host. The backend does not know the host.
 
 ## Opening a code

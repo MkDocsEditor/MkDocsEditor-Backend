@@ -48,7 +48,7 @@ func TestServerInfo(t *testing.T) {
 	e = newAccountEnv(t, func(c *configuration.Configuration) { c.Server.InstanceName = "  " })
 	r = e.app().do(http.MethodGet, "/server-info/", nil)
 	r.json(t, &info)
-	if info.Name != "localhost" || info.WikiURL != nil || info.BackendURL == nil || *info.BackendURL != e.srv.URL {
+	if info.Name != "localhost" || info.WikiURL != nil || info.BackendURL == nil || *info.BackendURL != e.srv.URL+APIPrefix {
 		t.Errorf("server info defaults = %s", r.body)
 	}
 
@@ -235,7 +235,7 @@ func TestDeviceLinkExpiryRevokeAndAccounts(t *testing.T) {
 	expect(t, redeemDeviceLink(e.app(), "mdl_"+strings.Repeat("A", 43), "", ""), http.StatusBadRequest, CodeInvalidLink)
 	expect(t, redeemDeviceLink(e.app(), "mdd_"+strings.Repeat("A", 43), "", ""), http.StatusBadRequest, CodeInvalidLink)
 	// the redeem endpoint needs X-Requested-With like the other public POSTs
-	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/auth/device-link/redeem/", strings.NewReader(`{"token":"x"}`))
+	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+APIPrefix+"/auth/device-link/redeem/", strings.NewReader(`{"token":"x"}`))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

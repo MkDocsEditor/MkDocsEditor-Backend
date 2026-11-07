@@ -38,6 +38,10 @@ const (
 	jsonIndent       = "  "
 
 	EndpointPathAlive = "/alive/"
+
+	// APIPrefix is the path every route is served under, see docs/sync-protocol.md. Route
+	// paths in this package are written without it.
+	APIPrefix = "/api"
 )
 
 type (
@@ -167,6 +171,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	}
 
 	// Root level middleware
+	echoRest.Pre(stripAPIPrefix)
 	echoRest.Pre(middleware.AddTrailingSlash())
 
 	echoRest.Use(rs.httpMetrics)
@@ -724,4 +729,33 @@ func (rs *RestService) handleWebsocket(c *echo.Context) error {
 		return echo.ErrNotFound
 	}
 	return err
+}
+
+// stripAPIPrefix serves the routes under APIPrefix: it removes the prefix before routing, and
+// answers every other path with 404
+func stripAPIPrefix(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		req := c.Request()
+		p, ok := cutAPIPrefix(req.URL.Path)
+		if !ok {
+			c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
+			return apiError(c, http.StatusNotFound, CodeNotFound, "the API is under "+APIPrefix+"/", nil)
+		}
+		req.URL.Path = p
+		if req.URL.RawPath != "" {
+			req.URL.RawPath, _ = cutAPIPrefix(req.URL.RawPath)
+		}
+		return next(c)
+	}
+}
+
+func cutAPIPrefix(p string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, APIPrefix)
+	if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
+		return "", false
+	}
+	if rest == "" {
+		rest = "/"
+	}
+	return rest, true
 }

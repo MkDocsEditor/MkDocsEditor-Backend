@@ -116,7 +116,7 @@ func TestAccountPasskeyFlow(t *testing.T) {
 	expect(t, app.do(http.MethodDelete, "/account/passkeys/"+keys[0].ID+"/", nil), http.StatusConflict, CodeLastLoginMethod)
 
 	// the backend serves assetlinks.json
-	resp, err := http.Get(e.srv.URL + "/.well-known/assetlinks.json")
+	resp, err := http.Get(e.srv.URL + APIPrefix + "/.well-known/assetlinks.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAccountPasskeysDisabled(t *testing.T) {
 	if strings.TrimSpace(string(r.body)) != "[]" {
 		t.Errorf("passkeys = %s", r.body)
 	}
-	resp, err := http.Get(e.srv.URL + "/.well-known/assetlinks.json")
+	resp, err := http.Get(e.srv.URL + APIPrefix + "/.well-known/assetlinks.json")
 	if err != nil {
 		t.Fatal(err)
 	}

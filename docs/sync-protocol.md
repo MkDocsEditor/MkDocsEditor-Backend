@@ -11,6 +11,13 @@ integration, revision history and the events websocket. The REST API reference i
 [`openapi-description.yaml`](../openapi-description.yaml). Where the two disagree on a
 REST endpoint, the OpenAPI file wins. For the websocket protocol, this document wins.
 
+**Paths.** The backend serves every route under the fixed prefix `/api`: `/api/server-info/`,
+`/api/auth/…`, `/api/document/{id}/ws/`, `/api/events/ws/`. Other paths answer 404, so the
+web client, the MkDocs site and the API can share one host. The paths in these documents and
+in the OpenAPI file are written without the prefix. `backendUrl` (connect links, `GET
+/server-info/`) includes it, for example `https://wiki.markusressel.de/api`, and clients
+append the paths to it.
+
 Target feature set (modelled on CodiMD):
 
 - realtime co-editing of one markdown file by several users

@@ -62,7 +62,7 @@ func newRestTestEnvWithAuth(t *testing.T, accounts bool, configure ...func(c *co
 
 func (e *restTestEnv) do(method, path string, body io.Reader, contentType string) *httptest.ResponseRecorder {
 	e.t.Helper()
-	req := httptest.NewRequest(method, path, body)
+	req := httptest.NewRequest(method, APIPrefix+path, body)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -355,7 +355,7 @@ func TestRestMultiUserAuth(t *testing.T) {
 
 func TestRestNoWWWAuthenticateForScripts(t *testing.T) {
 	e := newMultiUserEnv(t)
-	req := httptest.NewRequest(http.MethodGet, "/section/", nil)
+	req := httptest.NewRequest(http.MethodGet, APIPrefix+"/section/", nil)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	rec := httptest.NewRecorder()
 	e.rs.echoRest.ServeHTTP(rec, req)
@@ -389,7 +389,7 @@ func TestRestWsTicket(t *testing.T) {
 func TestRestCorsPreflight(t *testing.T) {
 	e := newMultiUserEnv(t)
 
-	req := httptest.NewRequest(http.MethodOptions, "/section/", nil)
+	req := httptest.NewRequest(http.MethodOptions, APIPrefix+"/section/", nil)
 	req.Header.Set("Origin", "https://editor.example.com")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	req.Header.Set("Access-Control-Request-Headers", "authorization")
@@ -405,7 +405,7 @@ func TestRestCorsPreflight(t *testing.T) {
 		t.Errorf("preflight headers = %v", h)
 	}
 
-	req = httptest.NewRequest(http.MethodOptions, "/section/", nil)
+	req = httptest.NewRequest(http.MethodOptions, APIPrefix+"/section/", nil)
 	req.Header.Set("Origin", "https://evil.example.com")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	rec = httptest.NewRecorder()

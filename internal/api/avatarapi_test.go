@@ -118,7 +118,7 @@ func TestAvatarUploadServeAndRemove(t *testing.T) {
 		t.Errorf("Cache-Control = %q", cc)
 	}
 	etag := r.header.Get("ETag")
-	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/avatars/"+me.ID+"/"+first+"/", nil)
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+APIPrefix+"/avatars/"+me.ID+"/"+first+"/", nil)
 	req.Header.Set("If-None-Match", etag)
 	req.Header.Set("Origin", testWebOrigin)
 	req.AddCookie(admin.cookie)

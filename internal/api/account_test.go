@@ -47,6 +47,8 @@ type client struct {
 	bearer  string
 	browser bool
 	origin  string
+	// basic is sent as Basic auth when set: user, password
+	basic []string
 }
 
 func (e *accountEnv) browser() *client { return &client{env: e, browser: true, origin: testWebOrigin} }
@@ -91,7 +93,7 @@ func (c *client) doRaw(method, path string, body []byte, contentType string) *re
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, c.env.srv.URL+path, reader)
+	req, err := http.NewRequest(method, c.env.srv.URL+APIPrefix+path, reader)
 	if err != nil {
 		c.env.t.Fatal(err)
 	}
@@ -99,6 +101,9 @@ func (c *client) doRaw(method, path string, body []byte, contentType string) *re
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "test-agent")
+	if c.basic != nil {
+		req.SetBasicAuth(c.basic[0], c.basic[1])
+	}
 	if c.browser {
 		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 		if c.origin != "" {
@@ -284,7 +289,7 @@ func TestAccountCSRF(t *testing.T) {
 	expect(t, create(b), http.StatusOK, "")
 
 	// no X-Requested-With
-	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/document/", strings.NewReader(`{"parent":"root","name":"x"}`))
+	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+APIPrefix+"/document/", strings.NewReader(`{"parent":"root","name":"x"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", testWebOrigin)
 	req.AddCookie(b.cookie)
@@ -315,7 +320,7 @@ func TestAccountCSRF(t *testing.T) {
 	expect(t, anon.do(http.MethodPost, "/auth/login/", map[string]any{"username": "markus", "password": "a long admin secret"}), http.StatusForbidden, CodeOriginNotAllowed)
 
 	// the preflight allows PATCH and the custom header for the web origin only
-	pre, _ := http.NewRequest(http.MethodOptions, e.srv.URL+"/account/", nil)
+	pre, _ := http.NewRequest(http.MethodOptions, e.srv.URL+APIPrefix+"/account/", nil)
 	pre.Header.Set("Origin", testWebOrigin)
 	pre.Header.Set("Access-Control-Request-Method", "PATCH")
 	pre.Header.Set("Access-Control-Request-Headers", "x-requested-with,content-type")
@@ -427,7 +432,7 @@ func TestAccountRateLimitResponse(t *testing.T) {
 func TestAccountPasswordOverBasicAuthRefused(t *testing.T) {
 	e := newAccountEnv(t)
 	e.setupAdmin()
-	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/section/", nil)
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+APIPrefix+"/section/", nil)
 	req.SetBasicAuth("markus", "a long admin secret")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -439,13 +444,56 @@ func TestAccountPasswordOverBasicAuthRefused(t *testing.T) {
 	}
 }
 
+// The browser sends the Basic auth of the MkDocs site on the same host along: the session
+// cookie still counts, and its CSRF checks apply
+func TestForeignBasicAuthIsIgnored(t *testing.T) {
+	e := newAccountEnv(t)
+	b := e.setupAdmin()
+	b.basic = []string{"family", "site password"}
+	expect(t, b.do(http.MethodGet, "/auth/whoami/", nil), http.StatusOK, "")
+	expect(t, b.do(http.MethodPost, "/document/", map[string]any{"parent": "root", "name": "x"}), http.StatusOK, "")
+	b.origin = "https://evil.example.com"
+	if r := b.do(http.MethodPost, "/document/", map[string]any{"parent": "root", "name": "y"}); r.status != http.StatusForbidden {
+		t.Errorf("foreign origin: %d", r.status)
+	}
+	anonymous := e.app()
+	anonymous.basic = []string{"family", "site password"}
+	expect(t, anonymous.do(http.MethodGet, "/section/", nil), http.StatusUnauthorized, CodeUnauthenticated)
+}
+
+func TestAPIPrefix(t *testing.T) {
+	e := newAccountEnv(t)
+	for path, want := range map[string]int{
+		APIPrefix + "/alive/": http.StatusOK,
+		APIPrefix + "/alive":  http.StatusOK,
+		"/alive/":             http.StatusNotFound,
+		"/server-info/":       http.StatusNotFound,
+		"/apialive/":          http.StatusNotFound,
+		"/":                   http.StatusNotFound,
+	} {
+		resp, err := http.Get(e.srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s: %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+	var info ServerInfoResponse
+	e.app().do(http.MethodGet, "/server-info/", nil).json(t, &info)
+	if info.BackendURL == nil || *info.BackendURL != e.srv.URL+APIPrefix {
+		t.Errorf("backendUrl = %v", info.BackendURL)
+	}
+}
+
 func TestAccountTrustedProxy(t *testing.T) {
 	e := newAccountEnv(t, func(c *configuration.Configuration) {
 		c.Server.TrustedProxies = []string{"127.0.0.1"}
 		c.Server.CORS.AllowedOrigins = []string{"https://edit.example.com"}
 	})
 	_, token, _ := e.rs.authenticator.CreateSetupLink()
-	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/auth/link/redeem/",
+	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+APIPrefix+"/auth/link/redeem/",
 		strings.NewReader(`{"token":"`+token+`","username":"markus","password":"a long admin secret"}`))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Origin", "https://edit.example.com")
@@ -496,7 +544,7 @@ func TestAccountSecurityHeaders(t *testing.T) {
 // websocket helpers
 
 func (e *accountEnv) dialEvents(header http.Header, hello map[string]any) (*websocket.Conn, error) {
-	ws, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(e.srv.URL, "http")+"/events/ws/", header)
+	ws, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(e.srv.URL, "http")+APIPrefix+"/events/ws/", header)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
