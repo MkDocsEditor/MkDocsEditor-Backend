@@ -130,12 +130,12 @@ paths:
               schema:
                 type: string
         "302":
-          description: "Not logged in: `Location: /login?next=<path>`"
+          description: "Not logged in: `Location: https://<X-Forwarded-Host>/login?next=<path>`"
           headers:
             Location:
               schema:
                 type: string
-              example: "/login?next=%2Fview%2F"
+              example: "https://wiki.example.com/login?next=%2Fview%2F"
         "401":
           description: "Not logged in, and not a page request"
 

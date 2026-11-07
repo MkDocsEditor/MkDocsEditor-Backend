@@ -34,6 +34,12 @@ func TestForwardAuth(t *testing.T) {
 		return answer{resp.StatusCode, resp.Header}
 	}
 	html := "text/html,application/xhtml+xml,*/*;q=0.8"
+	// what Traefik sends along
+	proxied := func(h map[string]string) map[string]string {
+		h[headerForwardedHost] = "wiki.example.com"
+		h["X-Forwarded-Proto"] = "https"
+		return h
+	}
 
 	// a session: 200 with the user
 	resp := forward(map[string]string{"Accept": html, headerForwardedURI: "/view/"}, admin.cookie)
@@ -65,11 +71,12 @@ func TestForwardAuth(t *testing.T) {
 		status   int
 		location string
 	}{
-		{"page", map[string]string{"Accept": html, headerForwardedURI: "/view/haus/heizung/?x=1"}, http.StatusFound, "/login?next=%2Fview%2Fhaus%2Fheizung%2F%3Fx%3D1"},
-		{"no uri", map[string]string{"Accept": html}, http.StatusFound, "/login"},
-		{"other host", map[string]string{"Accept": html, headerForwardedURI: "//evil.example.com/x"}, http.StatusFound, "/login"},
-		{"scheme", map[string]string{"Accept": html, headerForwardedURI: "https://evil.example.com/"}, http.StatusFound, "/login"},
-		{"backslash", map[string]string{"Accept": html, headerForwardedURI: "/\\evil.example.com"}, http.StatusFound, "/login"},
+		{"page", proxied(map[string]string{"Accept": html, headerForwardedURI: "/view/haus/heizung/?x=1"}), http.StatusFound, "https://wiki.example.com/login?next=%2Fview%2Fhaus%2Fheizung%2F%3Fx%3D1"},
+		{"no uri", proxied(map[string]string{"Accept": html}), http.StatusFound, "https://wiki.example.com/login"},
+		{"bad host", map[string]string{"Accept": html, headerForwardedHost: "evil.example.com/x", headerForwardedURI: "/view/"}, http.StatusFound, testWebOrigin + "/login?next=%2Fview%2F"},
+		{"other host", map[string]string{"Accept": html, headerForwardedURI: "//evil.example.com/x"}, http.StatusFound, testWebOrigin + "/login"},
+		{"scheme", map[string]string{"Accept": html, headerForwardedURI: "https://evil.example.com/"}, http.StatusFound, testWebOrigin + "/login"},
+		{"backslash", map[string]string{"Accept": html, headerForwardedURI: "/\\evil.example.com"}, http.StatusFound, testWebOrigin + "/login"},
 		{"not html", map[string]string{"Accept": "text/css,*/*", headerForwardedURI: "/view/style.css"}, http.StatusUnauthorized, ""},
 		{"post", map[string]string{"Accept": html, headerForwardedMethod: http.MethodPost, headerForwardedURI: "/view/"}, http.StatusUnauthorized, ""},
 	} {
@@ -105,7 +112,7 @@ func TestForwardAuthUntrustedHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/login" {
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != testWebOrigin+"/login" {
 		t.Errorf("%d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
