@@ -55,8 +55,13 @@ func (rs *RestService) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 		if rs.isHTTPS(c) {
 			h.Set(echo.HeaderStrictTransportSecurity, "max-age=31536000")
 		}
+		// API answers change with every edit, and browsers cache even a 404 or 410 heuristically.
+		// Files of resources are revalidated with Last-Modified; thumbnails and avatars set
+		// their own caching.
 		p := c.Request().URL.Path
-		if strings.HasPrefix(p, "/auth/") || strings.HasPrefix(p, "/account/") || strings.HasPrefix(p, "/admin/") {
+		if strings.HasPrefix(p, "/resource/") && strings.HasSuffix(p, "/content/") {
+			h.Set(echo.HeaderCacheControl, "no-cache")
+		} else {
 			h.Set(echo.HeaderCacheControl, "no-store")
 		}
 		return next(c)

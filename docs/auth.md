@@ -1038,8 +1038,10 @@ All responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none';
 frame-ancestors 'none'` (API responses, never rendered as pages),
 `Cross-Origin-Resource-Policy: same-site`. Over HTTPS also
-`Strict-Transport-Security: max-age=31536000`. `/auth/…`, `/account/…` and `/admin/…`
-responses add `Cache-Control: no-store`.
+`Strict-Transport-Security: max-age=31536000`. Responses say `Cache-Control: no-store`,
+errors included, because browsers cache even a 404 or 410 heuristically. Exceptions: the
+files of resources (`GET /resource/{id}/content/`) say `no-cache` and are revalidated with
+`Last-Modified`, and avatars and thumbnails set their own caching.
 
 ## 12. Passkeys: RP ID, origins and Android
 
