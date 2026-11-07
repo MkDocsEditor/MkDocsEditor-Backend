@@ -315,16 +315,20 @@ users reach another site on the host of the web client, such as the MkDocs site 
   account of any role: 200 with an empty body and `X-Auth-User: <username>`. The proxy
   passes the request on.
 - Otherwise, for a page (`X-Forwarded-Method` `GET` or `HEAD`, `Accept` containing
-  `text/html`): 302 to the login page of the web client, `Location: /login?next=<path>`.
+  `text/html`): 302 to the login page of the web client,
+  `Location: https://<host>/login?next=<path>`.
   `next` is the `X-Forwarded-Uri` of the request (path and query, URL-encoded), only if it
   is a path on the same host: one leading `/`, no `//`, no scheme or host, no backslash,
-  at most 2048 characters. Otherwise `Location: /login`. The web client logs in and goes
-  to `next`. The redirect is relative, so the protected site and the web client must share
-  a host.
+  at most 2048 characters. Otherwise there is no `next`. The web client logs in and goes
+  to `next`. `<host>` is the `X-Forwarded-Host` of the proxy (the host the browser asked
+  for), else the host of `auth.clientUrl`; the scheme follows `X-Forwarded-Proto`. The
+  redirect is absolute because Traefik resolves a relative one against the address of the
+  endpoint. `next` is a path, so the protected site and the web client must share a host.
 - Everything else (files the page loads, other methods): 401 `login required`.
 - A restricted session (above) counts as not logged in.
 
-`X-Forwarded-Method` and `X-Forwarded-Uri` count only from `server.trustedProxies`.
+`X-Forwarded-Method`, `X-Forwarded-Uri`, `X-Forwarded-Host` and `X-Forwarded-Proto` count
+only from `server.trustedProxies`.
 An invalid session cookie is cleared in the answer, which the proxy passes to the browser.
 The check is a `GET` without CSRF checks and does not count against the login rate
 limit. The last use of a session is written at most every 5 minutes, so a page with many files costs
