@@ -2,6 +2,7 @@ package activity
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -52,7 +53,10 @@ func TestSummarize(t *testing.T) {
 	before := "intro\n# One\na\nb\n```\n# not a heading\n```\n## Two ##\nc\n# Three\nd\n"
 	after := "intro\n# One\na\nB\n```\n# not a heading\n```\n## Two ##\nc\nnew\n# Three\n"
 	got := Summarize(before, after)
-	want := Summary{LinesAdded: 2, LinesRemoved: 2, Headings: []string{"One", "Two", "Three"}}
+	want := Summary{LinesAdded: 2, LinesRemoved: 2, Headings: []string{"One", "Two", "Three"}, TextHash: TextHash(after),
+		Ranges: []Range{{Line: 4, Count: 1, Heading: ptr("One"), HeadingOccurrence: 1, Offset: 2},
+			// "new" and the removed "d" are 1 line apart: one range
+			{Line: 10, Count: 2, Heading: ptr("Two"), HeadingOccurrence: 1, Offset: 2}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -70,6 +74,67 @@ func TestSummarize(t *testing.T) {
 	}
 	if got := Summarize(many, changed); !reflect.DeepEqual(got.Headings, []string{"A", "B", "C", "D", "E"}) {
 		t.Errorf("headings = %v", got.Headings)
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func TestRanges(t *testing.T) {
+	str := func(rs []Range) string {
+		out := []string{}
+		for _, r := range rs {
+			h := "-"
+			if r.Heading != nil {
+				h = *r.Heading
+			}
+			out = append(out, fmt.Sprintf("%d+%d@%s#%d+%d", r.Line, r.Count, h, r.HeadingOccurrence, r.Offset))
+		}
+		return strings.Join(out, " ")
+	}
+	for _, tc := range []struct{ name, before, after, want string }{
+		{"removed only", "a\nb\nc\n", "a\nc\n", "2+0@-#0+1"},
+		{"removed at the end", "# H\na\nb\n", "# H\na\n", "3+0@H#1+2"},
+		{"everything removed", "a\n", "", "1+0@-#0+0"},
+		{"repeated heading", "# Notes\nx\n# Notes\ny\n", "# Notes\nx\n# Notes\nY\n", "4+1@Notes#2+1"},
+		{"front matter is no heading", "---\n# comment\n---\na\n", "---\n# comment\n---\nA\n", "4+1@-#0+3"},
+		{"CR stays in the line", "a\r\nb\r\n", "a\r\nB\r\n", "2+1@-#0+1"},
+		{"far apart", "a\nb\nc\nd\ne\nf\ng\n", "A\nb\nc\nd\ne\nf\nG\n", "1+1@-#0+0 7+1@-#0+6"},
+		{"near", "a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n", "1+5@-#0+0"},
+	} {
+		if got := str(Summarize(tc.before, tc.after).Ranges); got != tc.want {
+			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
+		}
+	}
+
+	// at most maxRanges: the closest neighbours merge, every change stays covered
+	var before, after strings.Builder
+	for i := 0; i < 30; i++ {
+		gap := 5
+		if i%2 == 1 {
+			gap = 10
+		}
+		before.WriteString("x\n")
+		after.WriteString("changed\n")
+		for j := 0; j < gap; j++ {
+			before.WriteString("same\n")
+			after.WriteString("same\n")
+		}
+	}
+	rs := Summarize(before.String(), after.String()).Ranges
+	covered := 0
+	for i, r := range rs {
+		covered += r.Count
+		if i > 0 && r.Line <= rs[i-1].Line+rs[i-1].Count-1 {
+			t.Errorf("ranges overlap or are out of order: %s", str(rs))
+		}
+	}
+	last := rs[len(rs)-1]
+	// the last changed line is 245: 30 blocks of 1 + 5 or 10 lines, the last of 11 lines
+	if len(rs) != maxRanges || rs[0].Line != 1 || last.Line > 245 || last.Line+last.Count-1 < 245 || covered < 30 {
+		t.Errorf("%d ranges: %s", len(rs), str(rs))
+	}
+	if TextHash("") != "e3b0c44298fc1c14" {
+		t.Errorf("hash = %s", TextHash(""))
 	}
 }
 
@@ -279,5 +344,37 @@ func TestPinOrderMigration(t *testing.T) {
 	}
 	if len(family) != 3 || family[0].Path != "new.md" || family[1].Path != "mid.md" || family[2].Path != "old.md" || len(personal) != 1 {
 		t.Errorf("family %+v personal %+v", family, personal)
+	}
+}
+
+func TestRangesMigration(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, DatabaseFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:3] {
+		if _, err = db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.Exec(`PRAGMA user_version = 3;
+		INSERT INTO feed (time, kind, item_type, path, authors, lines_added, headings) VALUES (?, 'edited', 'document', 'a.md', '["alice"]', 1, '["H"]')`,
+		time.Now().UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	entries := feed(t, s)
+	if len(entries) != 1 || entries[0].Summary.Ranges != nil || entries[0].Summary.TextHash != "" || entries[0].Summary.Headings[0] != "H" {
+		t.Errorf("entries = %+v %+v", entries, entries[0].Summary)
+	}
+	s.RecordEdit("b.md", "x\n", "y\n", []string{"alice"})
+	if e := feed(t, s)[0]; e.Path != "b.md" || len(e.Summary.Ranges) != 1 || e.Summary.TextHash != TextHash("y\n") {
+		t.Errorf("new entry = %+v", e.Summary)
 	}
 }

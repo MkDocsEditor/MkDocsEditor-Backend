@@ -4615,6 +4615,41 @@ components:
           description: "Up to 5 headings above the changed lines, in document order"
           items:
             type: string
+        textHash:
+          type: string
+          description: |
+            First 16 hex digits of SHA-256 over the text after the last edit (feature
+            `feed-ranges`, docs/dashboard.md). Missing on older entries.
+          example: "9f2c1a0b7d3e4f55"
+        ranges:
+          type: array
+          nullable: true
+          description: |
+            The changed lines in text order, at most 20 (feature `feed-ranges`). `null` on
+            older entries.
+          items:
+            $ref: "#/components/schemas/FeedRange"
+
+    FeedRange:
+      type: object
+      required: [ line, count, heading, headingOccurrence, offset ]
+      properties:
+        line:
+          type: integer
+          description: "1-based line of the text after the edit"
+        count:
+          type: integer
+          description: "Added or changed lines from `line`; 0 marks lines removed before `line`"
+        heading:
+          type: string
+          nullable: true
+          description: "The nearest heading at or above `line`, as in `headings`"
+        headingOccurrence:
+          type: integer
+          description: "Which heading with this text, 1 for the first; 0 without heading"
+        offset:
+          type: integer
+          description: "`line` minus the line of the heading, or `line - 1` without heading"
 
     Feed:
       type: object

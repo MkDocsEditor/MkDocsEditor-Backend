@@ -53,6 +53,16 @@ func splitFrontMatter(text string) (front string, body string, ok bool) {
 	}
 }
 
+// FrontMatterLines returns the number of lines of the front matter with its two delimiter
+// lines, 0 if the text has none. The YAML inside is not parsed.
+func FrontMatterLines(text string) int {
+	front, _, ok := splitFrontMatter(text)
+	if !ok {
+		return 0
+	}
+	return strings.Count(front, "\n") + 2
+}
+
 // ParsePageMeta reads the front matter of a document. Invalid YAML counts as none.
 func ParsePageMeta(text string) (PageMeta, string) {
 	meta := PageMeta{Tags: []string{}}

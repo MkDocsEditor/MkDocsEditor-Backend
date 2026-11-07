@@ -103,29 +103,12 @@ func (s *Store) Subscriptions(accountID string) ([]Subscription, error) {
 
 // Entry returns one feed entry, nil if it does not exist
 func (s *Store) Entry(id int64) (*Entry, error) {
-	var (
-		e                       Entry
-		at                      int64
-		authors, headings       string
-		linesAdded, linesRemove int
-	)
-	err := s.db.QueryRow(`SELECT id, time, kind, item_type, path, old_path, authors, lines_added, lines_removed, headings
-		FROM feed WHERE id = ?`, id).Scan(&e.ID, &at, &e.Kind, &e.ItemType, &e.Path, &e.OldPath, &authors, &linesAdded, &linesRemove, &headings)
+	e, err := scanEntry(s.db.QueryRow(`SELECT `+entryColumns+` FROM feed WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
-	}
-	e.Time = time.UnixMilli(at).UTC()
-	if err = json.Unmarshal([]byte(authors), &e.Authors); err != nil {
-		return nil, err
-	}
-	if e.Kind == KindEdited {
-		e.Summary = &Summary{LinesAdded: linesAdded, LinesRemoved: linesRemove}
-		if err = json.Unmarshal([]byte(headings), &e.Summary.Headings); err != nil {
-			return nil, err
-		}
 	}
 	return &e, nil
 }
