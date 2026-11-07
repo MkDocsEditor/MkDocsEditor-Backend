@@ -28,6 +28,15 @@ server:
   #  port: 9413
   #  # Write the sync events as JSON lines to stdout, for a log system like Loki
   #  eventLog: true
+  # (optional) Web Push notifications for feed changes, also for UnifiedPush (ntfy), see
+  # docs/push.md. The VAPID key is created in <stateDir>/push-vapid.key on the first start.
+  #push:
+  #  # The push services the server sends to. Push is off without any.
+  #  allowedHosts:
+  #    - "ntfy.example.com"
+  #  # Default: backendUrl, else wikiUrl
+  #  subject: "mailto:admin@example.com"
+  #  disabled: false
   # (optional) Accounts and login, see docs/auth.md. Accounts live in <stateDir>/auth.db.
   # Without any account, the backend starts in setup mode and prints a setup link for the
   # first admin (again with: mkdocsrest setup-link). Further users join by invite links.

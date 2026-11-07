@@ -29,6 +29,8 @@ type (
 		LoginMethods    []string      `json:"loginMethods"`
 		Require2FA      bool          `json:"require2FA"`
 		Features        []string      `json:"features"`
+		// Push is set when the server sends Web Push messages
+		Push *PushInfo `json:"push"`
 	}
 
 	CreateDeviceLinkRequest struct {
@@ -117,6 +119,9 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 	if rs.authenticator.AccessRequestsAvailable() {
 		features = append(features, FeatureAccessRequests)
 	}
+	if rs.push != nil {
+		features = append(features, FeaturePush)
+	}
 	return c.JSONPretty(http.StatusOK, &ServerInfoResponse{
 		Name:            name,
 		Version:         global.Version,
@@ -130,6 +135,7 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 		LoginMethods:    methods,
 		Require2FA:      enabled && rs.authenticator.Require2FA(),
 		Features:        features,
+		Push:            rs.pushInfo(),
 	}, jsonIndent)
 }
 

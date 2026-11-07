@@ -22,6 +22,19 @@ type (
 		// Auth configures accounts and sessions, see docs/auth.md
 		Auth AuthConfiguration `yaml:"auth"`
 		CORS CorsConfiguration `yaml:"cors"`
+		// Push configures Web Push, see docs/push.md
+		Push PushConfiguration `yaml:"push"`
+	}
+
+	PushConfiguration struct {
+		// Disabled turns Web Push off
+		Disabled bool `yaml:"disabled"`
+		// AllowedHosts are the push services the server sends to, as host or host:port.
+		// Without any, push is off.
+		AllowedHosts []string `yaml:"allowedHosts"`
+		// Subject is the contact in the VAPID tokens, a mailto: or https: URL
+		// (default: backendUrl, else wikiUrl, else mailto:mkdocseditor@localhost)
+		Subject string `yaml:"subject"`
 	}
 
 	MetricsConfiguration struct {

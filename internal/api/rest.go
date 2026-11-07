@@ -22,6 +22,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/push"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v5"
@@ -70,6 +71,7 @@ type RestService struct {
 	treeManager    *wiki.TreeManager
 	sync           *collab.SyncServer
 	git            *gitstore.Committer
+	push           *push.Notifier
 	refs           *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
 	knownRoutes map[string]struct{}
@@ -304,6 +306,9 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.PUT("/pins/personal/:"+urlParamID+"/", rs.changePin(false, true))
 	echoRest.DELETE("/pins/personal/:"+urlParamID+"/", rs.changePin(false, false))
 	echoRest.GET("/feed/", rs.getFeed)
+	echoRest.GET("/push/subscriptions/", rs.getPushSubscriptions)
+	echoRest.POST("/push/subscriptions/", rs.postPushSubscription)
+	echoRest.DELETE("/push/subscriptions/", rs.deletePushSubscription)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")

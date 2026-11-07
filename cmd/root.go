@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/nativemem"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/push"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/fatih/color"
 	"github.com/pterm/pterm"
@@ -118,6 +120,13 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	if metricsServer != nil {
 		metrics.Registry.MustRegister(api.NewMetricsCollector(syncServer, treeManager, gitCommitter))
 	}
+	notifier, err := startPush(conf, authenticator, syncServer)
+	if err != nil {
+		return err
+	}
+	if notifier != nil {
+		restService.SetPush(notifier)
+	}
 
 	// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -131,6 +140,9 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	}()
 
 	serveErr := restService.Start()
+	if notifier != nil {
+		notifier.Close()
+	}
 	syncServer.Close()
 	log.Printf("All documents saved")
 	if gitCommitter != nil {
@@ -172,6 +184,26 @@ func startMetricsServer(conf configuration.Configuration) (*metrics.Server, erro
 	go server.Serve()
 	log.Printf("Serving metrics at http://%s/metrics", server.Addr())
 	return server, nil
+}
+
+// startPush starts sending Web Push messages if push is configured. It returns nil if not.
+func startPush(conf configuration.Configuration, authenticator *auth.Service, syncServer *collab.SyncServer) (*push.Notifier, error) {
+	cfg := conf.Server.Push
+	if cfg.Disabled || len(cfg.AllowedHosts) == 0 {
+		return nil, nil
+	}
+	subject := cfg.Subject
+	for _, u := range []string{conf.Server.BackendURL, conf.Server.WikiURL, "mailto:mkdocseditor@localhost"} {
+		if subject == "" {
+			subject = u
+		}
+	}
+	sender, err := push.NewSender(push.Options{StateDir: conf.MkDocs.StateDir, AllowedHosts: cfg.AllowedHosts, Subject: subject})
+	if err != nil {
+		return nil, fmt.Errorf("unable to start push: %w", err)
+	}
+	log.Printf("Web Push enabled for %s", strings.Join(cfg.AllowedHosts, ", "))
+	return push.NewNotifier(sender, syncServer.Activity(), authenticator), nil
 }
 
 // startGitCommitter starts committing changes if git is enabled. It returns nil if not.
