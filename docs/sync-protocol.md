@@ -473,9 +473,17 @@ Presence can have an optional `viewport`, the text the user is looking at:
 - Clients always send their current `selections`. Empty selections with a viewport mean "no
   cursor", and the server keeps the last selections in `lastPositions`.
 - From a client, a missing `viewport` keeps the last one, and `"viewport": null` clears it.
-  Clients send null when their editor pane stops being visible, also when someone only reads
-  the rendered preview, so followers do not track a stale spot. From the server, presence is
-  always complete: a missing `viewport` means there is none.
+  Clients send null only when they show nothing of the document, so followers do not track a
+  stale spot. From the server, presence is always complete: a missing `viewport` means there
+  is none.
+- A client that shows the rendered preview, alone or next to the editor, sends the source
+  range of the visible blocks:
+  - A block covers its source lines up to the line before the first line of the next block.
+    The last block covers the rest of the text.
+  - The visible blocks are those on screen. A block taller than the view counts when it
+    covers the top of the view.
+  - `top` is the start of the first line of the first visible block, and `bottom` the end of
+    the last line of the last visible block.
 - Clients send it at most about twice per second while scrolling, and once more when
   scrolling stops.
 - A follower centers the middle of `top` and `bottom`, on any screen size. Without a viewport
