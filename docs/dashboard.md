@@ -136,7 +136,64 @@ To keep the feed readable, edits form **editing sessions**:
 
 `summary` counts the changed lines (a changed line counts as one removed and one added)
 and names up to 5 headings above the changed lines, in document order. Headings are
-Markdown ATX headings (`#` to `######`) outside fenced code blocks.
+Markdown ATX headings (`#` to `######`) outside fenced code blocks and outside the front
+matter. Setext headings (a line underlined with `===` or `---`) are not recognized.
+
+### Changed lines
+
+`features` of `GET /server-info/` contains `feed-ranges` on a server where `summary` also
+says which lines changed, so clients can highlight them:
+
+```json
+"summary": {
+  "linesAdded": 5, "linesRemoved": 1, "headings": [ "Setup" ],
+  "textHash": "9f2c1a0b7d3e4f55",
+  "ranges": [
+    { "line": 12, "count": 3, "heading": "Setup", "headingOccurrence": 1, "offset": 4 },
+    { "line": 30, "count": 0, "heading": "Install", "headingOccurrence": 1, "offset": 2 }
+  ]
+}
+```
+
+Like the counts, the ranges compare the text at the start of the editing session with the
+text at its last edit. They are no union of the single edits. All line numbers refer to the
+text after the last edit.
+
+- **Lines.** The text is split on `\n` only, and a `\r` stays part of its line. A newline at
+  the end of the text does not start another line, so `"a\nb\n"` and `"a\nb"` have 2 lines and
+  `""` has none. Lines count from 1.
+- **`line` and `count`.** `count` added or changed lines start at `line`. Changes with up to
+  3 unchanged lines between them form one range, and the range includes those lines.
+- **Removed lines.** A range with `count: 0` marks lines that were removed before `line`
+  with nothing added in their place. For a removal at the end, `line` is the number of
+  lines + 1.
+- **`heading`.** The nearest heading at or above `line`, recognized as for `headings`, and
+  byte-equal to its entry there. `null` if there is no heading above. For a removal at the
+  end, it is the heading of the last line.
+- **`headingOccurrence`.** Which heading with this text it is, counting from the top: 1 for
+  the first. It is 0 when `heading` is `null`.
+- **`offset`.** `line` minus the line of the heading, or `line - 1` without a heading.
+- **Order and size.** Ranges are in text order and do not overlap. There are at most 20.
+  Beyond that, the two neighbours with the fewest lines between them merge until 20 are
+  left, so every change stays covered.
+- **`textHash`.** The first 16 hex digits of SHA-256 over the UTF-8 bytes of the text after
+  the last edit, with no normalisation. This is the text the backend wrote to the file, which
+  is byte-equal to the text of the Automerge document at that moment. For a change on disk,
+  it is the file text, which the backend takes over into the Automerge document unchanged.
+
+Clients find a range in the current text, which may have changed since:
+
+1. If the hash of the current Automerge text equals `textHash`, `line` and `count` apply
+   as they are.
+2. Otherwise they look for the heading `heading` number `headingOccurrence`, or the first
+   heading with that text if there are fewer, and take its line + `offset`.
+3. Without `heading`, or if no heading with that text exists, they take `line`.
+
+Lines beyond the end are clamped to the text. `ranges[0]` is the place to jump to.
+
+Entries recorded before `feed-ranges` have no `textHash`, and their `ranges` are `null`.
+Clients use `headings` for them. An edit that changes only the newline at the end has
+`ranges: []`.
 
 Edits of the server alone are no entries: the reference updates of a move are part of the
 `moved` entry. A restore from the history is an edit of the account that restored.

@@ -81,9 +81,10 @@ func (s *Store) recordEdit(path string, before string, after string, authors []s
 			return 0, err
 		}
 		sum := Summarize(before, after)
-		res, err := tx.Exec(`INSERT INTO feed (time, kind, item_type, path, authors, lines_added, lines_removed, headings, base_text)
-			VALUES (?, ?, 'document', ?, ?, ?, ?, ?, ?)`,
-			at.UnixMilli(), KindEdited, path, mustJSON(authors), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings), before)
+		res, err := tx.Exec(`INSERT INTO feed (time, kind, item_type, path, authors, lines_added, lines_removed, headings, ranges, text_hash, base_text)
+			VALUES (?, ?, 'document', ?, ?, ?, ?, ?, ?, ?, ?)`,
+			at.UnixMilli(), KindEdited, path, mustJSON(authors), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings),
+			mustJSON(sum.Ranges), sum.TextHash, before)
 		if err != nil {
 			return 0, err
 		}
@@ -108,8 +109,9 @@ func (s *Store) recordEdit(path string, before string, after string, authors []s
 			}
 		}
 		sum := Summarize(base, after)
-		if _, err = tx.Exec(`UPDATE feed SET time = ?, authors = ?, lines_added = ?, lines_removed = ?, headings = ? WHERE id = ?`,
-			at.UnixMilli(), mustJSON(known), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings), id); err != nil {
+		if _, err = tx.Exec(`UPDATE feed SET time = ?, authors = ?, lines_added = ?, lines_removed = ?, headings = ?, ranges = ?, text_hash = ?
+			WHERE id = ?`, at.UnixMilli(), mustJSON(known), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings),
+			mustJSON(sum.Ranges), sum.TextHash, id); err != nil {
 			return 0, err
 		}
 	}
@@ -172,7 +174,7 @@ func (s *Store) Feed(cursor string, limit int) ([]Entry, string, error) {
 			return nil, "", err
 		}
 	}
-	rows, err := s.db.Query(`SELECT id, time, kind, item_type, path, old_path, authors, lines_added, lines_removed, headings
+	rows, err := s.db.Query(`SELECT `+entryColumns+`
 		FROM feed WHERE time >= ? AND (time < ? OR (time = ? AND id < ?)) ORDER BY time DESC, id DESC LIMIT ?`,
 		s.now().Add(-Retention).UnixMilli(), beforeTime, beforeTime, beforeID, limit+1)
 	if err != nil {
@@ -181,24 +183,9 @@ func (s *Store) Feed(cursor string, limit int) ([]Entry, string, error) {
 	defer func() { _ = rows.Close() }()
 	entries := []Entry{}
 	for rows.Next() {
-		var (
-			e                     Entry
-			at                    int64
-			authors, headings     string
-			linesAdded, linesRemd int
-		)
-		if err = rows.Scan(&e.ID, &at, &e.Kind, &e.ItemType, &e.Path, &e.OldPath, &authors, &linesAdded, &linesRemd, &headings); err != nil {
+		e, err := scanEntry(rows)
+		if err != nil {
 			return nil, "", err
-		}
-		e.Time = time.UnixMilli(at).UTC()
-		if err = json.Unmarshal([]byte(authors), &e.Authors); err != nil {
-			return nil, "", err
-		}
-		if e.Kind == KindEdited {
-			e.Summary = &Summary{LinesAdded: linesAdded, LinesRemoved: linesRemd}
-			if err = json.Unmarshal([]byte(headings), &e.Summary.Headings); err != nil {
-				return nil, "", err
-			}
 		}
 		entries = append(entries, e)
 	}
@@ -241,4 +228,39 @@ func mustJSON(v any) string {
 		panic(err)
 	}
 	return string(data)
+}
+
+// entryColumns are the columns scanEntry reads
+const entryColumns = `id, time, kind, item_type, path, old_path, authors, lines_added, lines_removed, headings, ranges, text_hash`
+
+// scanEntry reads a feed row of entryColumns. Entries recorded before migration 4 have no
+// ranges and no text hash.
+func scanEntry(row interface{ Scan(...any) error }) (Entry, error) {
+	var (
+		e                     Entry
+		at                    int64
+		authors, headings     string
+		ranges, textHash      sql.NullString
+		linesAdded, linesRemd int
+	)
+	if err := row.Scan(&e.ID, &at, &e.Kind, &e.ItemType, &e.Path, &e.OldPath, &authors, &linesAdded, &linesRemd, &headings,
+		&ranges, &textHash); err != nil {
+		return e, err
+	}
+	e.Time = time.UnixMilli(at).UTC()
+	if err := json.Unmarshal([]byte(authors), &e.Authors); err != nil {
+		return e, err
+	}
+	if e.Kind == KindEdited {
+		e.Summary = &Summary{LinesAdded: linesAdded, LinesRemoved: linesRemd, TextHash: textHash.String}
+		if err := json.Unmarshal([]byte(headings), &e.Summary.Headings); err != nil {
+			return e, err
+		}
+		if ranges.Valid {
+			if err := json.Unmarshal([]byte(ranges.String), &e.Summary.Ranges); err != nil {
+				return e, err
+			}
+		}
+	}
+	return e, nil
 }

@@ -22,6 +22,8 @@ const (
 	FeatureFeed = "feed"
 	// FeaturePinOrder means the pins can be reordered, see docs/dashboard.md
 	FeaturePinOrder = "pin-order"
+	// FeatureFeedRanges means edit summaries have textHash and ranges, see docs/dashboard.md
+	FeatureFeedRanges = "feed-ranges"
 
 	feedDefaultLimit = 50
 	feedMaxLimit     = 200

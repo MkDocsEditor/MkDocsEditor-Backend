@@ -83,6 +83,11 @@ ALTER TABLE pins ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
 UPDATE pins SET position = (SELECT COUNT(*) FROM pins p2 WHERE p2.account_id = pins.account_id
 	AND (p2.pinned_at > pins.pinned_at OR (p2.pinned_at = pins.pinned_at AND p2.path < pins.path)));
 `,
+	// 4: the changed lines of edits, NULL for older entries
+	`
+ALTER TABLE feed ADD COLUMN ranges TEXT;
+ALTER TABLE feed ADD COLUMN text_hash TEXT;
+`,
 }
 
 // Store is the activity database
