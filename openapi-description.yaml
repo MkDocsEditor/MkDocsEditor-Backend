@@ -57,6 +57,8 @@ tags:
     description: "Pinned documents and the change feed, see docs/dashboard.md"
   - name: Push
     description: "Web Push subscriptions (sessions only), see docs/push.md"
+  - name: QR
+    description: "QR code keys of pages, see docs/qr.md"
 
 paths:
   /alive/:
@@ -1745,6 +1747,77 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /qr/:
+    get:
+      summary: "All QR code keys"
+      description: |
+        The keys of the front matter `qr` of all documents, the conflicts, the invalid values and
+        the keys no document has any more (docs/qr.md). Every role. `features` of
+        `GET /server-info/` contains `qr-codes`.
+      operationId: getQRCodes
+      tags: [ QR ]
+      responses:
+        "200":
+          description: "The keys"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCodes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /qr/{key}/:
+    get:
+      summary: "The page of a QR code key"
+      description: |
+        Every role. The key is compared in lower case. With `scan=1` the scan time is recorded
+        for a known key (200, 409, 410); without it the request is a preview.
+      operationId: getQRCode
+      tags: [ QR ]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "waschmaschine"
+        - name: scan
+          in: query
+          schema:
+            type: string
+            enum: [ "1" ]
+      responses:
+        "200":
+          description: "One document has the key"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCode"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "No document ever had the key, or it is invalid"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `qr-conflict`: more than one document has the key. `details` is
+            `{key, items: [QRItem], lastScannedAt}`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "410":
+          description: |
+            `qr-gone`: no document has the key any more. `details` is
+            `{key, label, lastPath, lastScannedAt}`, as QRGone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /mkdocs/config/:
     get:
       summary: "The MkDocs configuration"
@@ -3088,7 +3161,7 @@ components:
     PageMeta:
       type: object
       description: "Fields of the YAML front matter; null or empty when the page does not set them"
-      required: [ title, description, icon, status, tags, searchExclude ]
+      required: [ title, description, icon, status, tags, searchExclude, qr ]
       properties:
         title:
           type: string
@@ -3110,6 +3183,103 @@ components:
         searchExclude:
           type: boolean
           description: "`search: {exclude: true}`"
+        qr:
+          type: array
+          description: "The valid QR code keys of the page, docs/qr.md"
+          items:
+            $ref: "#/components/schemas/QRKey"
+
+    QRKey:
+      type: object
+      required: [ key, label ]
+      properties:
+        key:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+          example: "waschmaschine"
+        label:
+          type: string
+          nullable: true
+          example: "Keller, an der Maschine"
+
+    QRItem:
+      type: object
+      required: [ item, title ]
+      properties:
+        item:
+          $ref: "#/components/schemas/ItemRef"
+        title:
+          type: string
+          description: "The page title"
+
+    QRCode:
+      allOf:
+        - $ref: "#/components/schemas/QRKey"
+        - $ref: "#/components/schemas/QRItem"
+        - type: object
+          required: [ lastScannedAt ]
+          properties:
+            lastScannedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    QRGone:
+      type: object
+      required: [ key, label, lastPath, lastScannedAt ]
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+          nullable: true
+        lastPath:
+          type: string
+          description: "The last document that had the key"
+        lastScannedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    QRCodes:
+      type: object
+      required: [ codes, conflicts, invalid, gone ]
+      properties:
+        codes:
+          type: array
+          items:
+            $ref: "#/components/schemas/QRCode"
+        conflicts:
+          type: array
+          items:
+            type: object
+            required: [ key, items, lastScannedAt ]
+            properties:
+              key:
+                type: string
+              items:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QRItem"
+              lastScannedAt:
+                type: string
+                format: date-time
+                nullable: true
+        invalid:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/QRItem"
+              - type: object
+                required: [ value ]
+                properties:
+                  value:
+                    type: string
+                    description: "The qr value as written"
+        gone:
+          type: array
+          items:
+            $ref: "#/components/schemas/QRGone"
 
     WikiConfig:
       type: object

@@ -24,6 +24,10 @@ type PageMeta struct {
 	Status        *string  `json:"status"`
 	Tags          []string `json:"tags"`
 	SearchExclude bool     `json:"searchExclude"`
+	// QR are the valid QR code keys of the page, see docs/qr.md
+	QR []QRCode `json:"qr"`
+	// QRInvalid are the qr values that are no valid key, as written
+	QRInvalid []string `json:"-"`
 }
 
 var (
@@ -65,7 +69,7 @@ func FrontMatterLines(text string) int {
 
 // ParsePageMeta reads the front matter of a document. Invalid YAML counts as none.
 func ParsePageMeta(text string) (PageMeta, string) {
-	meta := PageMeta{Tags: []string{}}
+	meta := PageMeta{Tags: []string{}, QR: []QRCode{}}
 	front, body, ok := splitFrontMatter(text)
 	if !ok {
 		return meta, text
@@ -99,6 +103,7 @@ func ParsePageMeta(text string) (PageMeta, string) {
 	if search, ok := raw["search"].(map[string]any); ok {
 		meta.SearchExclude, _ = search["exclude"].(bool)
 	}
+	meta.QR, meta.QRInvalid = parseQRCodes(raw["qr"])
 	return meta, body
 }
 

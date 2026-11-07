@@ -634,7 +634,7 @@ The Automerge state lives outside the docs folder, in `mkdocs.stateDir` (default
 ```
 .mkdocseditor/
   auth.db                     accounts and actor id -> account bindings (SQLite, see auth.md)
-  activity.db                 pins, the change feed and push subscriptions (SQLite, see dashboard.md)
+  activity.db                 pins, the change feed, push subscriptions, QR codes (SQLite, see dashboard.md)
   push-vapid.key              VAPID key of the push messages (see push.md)
   documents/
     <uuid>.automerge          Automerge save() of the document
