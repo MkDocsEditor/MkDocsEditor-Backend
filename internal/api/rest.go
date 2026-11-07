@@ -192,6 +192,10 @@ func (rs *RestService) createRestService() *echo.Echo {
 		LogLatency:  true,
 		HandleError: true,
 		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
+			// a page of the protected site asks once per file
+			if c.Path() == EndpointPathForward && v.Status == http.StatusOK {
+				return nil
+			}
 			if v.Error != nil && !errors.Is(v.Error, errResponded) {
 				log.Printf("%s %s %d %v error=%v", v.Method, v.URIPath, v.Status, v.Latency, v.Error)
 			} else {
@@ -317,6 +321,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/push/subscriptions/", rs.getPushSubscriptions)
 	echoRest.POST("/push/subscriptions/", rs.postPushSubscription)
 	echoRest.DELETE("/push/subscriptions/", rs.deletePushSubscription)
+	echoRest.GET(EndpointPathForward, rs.forwardAuth)
 	echoRest.GET("/qr/", rs.getQRCodes)
 	echoRest.GET("/qr/:"+urlParamKey+"/", rs.getQRCode)
 

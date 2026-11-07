@@ -107,6 +107,38 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /auth/forward/:
+    get:
+      summary: "forwardAuth check of a reverse proxy"
+      description: |
+        For a proxy (Traefik forwardAuth, nginx auth_request) that protects another site on the
+        host of the web client, such as the MkDocs site at `/view/` (docs/auth.md section 4).
+        Every account with a session or an app token passes. Without one, browsers (GET or
+        HEAD with `Accept: text/html`) are sent to the login page of the web client with the
+        page as `next`; everything else gets 401. `X-Forwarded-Method` and `X-Forwarded-Uri`
+        count only from `server.trustedProxies`. `features` of `GET /server-info/` contains
+        `forward-auth`.
+      operationId: forwardAuth
+      tags: [ Auth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "Logged in"
+          headers:
+            X-Auth-User:
+              description: "The username"
+              schema:
+                type: string
+        "302":
+          description: "Not logged in: `Location: /login?next=<path>`"
+          headers:
+            Location:
+              schema:
+                type: string
+              example: "/login?next=%2Fview%2F"
+        "401":
+          description: "Not logged in, and not a page request"
+
   /auth/status/:
     get:
       summary: "Authentication status of the server"
