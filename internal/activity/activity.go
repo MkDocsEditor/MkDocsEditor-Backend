@@ -77,6 +77,12 @@ CREATE TABLE push_subscriptions (
 );
 CREATE INDEX push_subscriptions_account ON push_subscriptions(account_id);
 `,
+	// 3: the order of the pins, newest first as they were listed before
+	`
+ALTER TABLE pins ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+UPDATE pins SET position = (SELECT COUNT(*) FROM pins p2 WHERE p2.account_id = pins.account_id
+	AND (p2.pinned_at > pins.pinned_at OR (p2.pinned_at = pins.pinned_at AND p2.path < pins.path)));
+`,
 }
 
 // Store is the activity database

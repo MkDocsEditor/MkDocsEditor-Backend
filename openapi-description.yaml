@@ -2605,13 +2605,60 @@ paths:
       tags: [ Dashboard ]
       responses:
         "200":
-          description: "Both lists, newest first"
+          description: "Both lists, in their order"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Pins"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /pins/family/order/:
+    put:
+      summary: "Reorder the family pins"
+      description: |
+        Editors and admins. The listed documents come first, in this order; ids that are not
+        pinned are ignored, and the other pins follow in their order. New pins go to the end.
+        `features` of `GET /server-info/` contains `pin-order`.
+      operationId: putFamilyPinOrder
+      tags: [ Dashboard ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinOrder"
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /pins/personal/order/:
+    put:
+      summary: "Reorder the own pins"
+      description: "Every account, readers too; like the family order otherwise."
+      operationId: putPersonalPinOrder
+      tags: [ Dashboard ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinOrder"
+      responses:
+        "200":
+          $ref: "#/components/responses/Pins"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /pins/family/{documentId}/:
     parameters:
@@ -4382,18 +4429,28 @@ components:
           type: string
           format: date-time
 
+    PinOrder:
+      type: object
+      required: [ documentIds ]
+      properties:
+        documentIds:
+          type: array
+          description: "Document ids in the new order"
+          items:
+            type: string
+
     Pins:
       type: object
       required: [ family, personal ]
       properties:
         family:
           type: array
-          description: "Pinned for everyone, newest first"
+          description: "Pinned for everyone, in their order"
           items:
             $ref: "#/components/schemas/Pin"
         personal:
           type: array
-          description: "Pinned by the requesting account for itself, newest first"
+          description: "Pinned by the requesting account for itself, in their order"
           items:
             $ref: "#/components/schemas/Pin"
 

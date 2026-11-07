@@ -201,3 +201,46 @@ func TestFeedLeavesOutReferenceUpdates(t *testing.T) {
 		t.Error("the reference was not updated")
 	}
 }
+
+func TestPinOrder(t *testing.T) {
+	e := newSyncEnv(t)
+	setup, index := e.docID("guide/setup.md"), e.docID("index.md")
+	ev := dialEvents(t, e, "carol", false)
+	e.pins(http.MethodPut, "/pins/family/"+setup+"/", "bob", http.StatusOK)
+	pins := e.pins(http.MethodPut, "/pins/family/"+index+"/", "bob", http.StatusOK)
+	if pinPaths(pins.Family) != "guide/setup.md,index.md" {
+		t.Fatalf("new pins not at the end: %s", pinPaths(pins.Family))
+	}
+	order := func(scope string, user string, ids []string, want int) *PinsResponse {
+		t.Helper()
+		body, _ := json.Marshal(PinOrderRequest{DocumentIDs: ids})
+		rec := e.doBody(http.MethodPut, "/pins/"+scope+"/order/", user, string(body))
+		if rec.Code != want {
+			t.Fatalf("order %s as %s: %d %s", scope, user, rec.Code, rec.Body.String())
+		}
+		var out PinsResponse
+		_ = json.Unmarshal(rec.bytes(), &out)
+		return &out
+	}
+	before := ev.count(collab.MsgPinsChanged)
+	pins = order("family", "bob", []string{index, "unknown"}, http.StatusOK)
+	if pinPaths(pins.Family) != "index.md,guide/setup.md" {
+		t.Errorf("order = %s", pinPaths(pins.Family))
+	}
+	eventually(t, "pins-changed", func() bool { return ev.count(collab.MsgPinsChanged) == before+1 })
+	if got := pinPaths(e.pins(http.MethodGet, "/pins/", "alice", http.StatusOK).Family); got != "index.md,guide/setup.md" {
+		t.Errorf("stored order = %s", got)
+	}
+
+	// readers order their own pins only
+	order("family", "carol", []string{setup}, http.StatusForbidden)
+	e.pins(http.MethodPut, "/pins/personal/"+index+"/", "carol", http.StatusOK)
+	e.pins(http.MethodPut, "/pins/personal/"+setup+"/", "carol", http.StatusOK)
+	pins = order("personal", "carol", []string{setup}, http.StatusOK)
+	if pinPaths(pins.Personal) != "guide/setup.md,index.md" || pinPaths(pins.Family) != "index.md,guide/setup.md" {
+		t.Errorf("carol = %+v", pins)
+	}
+	if rec := e.doBody(http.MethodPut, "/pins/personal/order/", "carol", `{"documentIds": "x"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad body: %d", rec.Code)
+	}
+}
