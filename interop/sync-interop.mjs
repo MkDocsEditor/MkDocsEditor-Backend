@@ -1,11 +1,11 @@
 // Interop test: two @automerge/automerge (JS) clients edit a document through the Go backend.
-// Usage: BACKEND=http://127.0.0.1:7413 DOC_ID=<id> node sync-interop.mjs
+// Usage: BACKEND=http://127.0.0.1:7413/api DOC_ID=<id> node sync-interop.mjs
 // Users: alice/alice-pw (editor), carol/carol-pw (reader), see run.sh.
 import * as A from "@automerge/automerge";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 
-const BACKEND = process.env.BACKEND ?? "http://127.0.0.1:7413";
+const BACKEND = process.env.BACKEND ?? "http://127.0.0.1:7413/api";
 const DOC_ID = process.env.DOC_ID;
 assert.ok(DOC_ID, "DOC_ID is required");
 

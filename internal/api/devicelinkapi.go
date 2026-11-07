@@ -92,7 +92,7 @@ func (rs *RestService) backendURL(c *echo.Context) string {
 	if u := strings.TrimRight(rs.server.BackendURL, "/"); u != "" {
 		return u
 	}
-	return rs.ownOrigin(c)
+	return rs.ownOrigin(c) + APIPrefix
 }
 
 // GET /server-info/

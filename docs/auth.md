@@ -10,6 +10,9 @@ Status: **design**. The implementation lands in several pull requests; each sect
 what is new. Where this document and `openapi-description.yaml` disagree on a REST
 endpoint, the OpenAPI file wins once the endpoint is implemented.
 
+All paths are below the API prefix `/api` ([sync-protocol.md](sync-protocol.md)), and
+`backendUrl` includes it.
+
 Decisions:
 
 - Registration by **invite links only**. No open sign-up, no email, no OIDC/SSO.
@@ -274,7 +277,10 @@ Each request is authenticated by the first matching method:
    `mkdocseditor_session` over plain HTTP).
 
 If an `Authorization` header is present and invalid, the request fails with 401; the
-cookie is not tried. An expired or revoked session gives 401 `unauthenticated`, and over
+cookie is not tried. Exception: `Basic` with a password that is no app token is ignored,
+as if the header were missing. It is the login of another app on the same host (Markus'
+deployment protects the MkDocs site at `/view/` with Basic auth), which browsers may send
+along to `/api`. An expired or revoked session gives 401 `unauthenticated`, and over
 the cookie the response also clears the cookie.
 
 Without any method, endpoints that need authentication return 401 `unauthenticated`. No
@@ -331,10 +337,13 @@ on another origin cannot log in. List the web client's origin, also for developm
 
 **Same-site requirement for cookies.** The web client and the backend must be
 *same-site* (same registrable domain, scheme ignored for `localhost`), for example
-`edit.wiki.markusressel.de` and `backend.wiki.markusressel.de`, or `localhost:5173`
+`edit.wiki.example.com` and `backend.wiki.example.com`, or `localhost:5173`
 and `localhost:7413`. Then the Lax cookie is sent on `fetch` and on the websocket
 upgrade. The cookie is host-only (no `Domain` attribute), so it goes only to the backend
-host. A web client on an unrelated domain must use bearer tokens instead (not supported
+host. The simplest setup is one host: Markus' deployment serves the web client at `/`,
+the API at `/api` and the MkDocs site at `/view/` of `wiki.markusressel.de`, so the web
+client needs no CORS. The cookie has `Path=/` and also reaches the other paths of that
+host, which ignore it. A web client on an unrelated domain must use bearer tokens instead (not supported
 by the official web client).
 
 ## 6. Websockets
@@ -371,7 +380,7 @@ access log:
 ```
 
 `clientUrl` is `server.auth.clientUrl` (the web client, for example
-`https://edit.wiki.markusressel.de`). The API returns both the `token` and the full
+`https://wiki.markusressel.de`). The API returns both the `token` and the full
 `url` (`url` is `null` when `clientUrl` is not configured; clients can then build
 their own link or show the token). Clients read the token from the fragment and send it
 in request bodies only; the backend never accepts link tokens in URLs.
@@ -387,7 +396,7 @@ in request bodies only; the backend never accepts link tokens in URLs.
   tests can parse:
 
   ```
-  setup link: https://edit.wiki.markusressel.de/setup#mdl_…
+  setup link: https://wiki.markusressel.de/setup#mdl_…
   setup token: mdl_…
   ```
 
@@ -688,7 +697,7 @@ address, username or password:
    (`deviceName` optional) →
 
    ```json
-   {"deviceLink": {device link object}, "token": "mdd_…", "expiresAt": "…", "connectUrl": "https://edit.wiki.markusressel.de/connect#eyJ2IjoxLC…"}
+   {"deviceLink": {device link object}, "token": "mdd_…", "expiresAt": "…", "connectUrl": "https://wiki.markusressel.de/connect#eyJ2IjoxLC…"}
    ```
 
    The web client shows `connectUrl` as a QR code and as a link to tap on the phone.
@@ -706,13 +715,13 @@ address, username or password:
 below, encoded as base64url without padding. The payload never reaches a server log.
 
 ```json
-{"v": 1, "backendUrl": "https://backend.wiki.markusressel.de", "username": "markus", "token": "mdd_…", "expiresAt": "2026-11-01T12:05:00Z"}
+{"v": 1, "backendUrl": "https://wiki.markusressel.de/api", "username": "markus", "token": "mdd_…", "expiresAt": "2026-11-01T12:05:00Z"}
 ```
 
 | Field | Notes |
 |---|---|
 | `v` | payload version, `1`. Clients reject other versions with "update the app". |
-| `backendUrl` | the API base URL: `server.backendUrl`, else derived from the request that created the link (scheme, honouring `X-Forwarded-Proto` from trusted proxies, and `Host`) |
+| `backendUrl` | the API base URL including `/api`: `server.backendUrl`, else derived from the request that created the link (scheme, honouring `X-Forwarded-Proto` from trusted proxies, `Host`, and `/api`) |
 | `username` | the account's current username, for display and the redeem check |
 | `token` | the device link token |
 | `expiresAt` | so the client can say "expired" without a request |
@@ -803,8 +812,8 @@ provider (from the AAGUID) and absent for unknown authenticators.
 
 ```json
 {"name": "wiki.markusressel.de", "version": "1.4.0", "protocolVersion": 1,
- "backendUrl": "https://backend.wiki.markusressel.de", "wikiUrl": "https://wiki.markusressel.de",
- "webClientUrl": "https://edit.wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
+ "backendUrl": "https://wiki.markusressel.de/api", "wikiUrl": "https://wiki.markusressel.de",
+ "webClientUrl": "https://wiki.markusressel.de", "setupRequired": false, "authDisabled": false,
  "passkeys": {"enabled": true, "rpId": "markusressel.de"},
  "loginMethods": ["password", "passkey", "device-link"], "require2FA": false,
  "features": ["moved-lookup", "join-presence", "instance-presence", "access-requests"]}
@@ -1047,8 +1056,8 @@ files of resources (`GET /resource/{id}/content/`) say `no-cache` and are revali
 
 **RP ID.** A passkey is bound to a domain, the relying party id. It must be the host of
 the page that creates or uses the passkey, or a parent domain of it. The web client runs
-on `edit.wiki.markusressel.de`, so `backend.wiki.markusressel.de` is not possible (not a
-parent), but `wiki.markusressel.de` and `markusressel.de` are. Choose the RP ID once:
+on `wiki.markusressel.de`, so `wiki.markusressel.de` and `markusressel.de` are possible,
+but `edit.wiki.markusressel.de` would not be (not a parent). Choose the RP ID once:
 changing it later makes all existing passkeys useless.
 
 **The RP ID domain must be reachable from the internet** when the Android app should use
@@ -1108,14 +1117,14 @@ debug certificate if debug builds should use passkeys). With Play App Signing, u
 fingerprint of Google's app signing key from the Play Console.
 
 The backend can generate this file from `server.auth.webauthn.android` and serve it at
-`GET /.well-known/assetlinks.json` (`serveAssetLinks: true`). That only helps when
-public requests for the RP ID host reach the backend, for example through an ingress rule
-for the path `/.well-known/assetlinks.json` (exact). Otherwise publish the JSON as a
-static file on the RP ID host, as Markus' deployment does.
+`GET /api/.well-known/assetlinks.json` (`serveAssetLinks: true`). Android fetches it from
+the root of the RP ID host, so that only helps with a proxy rule that maps
+`/.well-known/assetlinks.json` (exact) of the RP ID host to that path. Otherwise publish
+the JSON as a static file on the RP ID host, as Markus' deployment does.
 
-Android **App Links** for the invite, setup, reset and connect links (`https://edit.wiki.…/invite`)
+Android **App Links** for the invite, setup, reset and connect links (`https://wiki.markusressel.de/invite`)
 are separate: they need the same file on the **client** host,
-`https://edit.wiki.markusressel.de/.well-known/assetlinks.json`, with both relations:
+`https://wiki.markusressel.de/.well-known/assetlinks.json`, with both relations:
 `handle_all_urls` for the App Links and `get_login_creds`, so password managers and
 Credential Manager offer the passwords saved for the web client in the app as well
 (and the other way round). The web client serves it (`MKDOCSEDITOR_ASSETLINKS_JSON`).
@@ -1134,9 +1143,10 @@ server:
   instanceName: "Markus' Wiki"
   # The published MkDocs site, reported by GET /server-info/.
   wikiUrl: "https://wiki.markusressel.de"
-  # The public base URL of this API, used in connect links and /server-info/. Default:
-  # derived from the request (scheme from X-Forwarded-Proto of trusted proxies, Host).
-  backendUrl: "https://backend.wiki.markusressel.de"
+  # The public base URL of this API including /api, used in connect links and
+  # /server-info/. Default: derived from the request (scheme from X-Forwarded-Proto of
+  # trusted proxies, Host, /api).
+  backendUrl: "https://wiki.markusressel.de/api"
   # Addresses of reverse proxies whose X-Forwarded-For and X-Forwarded-Proto are trusted
   # (CIDRs or single IPs). Default: none, the TCP peer is the client.
   trustedProxies:
@@ -1146,7 +1156,7 @@ server:
     disabled: false
     # The web client, used to build setup, invite, reset and connect links, reported as
     # webClientUrl by /server-info/, and the default passkey origin and RP ID.
-    clientUrl: "https://edit.wiki.markusressel.de"
+    clientUrl: "https://wiki.markusressel.de"
     # Session lifetimes (Go durations).
     sessionIdleTimeout: "720h"   # 30 days
     sessionMaxLifetime: "2160h"  # 90 days
@@ -1173,14 +1183,14 @@ server:
       rpName: "MkDocsEditor"
       # Allowed web origins. Default: origin of clientUrl + server.cors.allowedOrigins
       origins:
-        - "https://edit.wiki.markusressel.de"
+        - "https://wiki.markusressel.de"
       # Android apps that may use the passkeys. Adds their android:apk-key-hash origins
       # and the entries of /.well-known/assetlinks.json.
       android:
         - packageName: "de.markusressel.mkdocseditor"
           sha256CertFingerprints:
             - "AB:CD:…"
-      # Serve /.well-known/assetlinks.json from the backend. Default: false
+      # Serve /api/.well-known/assetlinks.json from the backend. Default: false
       serveAssetLinks: false
     # Only read once, to import existing users into the database (section 14).
     users: []

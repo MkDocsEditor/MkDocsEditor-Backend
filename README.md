@@ -149,6 +149,10 @@ The pinned documents and the change feed of the dashboard are specified in
 mkdocs.yml in [docs/page-meta.md](docs/page-meta.md), QR codes that open a page in
 [docs/qr.md](docs/qr.md).
 
+Every route is served under the prefix `/api` (`/api/server-info/`, `/api/document/{id}/ws/`),
+so the web client, the MkDocs site and the API can share one host. Point `server.backendUrl`
+at the public URL including `/api`.
+
 The REST API is described in the [OpenAPI file](openapi-description.yaml), which you can
 [browse in Swagger Editor](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml).
 CI lints it and checks that it lists exactly the routes the backend serves.

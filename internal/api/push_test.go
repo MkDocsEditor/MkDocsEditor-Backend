@@ -147,7 +147,7 @@ func TestPushSubscriptions(t *testing.T) {
 	f := e.withPush()
 
 	var info ServerInfoResponse
-	resp, err := http.Get(e.http.URL + "/server-info/")
+	resp, err := http.Get(e.http.URL + APIPrefix + "/server-info/")
 	if err != nil {
 		t.Fatal(err)
 	}

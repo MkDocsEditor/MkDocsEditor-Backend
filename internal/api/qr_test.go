@@ -109,7 +109,7 @@ func TestCacheControl(t *testing.T) {
 		"/resource/" + image.ID + "/content/": "no-cache",
 		"/resource/unknown/content/":          "no-cache",
 	} {
-		req, _ := http.NewRequest(http.MethodGet, e.http.URL+path, nil)
+		req, _ := http.NewRequest(http.MethodGet, e.http.URL+APIPrefix+path, nil)
 		req.Header.Set("Authorization", authHeader(t, e.authn, "carol", testPasswords["carol"]))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

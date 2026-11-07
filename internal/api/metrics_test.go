@@ -213,7 +213,7 @@ func TestHTTPMetricsUseRoutePatterns(t *testing.T) {
 	e := newSyncEnv(t)
 	request := func(method string, path string) {
 		t.Helper()
-		req, err := http.NewRequest(method, e.http.URL+path, nil)
+		req, err := http.NewRequest(method, e.http.URL+APIPrefix+path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -285,7 +285,7 @@ func TestRequestLogLeavesOutAliveChecks(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(previous) })
 
 	for _, path := range []string{"/alive/", "/auth/status/"} {
-		resp, err := http.Get(e.http.URL + path)
+		resp, err := http.Get(e.http.URL + APIPrefix + path)
 		if err != nil {
 			t.Fatal(err)
 		}

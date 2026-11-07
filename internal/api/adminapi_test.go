@@ -241,7 +241,7 @@ func TestAppTokens(t *testing.T) {
 	expect(t, ro.do(http.MethodPost, "/auth/ws-ticket/", nil), http.StatusForbidden, CodeForbidden)
 
 	// basic auth with username and app token
-	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/auth/whoami/", nil)
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+APIPrefix+"/auth/whoami/", nil)
 	req.SetBasicAuth("markus", write.Token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -200,7 +200,7 @@ func (c *testClient) dial(docID string, opts ...connectOptions) error {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	url := "ws" + strings.TrimPrefix(c.env.http.URL, "http") + "/document/" + docID + "/ws/"
+	url := "ws" + strings.TrimPrefix(c.env.http.URL, "http") + APIPrefix + "/document/" + docID + "/ws/"
 	header := http.Header{}
 	c.mu.Lock()
 	hello := map[string]any{"type": "hello", "documentId": docID, "actorId": c.actorID, "client": "test"}
