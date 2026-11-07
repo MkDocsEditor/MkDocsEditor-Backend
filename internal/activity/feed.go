@@ -50,18 +50,20 @@ func (s *Store) RecordEdit(path string, before string, after string, authors []s
 	at := s.now()
 	authors = slices.Clone(authors)
 	s.enqueue(func() {
-		if err := s.recordEdit(path, before, after, authors, at); err != nil {
+		id, err := s.recordEdit(path, before, after, authors, at)
+		if err != nil {
 			log.Printf("Unable to record the edit of %s in the feed: %v", path, err)
 			return
 		}
-		s.feedChanged()
+		s.feedChanged(id)
 	})
 }
 
-func (s *Store) recordEdit(path string, before string, after string, authors []string, at time.Time) error {
+// recordEdit returns the id of the entry it added, changed or removed
+func (s *Store) recordEdit(path string, before string, after string, authors []string, at time.Time) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -76,25 +78,29 @@ func (s *Store) recordEdit(path string, before string, after string, authors []s
 	case errors.Is(err, sql.ErrNoRows):
 		// a new session, older ones of this document end
 		if _, err = tx.Exec(`UPDATE feed SET base_text = NULL WHERE path = ? AND base_text IS NOT NULL`, path); err != nil {
-			return err
+			return 0, err
 		}
 		sum := Summarize(before, after)
-		if _, err = tx.Exec(`INSERT INTO feed (time, kind, item_type, path, authors, lines_added, lines_removed, headings, base_text)
+		res, err := tx.Exec(`INSERT INTO feed (time, kind, item_type, path, authors, lines_added, lines_removed, headings, base_text)
 			VALUES (?, ?, 'document', ?, ?, ?, ?, ?, ?)`,
-			at.UnixMilli(), KindEdited, path, mustJSON(authors), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings), before); err != nil {
-			return err
+			at.UnixMilli(), KindEdited, path, mustJSON(authors), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings), before)
+		if err != nil {
+			return 0, err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return 0, err
 		}
 	case err != nil:
-		return err
+		return 0, err
 	case base == after:
 		// back to where the session started
 		if _, err = tx.Exec(`DELETE FROM feed WHERE id = ?`, id); err != nil {
-			return err
+			return 0, err
 		}
 	default:
 		var known []string
 		if err = json.Unmarshal([]byte(authorJSON), &known); err != nil {
-			return err
+			return 0, err
 		}
 		for _, a := range authors {
 			if !slices.Contains(known, a) {
@@ -104,10 +110,10 @@ func (s *Store) recordEdit(path string, before string, after string, authors []s
 		sum := Summarize(base, after)
 		if _, err = tx.Exec(`UPDATE feed SET time = ?, authors = ?, lines_added = ?, lines_removed = ?, headings = ? WHERE id = ?`,
 			at.UnixMilli(), mustJSON(known), sum.LinesAdded, sum.LinesRemoved, mustJSON(sum.Headings), id); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return tx.Commit()
+	return id, tx.Commit()
 }
 
 // RecordItem records that an item was created, moved or deleted. oldPath is the path before a
@@ -115,18 +121,19 @@ func (s *Store) recordEdit(path string, before string, after string, authors []s
 func (s *Store) RecordItem(kind string, itemType string, path string, oldPath string, author string) {
 	at := s.now()
 	s.enqueue(func() {
-		if err := s.recordItem(kind, itemType, path, oldPath, author, at); err != nil {
+		id, err := s.recordItem(kind, itemType, path, oldPath, author, at)
+		if err != nil {
 			log.Printf("Unable to record that %s was %s in the feed: %v", path, kind, err)
 			return
 		}
-		s.feedChanged()
+		s.feedChanged(id)
 	})
 }
 
-func (s *Store) recordItem(kind string, itemType string, path string, oldPath string, author string, at time.Time) error {
+func (s *Store) recordItem(kind string, itemType string, path string, oldPath string, author string, at time.Time) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	// the paths below p sort between p+"/" and p+"0", '0' follows '/'
@@ -136,18 +143,23 @@ func (s *Store) recordItem(kind string, itemType string, path string, oldPath st
 		}
 		if _, err = tx.Exec(`UPDATE feed SET base_text = NULL WHERE base_text IS NOT NULL AND (path = ? OR (path >= ? AND path < ?))`,
 			p, p+"/", p+"0"); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	authors := []string{}
 	if author != "" {
 		authors = append(authors, author)
 	}
-	if _, err = tx.Exec(`INSERT INTO feed (time, kind, item_type, path, old_path, authors) VALUES (?, ?, ?, ?, ?, ?)`,
-		at.UnixMilli(), kind, itemType, path, oldPath, mustJSON(authors)); err != nil {
-		return err
+	res, err := tx.Exec(`INSERT INTO feed (time, kind, item_type, path, old_path, authors) VALUES (?, ?, ?, ?, ?, ?)`,
+		at.UnixMilli(), kind, itemType, path, oldPath, mustJSON(authors))
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
 }
 
 // Feed returns up to limit entries older than the cursor, newest first, and the cursor of the

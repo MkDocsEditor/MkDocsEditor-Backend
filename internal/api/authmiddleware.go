@@ -282,7 +282,9 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	method := authMethodFromContext(c)
 	isAccount := strings.HasPrefix(path, "/account/")
 	isAdmin := strings.HasPrefix(path, "/admin/")
-	needsSession := isAccount || isAdmin || path == "/auth/logout/" || strings.HasPrefix(path, "/auth/reauth/")
+	// push subscriptions end with the session that made them
+	isPush := strings.HasPrefix(path, "/push/")
+	needsSession := isAccount || isAdmin || isPush || path == "/auth/logout/" || strings.HasPrefix(path, "/auth/reauth/")
 
 	if needsSession && method != AuthMethodSession {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "this endpoint needs a session (log in with a password or passkey)", nil))
@@ -293,9 +295,9 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	if isAdmin && !user.IsAdmin() {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "only admins may do this", nil))
 	}
-	// readers may change their own pins, the handler checks the family pins
+	// readers may change their own pins and push subscriptions, the handler checks the family pins
 	isPins := strings.HasPrefix(path, "/pins/")
-	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !strings.HasPrefix(path, "/auth/") {
+	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isPush && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))
 	}

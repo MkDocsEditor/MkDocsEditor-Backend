@@ -2,7 +2,7 @@
 
 Notes for AI coding agents working on this repository. Human-oriented docs live in `README.md`;
 the account system is specified in `docs/auth.md`, the sync protocol in `docs/sync-protocol.md`,
-the dashboard in `docs/dashboard.md`.
+the dashboard in `docs/dashboard.md`, push notifications in `docs/push.md`.
 
 ## Package layout
 
@@ -14,7 +14,8 @@ Dependencies point one way, top to bottom:
 | `internal/api` | REST API, websocket endpoints, auth middleware, end-to-end tests |
 | `internal/collab` | Automerge sync, presence, document state, authorship, the move engine |
 | `internal/gitstore` | Git repository access, file history, the committer |
-| `internal/activity` | Pins and the change feed of the dashboard (`activity.db`) |
+| `internal/push` | Web Push: VAPID, encryption, who gets a push |
+| `internal/activity` | Pins, the change feed and push subscriptions (`activity.db`) |
 | `internal/references` | Link parsing, the reference index, text edits for moves |
 | `internal/wiki` | The tree of sections, documents and resources, the file watcher |
 | `internal/auth` | Accounts, sessions, passkeys, audit log |

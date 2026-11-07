@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -63,6 +64,19 @@ CREATE TABLE feed (
 CREATE INDEX feed_time ON feed(time, id);
 CREATE INDEX feed_open ON feed(path) WHERE base_text IS NOT NULL;
 `,
+	// 2: Web Push subscriptions
+	`
+CREATE TABLE push_subscriptions (
+	endpoint     TEXT PRIMARY KEY,
+	account_id   TEXT NOT NULL,
+	session_id   TEXT NOT NULL,
+	p256dh       BLOB NOT NULL,
+	auth         BLOB NOT NULL,
+	created_at   INTEGER NOT NULL,
+	last_push_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX push_subscriptions_account ON push_subscriptions(account_id);
+`,
 }
 
 // Store is the activity database
@@ -78,9 +92,10 @@ type Store struct {
 	// queueMu guards closed and sending to queue. The worker never takes it.
 	queueMu sync.Mutex
 	closed  bool
-	// mu guards onFeedChanged
-	mu            sync.Mutex
-	onFeedChanged func()
+	// mu guards the listeners
+	mu             sync.Mutex
+	onFeedChanged  func()
+	entryListeners []func(id int64)
 }
 
 // Open opens (and creates) the activity database in the state directory
@@ -154,12 +169,25 @@ func (s *Store) OnFeedChanged(f func()) {
 	s.onFeedChanged = f
 }
 
-func (s *Store) feedChanged() {
+// AddEntryListener adds a function that is called with the id of each feed entry that was
+// added, changed or removed. It runs on the worker, so it must not block for long.
+func (s *Store) AddEntryListener(f func(id int64)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entryListeners = append(s.entryListeners, f)
+}
+
+// feedChanged tells the listeners that an entry changed
+func (s *Store) feedChanged(id int64) {
 	s.mu.Lock()
 	f := s.onFeedChanged
+	listeners := slices.Clone(s.entryListeners)
 	s.mu.Unlock()
 	if f != nil {
 		f()
+	}
+	for _, l := range listeners {
+		l(id)
 	}
 }
 

@@ -55,6 +55,8 @@ tags:
     description: "Links between items, backlinks and link paths, see docs/references.md"
   - name: Dashboard
     description: "Pinned documents and the change feed, see docs/dashboard.md"
+  - name: Push
+    description: "Web Push subscriptions (sessions only), see docs/push.md"
 
 paths:
   /alive/:
@@ -2707,6 +2709,78 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /push/subscriptions/:
+    get:
+      summary: "The push subscriptions of the own account"
+      description: "404 `not-found` when push is off; `features` of `GET /server-info/` contains `push` when it is on."
+      operationId: getPushSubscriptions
+      tags: [ Push ]
+      responses:
+        "200":
+          $ref: "#/components/responses/PushSubscriptions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      summary: "Subscribe to push messages"
+      description: |
+        The body has the format of a browser `PushSubscription` and of UnifiedPush. Posting an
+        endpoint again replaces its keys and binds it to the current session, which may belong
+        to another account. The subscription ends with the session. An account keeps at most
+        10 subscriptions; a new one replaces the oldest. Every role may subscribe, app tokens may not.
+      operationId: postPushSubscription
+      tags: [ Push ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/PushSubscriptions"
+        "400":
+          description: "Invalid keys (`bad-request`), or an endpoint that is not https on an allowed host (`endpoint-not-allowed`, `details.allowedHosts`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: "Unsubscribe"
+      description: "Removing an endpoint that is not subscribed changes nothing."
+      operationId: deletePushSubscription
+      tags: [ Push ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ endpoint ]
+              properties:
+                endpoint:
+                  type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/PushSubscriptions"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2813,6 +2887,12 @@ components:
         default: false
 
   responses:
+    PushSubscriptions:
+      description: "The subscriptions of the own account, newest first"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PushSubscriptions"
     Pins:
       description: "The pins after the change, as `GET /pins/` answers"
       content:
@@ -3721,7 +3801,7 @@ components:
 
     ServerInfo:
       type: object
-      required: [ name, version, protocolVersion, backendUrl, wikiUrl, webClientUrl, setupRequired, authDisabled, passkeys, loginMethods, require2FA, features ]
+      required: [ name, version, protocolVersion, backendUrl, wikiUrl, webClientUrl, setupRequired, authDisabled, passkeys, loginMethods, require2FA, features, push ]
       properties:
         name:
           type: string
@@ -3765,6 +3845,15 @@ components:
           description: "Optional API features of this server. Clients ignore names they do not know."
           items:
             type: string
+        push:
+          type: object
+          nullable: true
+          description: "Set when the server sends Web Push messages (docs/push.md)"
+          required: [ vapidPublicKey ]
+          properties:
+            vapidPublicKey:
+              type: string
+              description: "VAPID public key: the uncompressed P-256 point, base64url without padding"
 
     DeviceLink:
       type: object
@@ -4213,6 +4302,48 @@ components:
         expiresAt:
           type: string
           format: date-time
+
+    PushSubscriptionRequest:
+      type: object
+      required: [ endpoint, keys ]
+      properties:
+        endpoint:
+          type: string
+          description: "https URL of the push service, on a host of server.push.allowedHosts"
+        keys:
+          type: object
+          required: [ p256dh, auth ]
+          properties:
+            p256dh:
+              type: string
+              description: "Uncompressed P-256 public key of the client, base64url"
+            auth:
+              type: string
+              description: "16 byte authentication secret, base64url"
+
+    PushSubscriptions:
+      type: object
+      required: [ subscriptions ]
+      properties:
+        subscriptions:
+          type: array
+          items:
+            type: object
+            required: [ endpoint, createdAt, lastPushAt, current ]
+            properties:
+              endpoint:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              lastPushAt:
+                type: string
+                format: date-time
+                nullable: true
+                description: "The last push the push service accepted"
+              current:
+                type: boolean
+                description: "The subscription of the requesting session"
 
     Author:
       type: object

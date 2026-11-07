@@ -133,7 +133,8 @@ section is one entry for the section, not one per document inside. Resources are
 the feed.
 
 After the feed changed, the events websocket sends `{"type": "feed-changed"}`, at most
-once per 10 seconds.
+once per 10 seconds. Clients that are not connected can get a push message instead, see
+[push.md](push.md).
 
 ## Authors
 
