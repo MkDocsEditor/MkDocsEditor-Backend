@@ -95,3 +95,29 @@ func TestQRCodes(t *testing.T) {
 		t.Errorf("list = %+v", l)
 	}
 }
+
+// Browsers cache a 404 or 410 heuristically: a code that later goes onto a page would stay
+// "not found". API answers say no-store, resource files are revalidated.
+func TestCacheControl(t *testing.T) {
+	e := newSyncEnv(t)
+	image := wikitest.FindResource(e.tm.Root(), "image.png")
+	for path, want := range map[string]string{
+		"/qr/":                                "no-store",
+		"/qr/unknown/?scan=1":                 "no-store",
+		"/section/":                           "no-store",
+		"/feed/":                              "no-store",
+		"/resource/" + image.ID + "/content/": "no-cache",
+		"/resource/unknown/content/":          "no-cache",
+	} {
+		req, _ := http.NewRequest(http.MethodGet, e.http.URL+path, nil)
+		req.Header.Set("Authorization", authHeader(t, e.authn, "carol", testPasswords["carol"]))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Cache-Control"); got != want {
+			t.Errorf("%s: %d Cache-Control = %q, want %q", path, resp.StatusCode, got, want)
+		}
+	}
+}
