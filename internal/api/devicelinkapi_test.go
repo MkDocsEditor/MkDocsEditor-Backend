@@ -29,7 +29,7 @@ func TestServerInfo(t *testing.T) {
 		info.WebClientURL == nil || *info.WebClientURL != testWebOrigin ||
 		!info.SetupRequired || info.AuthDisabled || !info.Passkeys.Enabled || info.Passkeys.RPID != "localhost" ||
 		strings.Join(info.LoginMethods, ",") != "password,passkey,device-link" || info.Require2FA ||
-		strings.Join(info.Features, ",") != FeatureMovedLookup+","+FeatureJoinPresence+","+FeatureInstancePresence+","+FeatureAvatars+","+FeaturePins+","+FeatureFeed+","+FeaturePinOrder {
+		strings.Join(info.Features, ",") != FeatureMovedLookup+","+FeatureJoinPresence+","+FeatureInstancePresence+","+FeatureAvatars+","+FeaturePins+","+FeatureFeed+","+FeaturePinOrder+","+FeaturePageMeta+","+FeatureWikiConfig {
 		t.Errorf("server info = %s", r.body)
 	}
 	// nothing about accounts

@@ -145,7 +145,8 @@ References between pages, moving and renaming with automatic link updates, and t
 path algorithm the clients share are specified in [docs/references.md](docs/references.md).
 The pinned documents and the change feed of the dashboard are specified in
 [docs/dashboard.md](docs/dashboard.md), push notifications (Web Push, UnifiedPush) in
-[docs/push.md](docs/push.md).
+[docs/push.md](docs/push.md), page metadata (front matter) and the renderer settings of
+mkdocs.yml in [docs/page-meta.md](docs/page-meta.md).
 
 The REST API is described in the [OpenAPI file](openapi-description.yaml), which you can
 [browse in Swagger Editor](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml).

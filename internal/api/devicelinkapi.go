@@ -63,6 +63,12 @@ type (
 // ConnectPayloadVersion is the version of the connect link payload
 const ConnectPayloadVersion = 1
 
+// FeaturePageMeta means documents in the tree have title and meta, see docs/page-meta.md
+const FeaturePageMeta = "page-meta"
+
+// FeatureWikiConfig means the server has GET /wiki/config/, see docs/page-meta.md
+const FeatureWikiConfig = "wiki-config"
+
 // FeatureMovedLookup in GET /server-info/ says that the server has GET /moved/?id=…&id=…
 const FeatureMovedLookup = "moved-lookup"
 
@@ -115,7 +121,7 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 		}
 		methods = append(methods, "device-link")
 	}
-	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder}
+	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig}
 	if rs.authenticator.AccessRequestsAvailable() {
 		features = append(features, FeatureAccessRequests)
 	}
