@@ -36,19 +36,19 @@ YAML
 "$work/mkdocsrest" --config "$work/mkdocsrest.yaml" > "$work/backend.log" 2>&1 &
 pid=$!
 for _ in $(seq 1 50); do
-  if curl -fs "http://127.0.0.1:$port/alive/" > /dev/null; then break; fi
+  if curl -fs "http://127.0.0.1:$port/api/alive/" > /dev/null; then break; fi
   if ! kill -0 "$pid" 2>/dev/null; then cat "$work/backend.log"; exit 1; fi
   sleep 0.2
 done
 
 token="$(curl -fs -H 'Content-Type: application/json' -H 'X-Requested-With: XMLHttpRequest' \
-  -d '{"username":"alice","password":"alice-pw","sessionType":"bearer"}' "http://127.0.0.1:$port/auth/login/" |
+  -d '{"username":"alice","password":"alice-pw","sessionType":"bearer"}' "http://127.0.0.1:$port/api/auth/login/" |
   node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')"
-doc_id="$(curl -fs -H "Authorization: Bearer $token" "http://127.0.0.1:$port/section/" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).documents[0].id))')"
+doc_id="$(curl -fs -H "Authorization: Bearer $token" "http://127.0.0.1:$port/api/section/" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).documents[0].id))')"
 
 cd "$repo/interop"
 status=0
-BACKEND="http://127.0.0.1:$port" DOC_ID="$doc_id" node sync-interop.mjs || status=$?
+BACKEND="http://127.0.0.1:$port/api" DOC_ID="$doc_id" node sync-interop.mjs || status=$?
 
 kill "$pid"
 wait "$pid" 2>/dev/null || true
