@@ -15,7 +15,7 @@ func TestParsePageMeta(t *testing.T) {
 	text := "---\ntitle: Setup guide\ndescription: How to start\nicon: material/rocket\nstatus: new\ntags:\n  - Setup\n  - 42\nsearch:\n  exclude: true\n---\n# Heading\n"
 	meta, body := ParsePageMeta(text)
 	want := PageMeta{Title: ptr("Setup guide"), Description: ptr("How to start"), Icon: ptr("material/rocket"), Status: ptr("new"),
-		Tags: []string{"Setup", "42"}, SearchExclude: true}
+		Tags: []string{"Setup", "42"}, SearchExclude: true, QR: []QRCode{}}
 	if !reflect.DeepEqual(meta, want) || body != "# Heading\n" {
 		t.Errorf("meta %+v body %q", meta, body)
 	}

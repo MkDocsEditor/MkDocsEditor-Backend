@@ -88,6 +88,15 @@ UPDATE pins SET position = (SELECT COUNT(*) FROM pins p2 WHERE p2.account_id = p
 ALTER TABLE feed ADD COLUMN ranges TEXT;
 ALTER TABLE feed ADD COLUMN text_hash TEXT;
 `,
+	// 5: the QR code keys the wiki had, with their last page and scan
+	`
+CREATE TABLE qr_codes (
+	key             TEXT PRIMARY KEY,
+	last_path       TEXT NOT NULL,
+	label           TEXT,
+	last_scanned_at INTEGER NOT NULL DEFAULT 0
+);
+`,
 }
 
 // Store is the activity database
