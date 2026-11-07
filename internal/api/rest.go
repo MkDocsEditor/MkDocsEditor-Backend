@@ -318,6 +318,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	groupResources := echoRest.Group("/resource")
 
 	groupMkDocs.GET("/config/", rs.getMkDocsConfig)
+	echoRest.GET("/wiki/config/", rs.getWikiConfig)
 
 	groupSections.GET("/", rs.getTree)
 	groupSections.GET("/:"+urlParamID+"/", rs.describeItem(wiki.TypeSection))
@@ -394,6 +395,16 @@ func (rs *RestService) Shutdown(ctx context.Context) {
 // returns an empty "ok" answer
 func (rs *RestService) isAlive(c *echo.Context) error {
 	return c.NoContent(http.StatusOK)
+}
+
+// GET /wiki/config/: the renderer settings of mkdocs.yml without secrets
+func (rs *RestService) getWikiConfig(c *echo.Context) error {
+	config, err := wiki.ReadWikiConfig(rs.treeManager.ConfigFile())
+	if err != nil {
+		log.Printf("Unable to read the wiki config: %v", err)
+		return apiError(c, http.StatusInternalServerError, CodeInternal, "mkdocs.yml cannot be read", nil)
+	}
+	return c.JSONPretty(http.StatusOK, config, jsonIndent)
 }
 
 func (rs *RestService) getMkDocsConfig(c *echo.Context) error {

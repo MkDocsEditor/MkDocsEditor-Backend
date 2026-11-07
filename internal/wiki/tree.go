@@ -65,6 +65,9 @@ type (
 		Filesize int64     `json:"filesize"`
 		ModTime  time.Time `json:"modtime"`
 		SubURL   string    `json:"url"`
+		// Title is the page name as MkDocs shows it, see docs/page-meta.md
+		Title string   `json:"title"`
+		Meta  PageMeta `json:"meta"`
 	}
 
 	Resource struct {
@@ -123,6 +126,10 @@ type TreeManager struct {
 
 	listenerLock sync.Mutex
 	listeners    []func(oldTree *Section, newTree *Section)
+
+	// meta caches the front matter of the documents; build counts the tree builds
+	meta  metaCache
+	build uint64
 }
 
 // NewTreeManager creates a TreeManager for the configured docs path and builds the initial tree
@@ -175,11 +182,13 @@ func (tm *TreeManager) CreateItemTree() {
 	tm.buildLock.Lock()
 	defer tm.buildLock.Unlock()
 
+	tm.build++
 	ignore := tm.newIgnoreMatcher()
 	parent, name := filepath.Split(tm.rootPath)
 	root := tm.createSectionForTree(parent, name, RootSectionID)
 	tm.populateItemTree(root, root.Path, ignore)
 	setSectionIndexes(root)
+	tm.meta.prune(tm.build)
 
 	tm.lock.Lock()
 	oldTree := tm.tree
@@ -321,6 +330,7 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 		subURL.WriteString(url.PathEscape(element) + "/")
 	}
 
+	meta, title := tm.meta.get(documentPath, relPath, f, tm.build)
 	return &Document{
 		Type:     TypeDocument,
 		ID:       tm.GenerateID(documentPath),
@@ -330,6 +340,8 @@ func (tm *TreeManager) createDocumentForTree(parentFolderPath string, f os.FileI
 		Filesize: f.Size(),
 		ModTime:  f.ModTime(),
 		SubURL:   subURL.String(),
+		Title:    title,
+		Meta:     meta,
 	}
 }
 

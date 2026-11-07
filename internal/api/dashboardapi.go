@@ -45,8 +45,10 @@ type (
 		DocumentID string `json:"documentId"`
 		Path       string `json:"path"`
 		Name       string `json:"name"`
-		PinnedBy   Author `json:"pinnedBy"`
-		PinnedAt   string `json:"pinnedAt"`
+		// Title is the page name, see docs/page-meta.md
+		Title    string `json:"title"`
+		PinnedBy Author `json:"pinnedBy"`
+		PinnedAt string `json:"pinnedAt"`
 	}
 
 	// PinOrderRequest is the body of PUT /pins/{family|personal}/order/
@@ -62,15 +64,17 @@ type (
 
 	// FeedEntryResponse is an entry of the feed
 	FeedEntryResponse struct {
-		ID         string            `json:"id"`
-		Time       string            `json:"time"`
-		Kind       string            `json:"kind"`
-		ItemType   string            `json:"itemType"`
-		DocumentID string            `json:"documentId,omitempty"`
-		Path       string            `json:"path"`
-		OldPath    string            `json:"oldPath,omitempty"`
-		Authors    []Author          `json:"authors"`
-		Summary    *activity.Summary `json:"summary,omitempty"`
+		ID         string `json:"id"`
+		Time       string `json:"time"`
+		Kind       string `json:"kind"`
+		ItemType   string `json:"itemType"`
+		DocumentID string `json:"documentId,omitempty"`
+		// Title is the page name of the document at path, null if there is none
+		Title   *string           `json:"title"`
+		Path    string            `json:"path"`
+		OldPath string            `json:"oldPath,omitempty"`
+		Authors []Author          `json:"authors"`
+		Summary *activity.Summary `json:"summary,omitempty"`
 	}
 
 	// FeedResponse is the answer of GET /feed/
@@ -124,7 +128,7 @@ func (rs *RestService) pinsOf(accountID string) (*PinsResponse, error) {
 			if d == nil {
 				continue
 			}
-			out = append(out, PinResponse{DocumentID: d.ID, Path: d.RelPath, Name: d.Name,
+			out = append(out, PinResponse{DocumentID: d.ID, Path: d.RelPath, Name: d.Name, Title: d.Title,
 				PinnedBy: rs.author(p.PinnedBy), PinnedAt: formatTime(p.PinnedAt)})
 		}
 		return out
@@ -233,6 +237,7 @@ func (rs *RestService) getFeed(c *echo.Context) error {
 			Path: e.Path, OldPath: e.OldPath, Authors: make([]Author, 0, len(e.Authors)), Summary: e.Summary}
 		if d := docs[e.Path]; d != nil && e.ItemType == wiki.TypeDocument {
 			r.DocumentID = d.ID
+			r.Title = &d.Title
 		}
 		for _, a := range e.Authors {
 			info, ok := authors[a]

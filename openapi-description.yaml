@@ -1719,6 +1719,32 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /wiki/config/:
+    get:
+      summary: "The renderer settings of mkdocs.yml"
+      description: |
+        Theme, plugins and Markdown extensions with their options, for clients that render pages
+        (docs/page-meta.md). Values tagged `!ENV` and keys that look like secrets are left out, and
+        so is everything else of mkdocs.yml. `features` of `GET /server-info/` contains
+        `wiki-config`.
+      operationId: getWikiConfig
+      tags: [ MkDocs ]
+      responses:
+        "200":
+          description: "The settings"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WikiConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: "mkdocs.yml cannot be read"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /mkdocs/config/:
     get:
       summary: "The MkDocs configuration"
@@ -3053,6 +3079,87 @@ components:
         url:
           type: string
           description: "Path of the page relative to the site root, for example `guide/setup/`"
+        title:
+          type: string
+          description: "The page name as MkDocs shows it: front matter `title`, else the first level-1 heading, else from the file name (docs/page-meta.md)"
+        meta:
+          $ref: "#/components/schemas/PageMeta"
+
+    PageMeta:
+      type: object
+      description: "Fields of the YAML front matter; null or empty when the page does not set them"
+      required: [ title, description, icon, status, tags, searchExclude ]
+      properties:
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        icon:
+          type: string
+          nullable: true
+          example: "material/rocket"
+        status:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        searchExclude:
+          type: boolean
+          description: "`search: {exclude: true}`"
+
+    WikiConfig:
+      type: object
+      required: [ siteName, siteUrl, useDirectoryUrls, theme, plugins, markdownExtensions, extraCss ]
+      properties:
+        siteName:
+          type: string
+        siteUrl:
+          type: string
+        useDirectoryUrls:
+          type: boolean
+        theme:
+          type: object
+          required: [ name, features, palette ]
+          properties:
+            name:
+              type: string
+            features:
+              type: array
+              items:
+                type: string
+            palette:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+        plugins:
+          type: array
+          description: "In the order of mkdocs.yml; `search` alone without a `plugins` key"
+          items:
+            $ref: "#/components/schemas/WikiExtension"
+        markdownExtensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/WikiExtension"
+        extraCss:
+          type: array
+          items:
+            type: string
+
+    WikiExtension:
+      type: object
+      required: [ name, options ]
+      properties:
+        name:
+          type: string
+        options:
+          type: object
+          additionalProperties: true
+          description: "The options from mkdocs.yml without secrets"
 
     Resource:
       type: object
@@ -4414,7 +4521,7 @@ components:
 
     Pin:
       type: object
-      required: [ documentId, path, name, pinnedBy, pinnedAt ]
+      required: [ documentId, path, name, title, pinnedBy, pinnedAt ]
       properties:
         documentId:
           type: string
@@ -4423,6 +4530,9 @@ components:
           description: "Path relative to the docs folder"
         name:
           type: string
+        title:
+          type: string
+          description: "The page name, see `Document.title`"
         pinnedBy:
           $ref: "#/components/schemas/Author"
         pinnedAt:
@@ -4456,7 +4566,7 @@ components:
 
     FeedEntry:
       type: object
-      required: [ id, time, kind, itemType, path, authors ]
+      required: [ id, time, kind, itemType, title, path, authors ]
       properties:
         id:
           type: string
@@ -4473,6 +4583,10 @@ components:
         documentId:
           type: string
           description: "The current id of the document, if one exists at `path`"
+        title:
+          type: string
+          nullable: true
+          description: "The page name of the document at `path`, null if there is none"
         path:
           type: string
           description: "Path relative to the docs folder; for moves the new path"
