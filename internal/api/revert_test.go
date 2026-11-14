@@ -40,6 +40,31 @@ func TestRevert(t *testing.T) {
 	revert := func(rev, user string) *httpRecorder {
 		return e.do(http.MethodPost, "/document/"+id+"/history/"+rev+"/revert/", user)
 	}
+	check := func(rev string) RevertCheck {
+		t.Helper()
+		rec := e.do(http.MethodGet, "/document/"+id+"/history/"+rev+"/revert/", "carol")
+		var c RevertCheck
+		if rec.Code != http.StatusOK {
+			t.Fatalf("check: %d %s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.bytes(), &c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	// the check changes nothing, readers may ask
+	if c := check(commitA); !c.Possible || c.Code != "" || c.Details != nil {
+		t.Errorf("check %+v", c)
+	}
+	if got := len(e.history(id)); got != 3 {
+		t.Errorf("the check committed: %d entries", got)
+	}
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/"+initial+"/revert/", "carol"); rec.Code != http.StatusBadRequest {
+		t.Errorf("check of the first revision: %d", rec.Code)
+	}
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/0000000000/revert/", "carol"); rec.Code != http.StatusNotFound {
+		t.Errorf("check of an unknown revision: %d", rec.Code)
+	}
 	if rec := revert(commitA, "carol"); rec.Code != http.StatusForbidden {
 		t.Errorf("reader revert: %d", rec.Code)
 	}
@@ -75,6 +100,9 @@ func TestRevert(t *testing.T) {
 	}
 
 	// twice: nothing left to revert
+	if c := check(commitA); c.Possible || c.Code != CodeNothingToRevert {
+		t.Errorf("check after the revert %+v", c)
+	}
 	rec := revert(commitA, "bob")
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), CodeNothingToRevert) {
 		t.Errorf("second revert: %d %s", rec.Code, rec.Body.String())
@@ -83,6 +111,9 @@ func TestRevert(t *testing.T) {
 	// a later edit of the same line conflicts and changes nothing
 	a.insertText(len(setupText+"line B"), " changed")
 	eventually(t, "server", func() bool { return strings.Contains(e.serverText(rel), "line B changed") })
+	if c := check(commitB); c.Possible || c.Code != CodeRevertConflict || c.Details["headings"] == nil || c.Details["conflicts"] == nil {
+		t.Errorf("check of a conflict %+v", c)
+	}
 	rec = revert(commitB, "bob")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body.String())

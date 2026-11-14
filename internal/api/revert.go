@@ -22,12 +22,23 @@ const (
 	CodeNothingToRevert = "nothing-to-revert"
 	// FeatureRevert means the server has POST /document/{id}/history/{revision}/revert/
 	FeatureRevert = "revert"
+	// FeatureRevertCheck means the server has GET /document/{id}/history/{revision}/revert/
+	FeatureRevertCheck = "revert-check"
 )
 
 // errFirstRevision is returned for the commit that created a file: there is nothing before it
 var errFirstRevision = errors.New("the revision created the document, delete the document instead")
 
 type (
+	// RevertCheck tells whether a revert would work now
+	RevertCheck struct {
+		Possible bool `json:"possible"`
+		// Code is CodeNothingToRevert or CodeRevertConflict when not possible
+		Code string `json:"code,omitempty"`
+		// Details are those of the 409 of POST
+		Details map[string]any `json:"details,omitempty"`
+	}
+
 	// RevertConflict is where a revert conflicts with later edits
 	RevertConflict struct {
 		// Heading is the nearest heading of the live text above the conflict, nil above the first
@@ -95,6 +106,29 @@ func (e *revertError) Error() string {
 	return msg
 }
 
+// revertedText returns the live text with the change from before to after undone, or
+// errNothingToRevert or a *revertError
+func revertedText(live, before, after string) (string, error) {
+	merged, conflicts := activity.RevertChange(live, before, after)
+	if len(conflicts) > 0 {
+		// the change could be made again: it is not in the document anymore
+		if again, failed := activity.RevertChange(live, after, before); len(failed) == 0 && again != live {
+			return "", errNothingToRevert
+		}
+		e := &revertError{conflicts: revertConflicts(live, conflicts), headings: []string{}}
+		for _, f := range e.conflicts {
+			if f.Heading != nil && !slices.Contains(e.headings, *f.Heading) {
+				e.headings = append(e.headings, *f.Heading)
+			}
+		}
+		return "", e
+	}
+	if merged == live {
+		return "", errNothingToRevert
+	}
+	return merged, nil
+}
+
 // revert undoes the change of a commit in the live text of a document and commits that as the
 // user. It returns the history entry of the revert commit.
 func (rs *RestService) revert(d *wiki.Document, rel string, commit *gitstore.Commit, before, after string, user *auth.User, agent collab.Agent) (*HistoryEntry, error) {
@@ -105,22 +139,9 @@ func (rs *RestService) revert(d *wiki.Document, rel string, commit *gitstore.Com
 	if err != nil {
 		return nil, err
 	}
-	merged, conflicts := activity.RevertChange(live, before, after)
-	if len(conflicts) > 0 {
-		// the change could be made again: it is not in the document anymore
-		if again, failed := activity.RevertChange(live, after, before); len(failed) == 0 && again != live {
-			return nil, errNothingToRevert
-		}
-		e := &revertError{conflicts: revertConflicts(live, conflicts), headings: []string{}}
-		for _, f := range e.conflicts {
-			if f.Heading != nil && !slices.Contains(e.headings, *f.Heading) {
-				e.headings = append(e.headings, *f.Heading)
-			}
-		}
-		return nil, e
-	}
-	if merged == live {
-		return nil, errNothingToRevert
+	merged, err := revertedText(live, before, after)
+	if err != nil {
+		return nil, err
 	}
 
 	tokenName := agent.TokenName
@@ -152,6 +173,59 @@ func (rs *RestService) revert(d *wiki.Document, rel string, commit *gitstore.Com
 	return &entry, nil
 }
 
+// revisionChangeOf reads the revision parameter and answers 400 or 404 itself
+func (rs *RestService) revisionChangeOf(c *echo.Context, repo *gitstore.Repo, rel string) (*gitstore.Commit, string, string, error) {
+	revision := c.Param(urlParamRevision)
+	commit, before, after, err := revisionChange(repo, rel, revision)
+	switch {
+	case errors.Is(err, ErrUnknownRevision):
+		return nil, "", "", responded(rs.returnUnknownRevision(c, revision))
+	case errors.Is(err, errFirstRevision):
+		return nil, "", "", responded(apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil))
+	case err != nil:
+		return nil, "", "", responded(rs.ReturnError(c, err))
+	}
+	return commit, before, after, nil
+}
+
+// revertRefusal maps errNothingToRevert and a *revertError to the code and details of the 409
+func revertRefusal(err error) (string, string, map[string]any, bool) {
+	var conflict *revertError
+	switch {
+	case errors.As(err, &conflict):
+		return CodeRevertConflict, "later edits changed the same lines, edit the document by hand",
+			map[string]any{"conflicts": conflict.conflicts, "headings": conflict.headings}, true
+	case errors.Is(err, errNothingToRevert):
+		return CodeNothingToRevert, err.Error(), nil, true
+	}
+	return "", "", nil, false
+}
+
+// GET /document/:id/history/:revision/revert/
+func (rs *RestService) checkDocumentRevert(c *echo.Context) error {
+	d, rel, repo, err := rs.historyContext(c)
+	if d == nil {
+		return err
+	}
+	_, before, after, err := rs.revisionChangeOf(c, repo, rel)
+	if err != nil {
+		return stop(err)
+	}
+	live, _, err := rs.sync.ReadContent(d)
+	if err != nil {
+		return rs.contentError(c, err)
+	}
+	check := RevertCheck{Possible: true}
+	if _, err = revertedText(live, before, after); err != nil {
+		code, _, details, ok := revertRefusal(err)
+		if !ok {
+			return rs.ReturnError(c, err)
+		}
+		check = RevertCheck{Code: code, Details: details}
+	}
+	return c.JSONPretty(http.StatusOK, check, jsonIndent)
+}
+
 // POST /document/:id/history/:revision/revert/
 func (rs *RestService) revertDocumentRevision(c *echo.Context) error {
 	d, rel, repo, err := rs.historyContext(c)
@@ -161,25 +235,15 @@ func (rs *RestService) revertDocumentRevision(c *echo.Context) error {
 	if err = rs.allowContentWrite(c); err != nil {
 		return err
 	}
-	revision := c.Param(urlParamRevision)
-	commit, before, after, err := revisionChange(repo, rel, revision)
-	switch {
-	case errors.Is(err, ErrUnknownRevision):
-		return rs.returnUnknownRevision(c, revision)
-	case errors.Is(err, errFirstRevision):
-		return apiError(c, http.StatusBadRequest, CodeBadRequest, err.Error(), nil)
-	case err != nil:
-		return rs.ReturnError(c, err)
+	commit, before, after, err := rs.revisionChangeOf(c, repo, rel)
+	if err != nil {
+		return stop(err)
 	}
 	entry, err := rs.revert(d, rel, commit, before, after, UserFromContext(c), agentOf(c))
-	var conflict *revertError
-	switch {
-	case errors.As(err, &conflict):
-		return apiError(c, http.StatusConflict, CodeRevertConflict, "later edits changed the same lines, edit the document by hand",
-			map[string]any{"conflicts": conflict.conflicts, "headings": conflict.headings})
-	case errors.Is(err, errNothingToRevert):
-		return apiError(c, http.StatusConflict, CodeNothingToRevert, err.Error(), nil)
-	case err != nil:
+	if code, message, details, ok := revertRefusal(err); ok {
+		return apiError(c, http.StatusConflict, code, message, details)
+	}
+	if err != nil {
 		return rs.contentError(c, err)
 	}
 	return c.JSONPretty(http.StatusOK, entry, jsonIndent)

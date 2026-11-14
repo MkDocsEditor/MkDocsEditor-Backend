@@ -847,6 +847,14 @@ Answers:
 - `400` for the commit that created the file (delete the document instead); `404` for a
   revision not in the history of the document.
 
+`GET` on the same path checks the revert without changing anything (servers with
+`revert-check` in `features`): it runs the check of step 2 on the live text, uncommitted
+edits included, and answers `200` with `{"possible": true}` or `{"possible": false, "code":
+"nothing-to-revert" | "revert-conflict", "details": {...}}`, `details` as in the `409`.
+`400` and `404` as for `POST`; readers may ask too. Clients ask when a history entry opens
+and show the reason in place of the undo button. The answer goes stale when others edit,
+so `POST` keeps its `409`s.
+
 Clients should confirm a revert with every author of the commit (`author`, `coAuthors`
 and `agents`). Since agent edits get commits of their own (section 10), the commit of an
 agent's edit has only that agent's account. Servers with revert list `revert` in
