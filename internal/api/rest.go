@@ -268,6 +268,7 @@ func (rs *RestService) registerAccountRoutes(echoRest *echo.Echo) {
 	echoRest.DELETE("/account/passkeys/:"+urlParamID+"/", rs.deletePasskey)
 	echoRest.GET("/account/tokens/", rs.listAppTokens)
 	echoRest.POST("/account/tokens/", rs.createAppToken)
+	echoRest.PATCH("/account/tokens/:"+urlParamID+"/", rs.updateAppToken)
 	echoRest.DELETE("/account/tokens/:"+urlParamID+"/", rs.revokeAppToken)
 	echoRest.GET("/account/device-links/", rs.listDeviceLinks)
 	echoRest.POST("/account/device-links/", rs.createDeviceLink)

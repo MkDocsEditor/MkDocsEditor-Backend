@@ -219,6 +219,12 @@ CREATE TABLE oauth_tokens (
 );
 CREATE INDEX oauth_tokens_app_token ON oauth_tokens(app_token_id);
 `,
+	// 11: OAuth grants with a fixed end: sliding_expiry = 1 for grants whose end moves with
+	// every refresh (30 days), 0 for app tokens and grants that end at expires_at
+	`
+ALTER TABLE app_tokens ADD COLUMN sliding_expiry INTEGER NOT NULL DEFAULT 0;
+UPDATE app_tokens SET sliding_expiry = 1 WHERE oauth_client_id != '';
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

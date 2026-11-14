@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +41,15 @@ type (
 		Name          string `json:"name"`
 		Scope         string `json:"scope"`
 		ExpiresInDays int    `json:"expiresInDays"`
+		// ExpiresAt is an absolute end, instead of ExpiresInDays
+		ExpiresAt *time.Time `json:"expiresAt"`
+	}
+
+	// AppTokenUpdateRequest is the body of PATCH /account/tokens/{id}/. The end of a token
+	// cannot change: expiresAt is rejected.
+	AppTokenUpdateRequest struct {
+		Name      *string         `json:"name"`
+		ExpiresAt json.RawMessage `json:"expiresAt"`
 	}
 
 	CreatedAppTokenResponse struct {
@@ -245,12 +255,41 @@ func (rs *RestService) createAppToken(c *echo.Context) error {
 	if err := decodeJSON(c, &r); err != nil {
 		return err
 	}
-	t, token, err := rs.authenticator.CreateAppToken(UserFromContext(c), r.Name, r.Scope, r.ExpiresInDays, requestInfo(c))
+	var t *auth.AppToken
+	var token string
+	var err error
+	switch {
+	case r.ExpiresAt != nil && r.ExpiresInDays != 0:
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "use expiresInDays or expiresAt, not both", nil)
+	case r.ExpiresAt != nil:
+		t, token, err = rs.authenticator.CreateAppTokenUntil(UserFromContext(c), r.Name, r.Scope, r.ExpiresAt, requestInfo(c))
+	default:
+		t, token, err = rs.authenticator.CreateAppToken(UserFromContext(c), r.Name, r.Scope, r.ExpiresInDays, requestInfo(c))
+	}
 	if err != nil {
 		return rs.authError(c, err)
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	return c.JSONPretty(http.StatusOK, &CreatedAppTokenResponse{AppToken: t, Token: token}, jsonIndent)
+}
+
+// PATCH /account/tokens/{id}/: renames an app token or OAuth grant
+func (rs *RestService) updateAppToken(c *echo.Context) error {
+	var r AppTokenUpdateRequest
+	if err := decodeJSON(c, &r); err != nil {
+		return err
+	}
+	if r.ExpiresAt != nil {
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "the end of a token cannot change: revoke it and create a new one", nil)
+	}
+	if r.Name == nil {
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "name is required", nil)
+	}
+	t, err := rs.authenticator.RenameAppToken(UserFromContext(c), c.Param(urlParamID), *r.Name, requestInfo(c))
+	if err != nil {
+		return rs.authError(c, err)
+	}
+	return c.JSONPretty(http.StatusOK, t, jsonIndent)
 }
 
 // DELETE /account/tokens/{id}/

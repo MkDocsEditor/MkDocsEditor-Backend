@@ -19,9 +19,14 @@ var (
 	ErrInvalidTokenName   = errors.New("token names have 1 to 64 characters")
 	ErrInvalidTokenScope  = errors.New("scope must be read or write")
 	ErrInvalidTokenExpiry = errors.New("expiresInDays must be between 1 and 3650")
+	// ErrInvalidTokenExpiresAt is returned for an end in the past or too far ahead
+	ErrInvalidTokenExpiresAt = errors.New("expiresAt must be in the future and at most 3650 days ahead")
 )
 
 const maxAppTokenDays = 3650
+
+// MaxAppTokenLifetime is the longest time to an absolute end of a token
+const MaxAppTokenLifetime = maxAppTokenDays * 24 * time.Hour
 
 // AppToken is a long-lived token for scripts and integrations
 type AppToken struct {
@@ -34,8 +39,11 @@ type AppToken struct {
 	// OAuthClientID is the client of an OAuth grant, "" for tokens made by hand
 	OAuthClientID string `json:"oauthClientId,omitempty"`
 	// Resource is the only resource an OAuth grant may access (the MCP endpoint)
-	Resource  string `json:"resource,omitempty"`
-	AccountID string `json:"-"`
+	Resource string `json:"resource,omitempty"`
+	// SlidingExpiry is true for OAuth grants without a fixed end: expiresAt moves 30 days
+	// ahead with every refresh
+	SlidingExpiry bool   `json:"slidingExpiry"`
+	AccountID     string `json:"-"`
 }
 
 // ValidAppToken reports whether a string has the format of an app token
@@ -43,12 +51,12 @@ func ValidAppToken(token string) bool {
 	return validTokenFormat(token, PrefixAppToken)
 }
 
-const appTokenColumns = "id, account_id, name, scope, created_at, last_used_at, expires_at, oauth_client_id, resource" //nolint:gosec // column names
+const appTokenColumns = "id, account_id, name, scope, created_at, last_used_at, expires_at, oauth_client_id, resource, sliding_expiry" //nolint:gosec // column names
 
 func scanAppToken(row interface{ Scan(...any) error }) (*AppToken, error) {
 	var t AppToken
 	var created, used, expires int64
-	if err := row.Scan(&t.ID, &t.AccountID, &t.Name, &t.Scope, &created, &used, &expires, &t.OAuthClientID, &t.Resource); err != nil {
+	if err := row.Scan(&t.ID, &t.AccountID, &t.Name, &t.Scope, &created, &used, &expires, &t.OAuthClientID, &t.Resource, &t.SlidingExpiry); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = fromMillis(created)
@@ -63,23 +71,57 @@ func scanAppToken(row interface{ Scan(...any) error }) (*AppToken, error) {
 	return &t, nil
 }
 
-// CreateAppToken creates an app token; expiresInDays 0 means no expiry
-func (s *Service) CreateAppToken(u *User, name, scope string, expiresInDays int, ri RequestInfo) (*AppToken, string, error) {
+// cleanTokenName checks the name of an app token: 1 to 64 characters, no control characters
+func cleanTokenName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len([]rune(name)) > 64 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		return nil, "", ErrInvalidTokenName
+		return "", ErrInvalidTokenName
+	}
+	return name, nil
+}
+
+// checkExpiresAt checks an absolute end of a token: after now, at most 3650 days ahead
+func (s *Service) checkExpiresAt(expiresAt *time.Time) error {
+	if expiresAt == nil {
+		return nil
+	}
+	now := s.now()
+	if !expiresAt.After(now) || expiresAt.After(now.Add(maxAppTokenDays*24*time.Hour)) {
+		return ErrInvalidTokenExpiresAt
+	}
+	return nil
+}
+
+// CreateAppToken creates an app token; expiresInDays 0 means no expiry
+func (s *Service) CreateAppToken(u *User, name, scope string, expiresInDays int, ri RequestInfo) (*AppToken, string, error) {
+	if expiresInDays < 0 || expiresInDays > maxAppTokenDays {
+		return nil, "", ErrInvalidTokenExpiry
+	}
+	var expiresAt *time.Time
+	if expiresInDays > 0 {
+		e := s.now().UTC().Add(time.Duration(expiresInDays) * 24 * time.Hour)
+		expiresAt = &e
+	}
+	return s.CreateAppTokenUntil(u, name, scope, expiresAt, ri)
+}
+
+// CreateAppTokenUntil creates an app token that ends at expiresAt, nil for no expiry
+func (s *Service) CreateAppTokenUntil(u *User, name, scope string, expiresAt *time.Time, ri RequestInfo) (*AppToken, string, error) {
+	name, err := cleanTokenName(name)
+	if err != nil {
+		return nil, "", err
 	}
 	if scope != ScopeRead && scope != ScopeWrite {
 		return nil, "", ErrInvalidTokenScope
 	}
-	if expiresInDays < 0 || expiresInDays > maxAppTokenDays {
-		return nil, "", ErrInvalidTokenExpiry
+	if err = s.checkExpiresAt(expiresAt); err != nil {
+		return nil, "", err
 	}
 	now := s.now().UTC()
 	t := &AppToken{ID: newID(), Name: name, Scope: scope, CreatedAt: now, AccountID: u.ID}
 	var expires int64
-	if expiresInDays > 0 {
-		e := now.Add(time.Duration(expiresInDays) * 24 * time.Hour)
+	if expiresAt != nil {
+		e := expiresAt.UTC()
 		t.ExpiresAt, expires = &e, toMillis(e)
 	}
 	token := newToken(PrefixAppToken)
@@ -108,6 +150,46 @@ func (s *Service) AppTokens(accountID string) ([]*AppToken, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// AppTokenByID returns an app token of an account, ErrNotFound for unknown ids and tokens of
+// other accounts
+func (s *Service) AppTokenByID(accountID, id string) (*AppToken, error) {
+	t, err := scanAppToken(s.db.QueryRow("SELECT "+appTokenColumns+" FROM app_tokens WHERE id = ? AND account_id = ?", id, accountID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+// RenameAppToken renames an app token or OAuth grant of an account. The end of a token
+// never changes: a longer life needs a new token.
+func (s *Service) RenameAppToken(u *User, id, name string, ri RequestInfo) (*AppToken, error) {
+	name, err := cleanTokenName(name)
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.AppTokenByID(u.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.Exec("UPDATE app_tokens SET name = ? WHERE id = ?", name, t.ID); err != nil {
+		return nil, err
+	}
+	if err = insertAudit(tx, s.now().UTC(), AuditEvent{Type: AuditAppTokenUpdated, ActorID: u.ID, TargetID: u.ID, IP: ri.IP, UserAgent: ri.UserAgent,
+		Details: map[string]any{"tokenId": t.ID, "name": name, "previousName": t.Name}}); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	t.Name = name
+	return t, nil
 }
 
 // RevokeAppToken deletes an app token of an account

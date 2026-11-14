@@ -473,3 +473,58 @@ func TestOAuthSDKClient(t *testing.T) {
 		t.Errorf("grants = %+v %v", tokens, err)
 	}
 }
+
+// Name and end chosen on the consent page; renaming afterwards; the end never changes
+func TestOAuthGrantNameAndEnd(t *testing.T) {
+	e := newSyncEnv(t)
+	f := &oauthFlow{e: e, clientID: e.registerClient("http://127.0.0.1/callback"), redirectURI: "http://127.0.0.1/callback", verifier: strings.Repeat("v", 50)}
+
+	id := f.authorize(nil)
+	r := e.session(http.MethodGet, "/oauth/requests/"+id+"/", "bob", nil)
+	var view OAuthRequestView
+	r.json(t, &view)
+	if view.Defaults.Name != "Claude Code" || view.Defaults.ExpiresAt != nil || view.Defaults.MaxExpiresAt.Before(time.Now().Add(3649*24*time.Hour)) {
+		t.Errorf("defaults: %s", r.Body.String())
+	}
+	// bad ends and names are refused and leave the request pending
+	for _, body := range []map[string]any{
+		{"expiresAt": time.Now().Add(-time.Hour).Format(time.RFC3339)},
+		{"expiresAt": time.Now().Add(3651 * 24 * time.Hour).Format(time.RFC3339)},
+		{"expiresAt": "2030-01-01"},
+		{"name": strings.Repeat("n", 65)},
+	} {
+		expectCode(t, e.session(http.MethodPost, "/oauth/requests/"+id+"/approve/", "bob", body), http.StatusBadRequest, CodeBadRequest)
+	}
+	end := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	tokensOf(t, f.exchange(f.approve("bob", id, map[string]any{"name": "Laptop agent", "expiresAt": end.Format(time.RFC3339)}), f.verifier))
+
+	var tokens []auth.AppToken
+	e.session(http.MethodGet, "/account/tokens/", "bob", nil).json(t, &tokens)
+	if len(tokens) != 1 || tokens[0].Name != "Laptop agent" || tokens[0].SlidingExpiry || tokens[0].ExpiresAt == nil || !tokens[0].ExpiresAt.Equal(end) {
+		t.Fatalf("grant: %+v", tokens)
+	}
+	grantID := tokens[0].ID
+
+	// rename: sessions of the owner only; the end cannot change
+	r = e.session(http.MethodPatch, "/account/tokens/"+grantID+"/", "bob", map[string]any{"name": "Desk agent"})
+	var renamed auth.AppToken
+	r.json(t, &renamed)
+	if r.Code != http.StatusOK || renamed.Name != "Desk agent" || !renamed.ExpiresAt.Equal(end) {
+		t.Errorf("rename = %d %s", r.Code, r.Body.String())
+	}
+	for _, body := range []map[string]any{{"expiresAt": nil}, {"name": "x", "expiresAt": end.Add(time.Hour).Format(time.RFC3339)}, {}, {"name": ""}} {
+		expectCode(t, e.session(http.MethodPatch, "/account/tokens/"+grantID+"/", "bob", body), http.StatusBadRequest, CodeBadRequest)
+	}
+	expectCode(t, e.session(http.MethodPatch, "/account/tokens/"+grantID+"/", "alice", map[string]any{"name": "mine"}), http.StatusNotFound, CodeNotFound)
+	expectCode(t, e.doToken(http.MethodPatch, "/account/tokens/"+grantID+"/", e.appToken("bob", "script", auth.ScopeWrite), map[string]any{"name": "x"}), http.StatusForbidden, CodeForbidden)
+
+	// app tokens can be created with an absolute end
+	r = e.session(http.MethodPost, "/account/tokens/", "bob", map[string]any{"name": "ci", "scope": "read", "expiresAt": end.Format(time.RFC3339)})
+	var created CreatedAppTokenResponse
+	r.json(t, &created)
+	if r.Code != http.StatusOK || created.AppToken.ExpiresAt == nil || !created.AppToken.ExpiresAt.Equal(end) || created.AppToken.SlidingExpiry {
+		t.Errorf("create with expiresAt = %d %s", r.Code, r.Body.String())
+	}
+	expectCode(t, e.session(http.MethodPost, "/account/tokens/", "bob", map[string]any{"name": "ci", "scope": "read", "expiresAt": end.Format(time.RFC3339), "expiresInDays": 3}),
+		http.StatusBadRequest, CodeBadRequest)
+}
