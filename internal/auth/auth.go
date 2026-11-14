@@ -130,6 +130,9 @@ type Service struct {
 
 	ticketsMu sync.Mutex
 	tickets   map[string]ticket
+
+	// pending OAuth requests and codes
+	oauth oauthState
 }
 
 // Open opens the account database in the state directory and imports the configured users

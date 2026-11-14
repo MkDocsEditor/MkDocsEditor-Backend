@@ -64,12 +64,19 @@ func (s *Service) AllowIP(ip string) error {
 const (
 	contentWriteBurst  = 60
 	contentWriteRefill = time.Second
+	oauthBurst         = 30
+	oauthRefill        = 2 * time.Second
 )
 
 // AllowContentWrite takes a token from the bucket of the content writes of an app token or,
 // for sessions, of an account
 func (s *Service) AllowContentWrite(key string, ip string) error {
 	return s.allowBucket("content-write:", key, ip, contentWriteBurst, contentWriteRefill)
+}
+
+// AllowOAuth takes a token for a request to the public OAuth endpoints of a client address
+func (s *Service) AllowOAuth(ip string) error {
+	return s.allowBucket("oauth:", ip, ip, oauthBurst, oauthRefill)
 }
 
 // AllowAccessRequestCreate takes a token for a new access request of a client address

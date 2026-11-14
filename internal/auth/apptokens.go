@@ -31,7 +31,11 @@ type AppToken struct {
 	CreatedAt  time.Time  `json:"createdAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 	ExpiresAt  *time.Time `json:"expiresAt"`
-	AccountID  string     `json:"-"`
+	// OAuthClientID is the client of an OAuth grant, "" for tokens made by hand
+	OAuthClientID string `json:"oauthClientId,omitempty"`
+	// Resource is the only resource an OAuth grant may access (the MCP endpoint)
+	Resource  string `json:"resource,omitempty"`
+	AccountID string `json:"-"`
 }
 
 // ValidAppToken reports whether a string has the format of an app token
@@ -39,12 +43,12 @@ func ValidAppToken(token string) bool {
 	return validTokenFormat(token, PrefixAppToken)
 }
 
-const appTokenColumns = "id, account_id, name, scope, created_at, last_used_at, expires_at" //nolint:gosec // column names
+const appTokenColumns = "id, account_id, name, scope, created_at, last_used_at, expires_at, oauth_client_id, resource" //nolint:gosec // column names
 
 func scanAppToken(row interface{ Scan(...any) error }) (*AppToken, error) {
 	var t AppToken
 	var created, used, expires int64
-	if err := row.Scan(&t.ID, &t.AccountID, &t.Name, &t.Scope, &created, &used, &expires); err != nil {
+	if err := row.Scan(&t.ID, &t.AccountID, &t.Name, &t.Scope, &created, &used, &expires, &t.OAuthClientID, &t.Resource); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = fromMillis(created)
@@ -119,12 +123,20 @@ func (s *Service) RevokeAppToken(u *User, id string, ri RequestInfo) error {
 	return nil
 }
 
-// AuthenticateAppToken returns the account and the token of an app token
+// AuthenticateAppToken returns the account and the token of an app token, or of the grant of
+// an OAuth access token
 func (s *Service) AuthenticateAppToken(token string) (*User, *AppToken, error) {
-	if !ValidAppToken(token) {
+	var row *sql.Row
+	switch {
+	case ValidAppToken(token):
+		row = s.db.QueryRow("SELECT "+appTokenColumns+" FROM app_tokens WHERE token_hash = ?", tokenHash(token))
+	case ValidOAuthAccessToken(token):
+		row = s.db.QueryRow("SELECT "+appTokenColumns+" FROM app_tokens WHERE id = (SELECT app_token_id FROM oauth_tokens WHERE token_hash = ? AND kind = 'access' AND expires_at > ?)",
+			tokenHash(token), toMillis(s.now()))
+	default:
 		return nil, nil, ErrUnauthenticated
 	}
-	t, err := scanAppToken(s.db.QueryRow("SELECT "+appTokenColumns+" FROM app_tokens WHERE token_hash = ?", tokenHash(token)))
+	t, err := scanAppToken(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrUnauthenticated
 	}

@@ -240,6 +240,7 @@ admin reset with `resetSecondFactors`).
 |---|---|---|
 | session | `mds_` + 43 base64url characters (32 random bytes) | cookie value or `Authorization: Bearer` |
 | app token | `mdp_` + 43 base64url characters | `Authorization: Bearer` |
+| OAuth access / refresh token, code | `mdo_` / `mdr_` / `mdk_` + 43 base64url characters | `Authorization: Bearer` at `/mcp` / token endpoint, see [oauth.md](oauth.md) |
 | link token | `mdl_` + 43 base64url characters | link fragment, request bodies |
 | login challenge | `mdc_` + 43 base64url characters | between password and second factor |
 | device link token | `mdd_` + 43 base64url characters | connect link payload, redeem request body |
@@ -271,6 +272,8 @@ Each request is authenticated by the first matching method:
 
 1. `Authorization: Bearer mds_…`: a bearer session.
 2. `Authorization: Bearer mdp_…`: an app token.
+   `Authorization: Bearer mdo_…`, an OAuth access token, counts as the app token of its
+   grant, but only at `/mcp/` ([oauth.md](oauth.md)).
 3. `Authorization: Basic …` with the username and an **app token** as the password, for
    tools that only speak Basic auth. Account passwords are not accepted here.
 4. The session cookie (`__Host-mkdocseditor_session` over HTTPS,
@@ -294,7 +297,9 @@ Without any method, endpoints that need authentication return 401 `unauthenticat
 | `GET /auth/forward/` | everyone; answers whether the request is logged in (below) |
 | content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, `/search/`, websockets) | any role; app tokens with `read` or `write` |
 | content changes (`POST`, `PUT`, `DELETE` on content routes, history restore, `POST /document/{id}/edits/`) | `editor`, `admin`; app tokens with `write` |
-| `POST /mcp/` (MCP server, [mcp.md](mcp.md)) | any role, `Authorization` header required (no cookie); readers and `read` tokens get only the read tools |
+| `POST /mcp/` (MCP server, [mcp.md](mcp.md)) | any role, `Authorization` header required (no cookie, `401` with `WWW-Authenticate`); readers and `read` tokens get only the read tools |
+| OAuth metadata, `/oauth/authorize/`, `/oauth/token/`, `/oauth/register/`, `/oauth/revoke/` ([oauth.md](oauth.md)) | everyone, rate limited; credentials are ignored |
+| `/oauth/requests/{id}/…` (consent) | sessions only; approving needs a recent authentication |
 | `/auth/whoami/`, `/auth/logout/`, `/auth/ws-ticket/`, `/auth/reauth/…` | sessions (any role); `whoami` and `ws-ticket` also app tokens |
 | `/account/…` | sessions only |
 | `/admin/…` | sessions of admins only |
