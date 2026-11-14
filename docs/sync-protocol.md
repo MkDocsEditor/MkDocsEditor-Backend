@@ -129,6 +129,10 @@ uses actor ids to attribute changes to users, so they follow these rules:
     manual edits), see [External changes](#8-external-changes)
   - `:server` (display name "Server"): the initial import of a file and restores of
     old revisions
+- Changes over the content API (`POST /document/{id}/edits/`, `PUT /document/{id}/content/`)
+  are made with actors of the requesting account. With an app token, the binding also
+  keeps the token's id and name, and the actor map shows it as `agent`. See
+  [content-api.md](content-api.md) section 5.
 
 The actor map is available over REST (`GET /actors/`) and in the websocket. The
 `actors` field of `initial-content` has the whole map. An `actor` message follows when a
@@ -139,7 +143,9 @@ actor, or a `:disk` change). Entry:
 { "actorId": "5f3c…", "accountId": "k3x8m2q9w4e7r1t6y5u0i3o8pa", "username": "markus", "displayName": "Markus", "color": "#e8590c", "avatar": "3f9a1c0b7d2e4a68" }
 ```
 
-`accountId` is the stable id of the account (empty for `:disk` and `:server`).
+`accountId` is the stable id of the account (empty for `:disk` and `:server`). An actor
+of changes made with an app token also has `"agent": {"tokenId": "…", "name": "…"}`, see
+[content-api.md](content-api.md) section 5.
 `username` is the account's current username, which can change; clients that keep
 authorship or actor data should key it on `accountId`. Presence messages, `you`, the
 `online` list, authorship runs and history authors carry `accountId` as well.
@@ -732,6 +738,8 @@ volume), and without commit signing or hooks.
 - Changes by the **disk** actor do not count. A commit that holds only disk changes is
   not made, because those changes came from git or from someone outside the backend.
 - A REST tree operation is authored by the user who made the request.
+- Changes made with an app token add a `Via-App-Token: <token name> (Name <email>)`
+  trailer per account and token, see [content-api.md](content-api.md) section 5.
 - The committer is the backend (`git.committerName`, `git.committerEmail`).
 
 Commit message: `Update guide/setup.md` (or `Create`, `Rename … to …`, `Move … to …`,

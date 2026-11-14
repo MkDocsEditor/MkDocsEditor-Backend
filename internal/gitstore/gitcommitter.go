@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -35,9 +36,11 @@ type CommitterOptions struct {
 
 // pendingEdits are the uncommitted user changes of one document
 type pendingEdits struct {
-	Changes     map[string]int `json:"changes"`
-	FirstChange time.Time      `json:"firstChange"`
-	LastChange  time.Time      `json:"lastChange"`
+	Changes map[string]int `json:"changes"`
+	// Agents are the names of the app tokens each account (by id) changed the document with
+	Agents      map[string][]string `json:"agents,omitempty"`
+	FirstChange time.Time           `json:"firstChange"`
+	LastChange  time.Time           `json:"lastChange"`
 	// leftAt is when the committer first saw the document without connections
 	leftAt time.Time
 }
@@ -131,6 +134,24 @@ func (c *Committer) RecordChanges(relPath string, countsByUser map[string]int) {
 	}
 }
 
+// RecordAgent implements ChangeRecorder: the commit of the document gets a Via-App-Token
+// trailer for the token. Call it after RecordChanges.
+func (c *Committer) RecordAgent(relPath string, accountID string, tokenName string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.pending[relPath]
+	if e == nil || tokenName == "" {
+		return
+	}
+	if e.Agents == nil {
+		e.Agents = map[string][]string{}
+	}
+	if !slices.Contains(e.Agents[accountID], tokenName) {
+		e.Agents[accountID] = append(e.Agents[accountID], tokenName)
+		c.dirty = true
+	}
+}
+
 func (c *Committer) loop() {
 	defer close(c.done)
 	ticker := time.NewTicker(c.opts.CheckInterval)
@@ -187,16 +208,25 @@ func (c *Committer) check(now time.Time) {
 	c.saveIfDirty()
 }
 
-// takePending removes and returns the pending edits of the given paths and everything below them
-func (c *Committer) takePending(paths ...string) map[string]int {
+// takePending removes and returns the pending edits of the given paths and everything below
+// them, and the app tokens they were made with
+func (c *Committer) takePending(paths ...string) (map[string]int, map[string][]string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	total := map[string]int{}
+	agents := map[string][]string{}
 	for p, e := range c.pending {
 		for _, q := range paths {
 			if wiki.IsInside(p, q) {
 				for user, n := range e.Changes {
 					total[user] += n
+				}
+				for user, names := range e.Agents {
+					for _, name := range names {
+						if !slices.Contains(agents[user], name) {
+							agents[user] = append(agents[user], name)
+						}
+					}
 				}
 				delete(c.pending, p)
 				c.dirty = true
@@ -204,15 +234,34 @@ func (c *Committer) takePending(paths ...string) map[string]int {
 			}
 		}
 	}
-	return total
+	return total, agents
 }
 
 // restorePending puts back changes whose commit failed
-func (c *Committer) restorePending(relPath string, changes map[string]int) {
+func (c *Committer) restorePending(relPath string, changes map[string]int, agents map[string][]string) {
 	if len(changes) == 0 {
 		return
 	}
 	c.RecordChanges(relPath, changes)
+	for user, names := range agents {
+		for _, name := range names {
+			c.RecordAgent(relPath, user, name)
+		}
+	}
+}
+
+// agentTrailers returns a Via-App-Token trailer per account and app token, for example
+// "Via-App-Token: claude (Markus <markus@example.com>)"
+func (c *Committer) agentTrailers(agents map[string][]string) []string {
+	var out []string
+	for user, names := range agents {
+		sig := c.signature(user)
+		for _, name := range names {
+			out = append(out, "Via-App-Token: "+sanitizeSignature(name)+" ("+sig.String()+")")
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // commitEdits commits the uncommitted user changes of one document
@@ -220,7 +269,7 @@ func (c *Committer) commitEdits(relPath string) {
 	if c.sync != nil {
 		c.sync.FlushPath(relPath)
 	}
-	changes := c.takePending(relPath)
+	changes, agents := c.takePending(relPath)
 	if len(changes) == 0 {
 		return
 	}
@@ -230,8 +279,8 @@ func (c *Committer) commitEdits(relPath string) {
 	for _, u := range users[1:] {
 		coAuthors = append(coAuthors, c.signature(u))
 	}
-	if _, err := c.commit([]string{relPath}, author, coAuthors, "Update "+relPath, ""); err != nil {
-		c.restorePending(relPath, changes)
+	if _, err := c.commit([]string{relPath}, author, coAuthors, "Update "+relPath, "", c.agentTrailers(agents)...); err != nil {
+		c.restorePending(relPath, changes, agents)
 	}
 }
 
@@ -247,7 +296,7 @@ func (c *Committer) CommitTreeChangeWithBody(user *auth.User, subject string, bo
 	if c.sync != nil {
 		c.sync.FlushAll()
 	}
-	changes := c.takePending(paths...)
+	changes, agents := c.takePending(paths...)
 	author := c.signature(user.ID)
 	var coAuthors []Signature
 	for _, u := range c.rankUsers(changes) {
@@ -255,18 +304,18 @@ func (c *Committer) CommitTreeChangeWithBody(user *auth.User, subject string, bo
 			coAuthors = append(coAuthors, c.signature(u))
 		}
 	}
-	hash, err := c.commit(paths, author, coAuthors, subject, body)
+	hash, err := c.commit(paths, author, coAuthors, subject, body, c.agentTrailers(agents)...)
 	if err != nil {
 		// attribute the edits to the first path, the next edit commit takes them along
-		c.restorePending(paths[0], changes)
+		c.restorePending(paths[0], changes, agents)
 	}
 	c.saveIfDirty()
 	return hash
 }
 
-func (c *Committer) commit(paths []string, author Signature, coAuthors []Signature, subject string, body string) (string, error) {
+func (c *Committer) commit(paths []string, author Signature, coAuthors []Signature, subject string, body string, trailers ...string) (string, error) {
 	start := time.Now()
-	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body)
+	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body, trailers...)
 	metrics.GitCommitDuration.Observe(time.Since(start).Seconds())
 	if err != nil {
 		metrics.GitCommits.WithLabelValues(metrics.ResultError).Inc()

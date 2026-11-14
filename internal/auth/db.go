@@ -192,6 +192,11 @@ CREATE TABLE avatars (
 	updated_at INTEGER NOT NULL
 );
 `,
+	// 9: actors of edits made with an app token (agents), see docs/content-api.md
+	`
+ALTER TABLE actor_bindings ADD COLUMN app_token_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE actor_bindings ADD COLUMN app_token_name TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

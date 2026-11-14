@@ -1851,6 +1851,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /search/:
+    get:
+      summary: "Full text search over the documents"
+      description: |
+        Documents that contain every word of `q` (case-insensitive) in their text, title or
+        path, the best matches first: a word in the title or path counts more than one in the
+        text. Searches the live text of open documents. See docs/content-api.md.
+      operationId: search
+      tags: [ Documents ]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: "Words to search for, 1 to 200 characters"
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: "Maximum number of results (1 to 100, default 20)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: "The matching documents"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /mkdocs/config/:
     get:
       summary: "The MkDocs configuration"
@@ -2094,12 +2131,22 @@ paths:
       - $ref: "#/components/parameters/documentId"
     get:
       summary: "A document's content"
-      description: "The markdown text. While the document is open for editing, this is the live text."
+      description: |
+        The markdown text. While the document is open for editing, this is the live text. The
+        `ETag` header holds its revision, the base for `PUT` on this path and for
+        `POST /document/{documentId}/edits/`. See docs/content-api.md.
       operationId: getDocumentContent
       tags: [ Documents ]
       responses:
         "200":
           description: "The markdown text"
+          headers:
+            ETag:
+              description: |
+                The revision in quotes. Missing for files that are not valid UTF-8, which
+                cannot be edited.
+              schema:
+                type: string
           content:
             text/plain:
               schema:
@@ -2108,6 +2155,85 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    put:
+      summary: "Replace a document's content"
+      description: |
+        Writes the full text, merged three-way: the difference between the text of
+        `baseRevision` and `content` is applied to the document as of `baseRevision`, and that
+        is merged with everything that changed since. Concurrent edits elsewhere survive.
+        Connected clients see the change live. Rate limited per app token (or account).
+        Prefer `POST /document/{documentId}/edits/` for small changes. See docs/content-api.md.
+      operationId: putDocumentContent
+      tags: [ Documents ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WriteContentRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Revision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ContentConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          description: "`baseRevision` is missing (code `base-revision-required`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /document/{documentId}/edits/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    post:
+      summary: "Edit a document by unique search strings"
+      description: |
+        Applies the edits in order. Each `old` must occur exactly once in the text the edits
+        before it left, otherwise nothing is applied and the answer is 409 with the code
+        `edit-not-found` or `edit-ambiguous` and the index of the edit in `details.index`.
+        Without `baseRevision` the edits apply to the current text; with it, to the text of
+        that revision, merged with everything that changed since. The edits are applied as
+        splices of an actor of the account (marked with the app token, see `Actor.agent`), so
+        connected clients see them live and concurrent typing merges. Rate limited per app
+        token (or account). See docs/content-api.md.
+      operationId: postDocumentEdits
+      tags: [ Documents ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Revision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ContentConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /document/{documentId}/authorship/:
     parameters:
@@ -3114,6 +3240,32 @@ components:
             $ref: "#/components/schemas/Error"
     Conflict:
       description: "The target already exists, or clients are connected to the document"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Revision:
+      description: "The change is applied (or changed nothing); the new revision"
+      headers:
+        ETag:
+          description: "The revision in quotes"
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RevisionResponse"
+    ContentConflict:
+      description: |
+        `edit-not-found` or `edit-ambiguous` (an `old` of the edit at `details.index` occurs not
+        or more than once), or `unknown-revision` (the document does not have the base
+        revision any more: read it again)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: "The request body is larger than 4 MiB (code `payload-too-large`)"
       content:
         application/json:
           schema:
@@ -4888,6 +5040,102 @@ components:
           type: string
           nullable: true
           description: "Version of the profile picture of the account, null for pseudo users and without one"
+        agent:
+          $ref: "#/components/schemas/AgentInfo"
+
+    AgentInfo:
+      type: object
+      description: |
+        Set for the actors of changes an account made with an app token (an agent, such as
+        an LLM). Missing for everything else.
+      required: [ tokenId, name ]
+      properties:
+        tokenId:
+          type: string
+          description: "Id of the app token; the token may be revoked since"
+        name:
+          type: string
+          description: "Name of the app token when the actor was created"
+
+    EditRequest:
+      type: object
+      required: [ edits ]
+      properties:
+        edits:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TextEdit"
+        baseRevision:
+          type: string
+          description: "Revision the edits refer to (the ETag of the content); default: the current text"
+
+    TextEdit:
+      type: object
+      required: [ old, new ]
+      properties:
+        old:
+          type: string
+          description: "Text to replace, must occur exactly once. Empty only in an empty document."
+        new:
+          type: string
+          description: "Replacement"
+
+    WriteContentRequest:
+      type: object
+      required: [ content, baseRevision ]
+      properties:
+        content:
+          type: string
+          description: "The full new markdown text"
+        baseRevision:
+          type: string
+          description: "Revision the content was based on (the ETag of the content)"
+
+    RevisionResponse:
+      type: object
+      required: [ revision ]
+      properties:
+        revision:
+          type: string
+          description: "Automerge heads (hex), sorted and joined with dots"
+
+    SearchResponse:
+      type: object
+      required: [ results, total ]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+        total:
+          type: integer
+          description: "Number of matching documents, also those beyond the limit"
+
+    SearchResult:
+      type: object
+      required: [ id, path, title, snippets ]
+      properties:
+        id:
+          type: string
+        path:
+          type: string
+          description: "Path relative to the docs folder"
+        title:
+          type: string
+        snippets:
+          type: array
+          description: "Up to three lines with a match, shortened around it"
+          items:
+            type: object
+            required: [ line, text ]
+            properties:
+              line:
+                type: integer
+                description: "Line number, starting at 1"
+              text:
+                type: string
 
     Authorship:
       type: object
@@ -4925,7 +5173,7 @@ components:
 
     HistoryEntry:
       type: object
-      required: [ revision, time, author, coAuthors, message, path ]
+      required: [ revision, time, author, coAuthors, message, path, appTokens ]
       properties:
         revision:
           type: string
@@ -4947,6 +5195,13 @@ components:
         path:
           type: string
           description: "Path of the file in this commit, relative to the docs folder"
+        appTokens:
+          type: array
+          description: |
+            Names of the app tokens (agents) changes of this commit were made with, from the
+            `Via-App-Token` trailers
+          items:
+            type: string
 
     HistoryAuthor:
       type: object

@@ -90,6 +90,14 @@ type (
 		Color       string `json:"color"`
 		// Avatar is null for pseudo users and accounts without a profile picture
 		Avatar *string `json:"avatar"`
+		// Agent is set for the actors of edits made with an app token of the account
+		Agent *AgentInfo `json:"agent,omitempty"`
+	}
+
+	// AgentInfo names the app token an agent (an LLM, a script) edited with
+	AgentInfo struct {
+		TokenID string `json:"tokenId"`
+		Name    string `json:"name"`
 	}
 
 	InitialContentMessage struct {

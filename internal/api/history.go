@@ -32,6 +32,8 @@ type HistoryEntry struct {
 	CoAuthors []HistoryAuthor `json:"coAuthors"`
 	Message   string          `json:"message"`
 	Path      string          `json:"path"`
+	// AppTokens are the names of the app tokens (agents) the changes were made with
+	AppTokens []string `json:"appTokens"`
 }
 
 // HistoryAuthor is a commit author. Username and AccountID are empty if the author is not
@@ -122,6 +124,7 @@ func (rs *RestService) getDocumentHistory(c *echo.Context) error {
 			CoAuthors: []HistoryAuthor{},
 			Message:   cm.Subject,
 			Path:      cm.Path,
+			AppTokens: cm.AppTokens,
 		}
 		for _, co := range cm.CoAuthors {
 			e.CoAuthors = append(e.CoAuthors, rs.historyAuthor(co))

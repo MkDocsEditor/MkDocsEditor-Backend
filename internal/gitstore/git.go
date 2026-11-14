@@ -107,8 +107,9 @@ func (e *gitError) Unwrap() error {
 // Commit commits the given paths (files or folders, existing or deleted, relative to the docs
 // folder; "../mkdocs.yml" for a file next to it) and nothing else. Other staged changes in the
 // repository stay staged and uncommitted. body is optional text between the subject and the
-// trailers. It returns the abbreviated hash of the commit, or "" if the paths have no changes.
-func (g *Repo) Commit(paths []string, author Signature, coAuthors []Signature, subject string, body string) (string, error) {
+// trailers. trailers are more "Key: value" lines after the Co-authored-by ones. It returns the
+// abbreviated hash of the commit, or "" if the paths have no changes.
+func (g *Repo) Commit(paths []string, author Signature, coAuthors []Signature, subject string, body string, trailers ...string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -129,7 +130,7 @@ func (g *Repo) Commit(paths []string, author Signature, coAuthors []Signature, s
 		return "", nil
 	}
 
-	messageFile, err := writeCommitMessage(subject, body, coAuthors)
+	messageFile, err := writeCommitMessage(subject, body, coAuthors, trailers)
 	if err != nil {
 		return "", err
 	}
@@ -180,16 +181,19 @@ func coveredBy(file string, paths []string) bool {
 }
 
 // writeCommitMessage writes the message to a temporary file and returns its name
-func writeCommitMessage(subject string, body string, coAuthors []Signature) (string, error) {
+func writeCommitMessage(subject string, body string, coAuthors []Signature, trailers []string) (string, error) {
 	var message strings.Builder
 	message.WriteString(subject)
 	if body != "" {
 		message.WriteString("\n\n" + body)
 	}
-	if len(coAuthors) > 0 {
+	if len(coAuthors) > 0 || len(trailers) > 0 {
 		message.WriteString("\n")
 		for _, co := range coAuthors {
 			message.WriteString("\nCo-authored-by: " + co.String())
+		}
+		for _, t := range trailers {
+			message.WriteString("\n" + t)
 		}
 	}
 	message.WriteString("\n")

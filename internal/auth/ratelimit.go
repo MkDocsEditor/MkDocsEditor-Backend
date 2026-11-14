@@ -57,20 +57,32 @@ func newLimiter() *limiter {
 // AllowIP takes a token from the bucket of a client address
 func (s *Service) AllowIP(ip string) error {
 	rl := s.cfg.rateLimits
-	return s.allowBucket("ip:", ip, rl.PerIPBurst, rl.PerIPRefill)
+	return s.allowBucket("ip:", ip, ip, rl.PerIPBurst, rl.PerIPRefill)
+}
+
+// Limits of the content writes (edits, PUT content) per app token or account
+const (
+	contentWriteBurst  = 60
+	contentWriteRefill = time.Second
+)
+
+// AllowContentWrite takes a token from the bucket of the content writes of an app token or,
+// for sessions, of an account
+func (s *Service) AllowContentWrite(key string, ip string) error {
+	return s.allowBucket("content-write:", key, ip, contentWriteBurst, contentWriteRefill)
 }
 
 // AllowAccessRequestCreate takes a token for a new access request of a client address
 func (s *Service) AllowAccessRequestCreate(ip string) error {
-	return s.allowBucket("access-request:", ip, accessRequestCreateBurst, accessRequestCreateRefill)
+	return s.allowBucket("access-request:", ip, ip, accessRequestCreateBurst, accessRequestCreateRefill)
 }
 
 // AllowAccessRequestStatus takes a token for a status request of a client address
 func (s *Service) AllowAccessRequestStatus(ip string) error {
-	return s.allowBucket("access-request-status:", ip, accessRequestStatusBurst, accessRequestStatusRefill)
+	return s.allowBucket("access-request-status:", ip, ip, accessRequestStatusBurst, accessRequestStatusRefill)
 }
 
-func (s *Service) allowBucket(prefix, ip string, burst int, refill time.Duration) error {
+func (s *Service) allowBucket(prefix, key, ip string, burst int, refill time.Duration) error {
 	if s.cfg.rateLimits.Disabled {
 		return nil
 	}
@@ -86,7 +98,7 @@ func (s *Service) allowBucket(prefix, ip string, burst int, refill time.Duration
 			}
 		}
 	}
-	key := prefix + ip
+	key = prefix + key
 	b := l.buckets[key]
 	if b == nil {
 		b = &bucket{tokens: float64(burst), last: now, full: time.Duration(burst) * refill}

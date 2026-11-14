@@ -66,6 +66,9 @@ type docSession struct {
 	authorship *authorshipState
 	// authorshipPending counts the changes since the last authorship job started
 	authorshipPending int
+
+	// apiActors are the actors of the agents that changed the document over the API, by Agent.key
+	apiActors map[string]apiActor
 }
 
 // newDocument creates a new Automerge document with the given text, made by a server actor
