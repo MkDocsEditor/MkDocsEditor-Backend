@@ -1,6 +1,9 @@
 package collab
 
 import (
+	"slices"
+	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -189,4 +192,63 @@ func (s *SyncServer) ReplayAuthorship(d *wiki.Document) (*Authorship, error) {
 // actorOwner returns the current username and the account id of an actor
 func (s *SyncServer) actorOwner(actorID string) (string, string) {
 	return s.subjectUsername(s.actors.Owner(actorID))
+}
+
+// LineAuthor is who wrote most of a line of the live text, by the authorship of its characters.
+// AccountID is empty for lines nobody bound wrote, AppToken is set for edits with an app token.
+type LineAuthor struct {
+	AccountID string
+	AppToken  string
+}
+
+// LineAuthors returns the live text as of the heads of its authorship, its revision, and for
+// every line who wrote most of its characters (the line end included)
+func (s *SyncServer) LineAuthors(d *wiki.Document) (string, string, []LineAuthor, error) {
+	a, err := s.Authorship(d)
+	if err != nil {
+		return "", "", nil, err
+	}
+	heads := slices.Clone(a.Heads)
+	sort.Strings(heads)
+	revision := strings.Join(heads, ".")
+	text := ""
+	if len(heads) > 0 {
+		if text, _, err = s.ReadContentAt(d, revision); err != nil {
+			return "", "", nil, err
+		}
+	}
+	var out []LineAuthor
+	counts := map[string]int{}
+	run := 0 // the run of the current code point
+	endLine := func() {
+		best, bestN := "", 0
+		for actor, n := range counts {
+			if n > bestN || (n == bestN && actor < best) {
+				best, bestN = actor, n
+			}
+		}
+		var la LineAuthor
+		if b, ok := s.actors.Binding(best); ok && b.Subject != "" {
+			la = LineAuthor{AccountID: b.Subject, AppToken: b.AppTokenName}
+		}
+		out = append(out, la)
+		clear(counts)
+	}
+	pos := 0
+	for _, r := range text {
+		for run < len(a.Runs) && pos >= a.Runs[run].End {
+			run++
+		}
+		if run < len(a.Runs) && pos >= a.Runs[run].Start {
+			counts[a.Runs[run].ActorID]++
+		}
+		pos++
+		if r == '\n' {
+			endLine()
+		}
+	}
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		endLine()
+	}
+	return text, revision, out, nil
 }

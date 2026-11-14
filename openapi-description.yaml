@@ -2859,15 +2859,104 @@ paths:
         Automerge change, so connected clients merge it like any other edit and nothing
         typed concurrently is lost. In git, the change counts for the requesting user.
         Requires the editor or admin role.
+
+        With a body `{"heading", "headingOccurrence"}` only that section is restored: the
+        heading and the lines below it up to the next heading of the same or a higher level
+        (subsections included). Uncommitted edits are committed first, the restore is
+        committed as `Restore section "<heading>" of <path> to <12 hex>`. `409
+        section-not-found` (`details.in`: `revision` or `current`) when either text has no
+        such section. `features` of `GET /server-info/` contains `blame` on servers with
+        section restore.
       operationId: restoreDocumentRevision
       tags: [ History ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ heading ]
+              properties:
+                heading:
+                  type: string
+                headingOccurrence:
+                  type: integer
+                  minimum: 1
+                  default: 1
       responses:
         "204":
           description: "Restored"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /document/{documentId}/blame/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "Who last changed each line"
+      description: |
+        git blame of the live text, following renames, grouped into blocks of consecutive
+        lines with the same commit. Lines not committed yet are `pending`, attributed to the
+        account that wrote most of their characters. Requires `git.enabled`; without it the
+        response is 404. `features` of `GET /server-info/` contains `blame`.
+      operationId: getDocumentBlame
+      tags: [ History ]
+      responses:
+        "200":
+          description: "The blocks"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ revision, lines, blocks ]
+                properties:
+                  revision:
+                    type: string
+                    description: "Revision (seenToken) of the text the lines belong to"
+                  lines:
+                    type: integer
+                  blocks:
+                    type: array
+                    items:
+                      type: object
+                      required: [ start, end, pending, revision, time, message, author, agents ]
+                      properties:
+                        start:
+                          type: integer
+                          description: "First line, 1-based"
+                        end:
+                          type: integer
+                          description: "Last line, 1-based, inclusive"
+                        pending:
+                          type: boolean
+                        revision:
+                          type: string
+                          nullable: true
+                        time:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        message:
+                          type: string
+                          nullable: true
+                        author:
+                          description: "Null when nobody known wrote the lines"
+                          allOf:
+                            - $ref: "#/components/schemas/Author"
+                        agents:
+                          type: array
+                          items:
+                            type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
 

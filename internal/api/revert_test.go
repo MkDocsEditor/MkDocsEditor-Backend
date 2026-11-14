@@ -8,6 +8,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
+	automerge "github.com/automerge/automerge-go"
 )
 
 // appendCommitted appends a line as a user and commits it with a restart
@@ -102,5 +103,54 @@ func TestRevert(t *testing.T) {
 	}
 	if !strings.Contains(e.serverText(rel), "line B changed") {
 		t.Error("the conflicting revert changed the text")
+	}
+}
+
+func TestRestoreSection(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{})
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	e.appendCommitted(id, rel, "bob", "## A\na1\n### A.1\nsub\n## B\nb1\n")
+	rev := e.history(id)[0].Revision
+
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.edit(func(text *automerge.Text) error {
+		s, _ := text.Get()
+		for _, r := range [][2]string{{"a1", "a2"}, {"sub", "sub2"}, {"b1", "b2"}} {
+			i := strings.Index(s, r[0])
+			if err := text.Splice(i, len(r[0]), r[1]); err != nil {
+				return err
+			}
+			s = s[:i] + r[1] + s[i+len(r[0]):]
+		}
+		return nil
+	})
+	eventually(t, "server", func() bool { return e.serverText(rel) == a.text() })
+
+	restore := func(body string) *httpRecorder {
+		return e.doBody(http.MethodPost, "/document/"+id+"/history/"+rev+"/restore/", "bob", body)
+	}
+	if rec := restore(`{"heading":"Nope"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), CodeSectionNotFound) {
+		t.Errorf("missing section: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := restore(`{"heading":" "}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("empty heading: %d", rec.Code)
+	}
+	// the section with its subsections, the rest stays
+	if rec := restore(`{"heading":"A","headingOccurrence":1}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("restore section: %d %s", rec.Code, rec.Body.String())
+	}
+	want := setupText + "## A\na1\n### A.1\nsub\n## B\nb2\n"
+	a.waitFor("restored section", func() bool { return a.textLocked() == want })
+	h := e.history(id)
+	if h[0].Message != `Restore section "A" of guide/setup.md to `+rev[:12] || h[0].Author.Username != "bob" {
+		t.Errorf("commit %+v", h[0])
+	}
+	if h[1].Author.Username != "alice" {
+		t.Errorf("pending edits not committed apart: %+v", h[1])
+	}
+	if got := e.git0("show", "HEAD:docs/"+rel); got != want {
+		t.Errorf("committed %q", got)
 	}
 }
