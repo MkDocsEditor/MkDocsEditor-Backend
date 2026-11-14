@@ -251,6 +251,8 @@ func (s *SyncServer) relPath(absPath string) (string, error) {
 // the session lock held, so it must not block or call back into the sync server.
 type ChangeRecorder interface {
 	RecordChanges(relPath string, countsByUser map[string]int)
+	// RecordAgent notes that an account changed the document with the named app token
+	RecordAgent(relPath string, accountID string, tokenName string)
 }
 
 // SetChangeRecorder sets the recorder of user changes. Call it before serving requests.
@@ -321,6 +323,9 @@ func (s *SyncServer) actorInfo(actorID string, subject string) ActorInfo {
 		} else {
 			info.Color = auth.ColorForUsername(subject)
 		}
+	}
+	if b, ok := s.actors.Binding(actorID); ok && b.AppTokenID != "" {
+		info.Agent = &AgentInfo{TokenID: b.AppTokenID, Name: b.AppTokenName}
 	}
 	return info
 }

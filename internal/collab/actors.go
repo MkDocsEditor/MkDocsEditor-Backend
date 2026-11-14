@@ -86,6 +86,31 @@ func (r *ActorRegistry) Bind(actorID string, subject string) (bool, error) {
 	return true, nil
 }
 
+// NewAgentActor creates and binds a fresh actor id for the edits an account makes with an app
+// token
+func (r *ActorRegistry) NewAgentActor(agent Agent) (string, error) {
+	id := newRandomID()
+	b := auth.ActorBinding{Subject: agent.AccountID, Bound: time.Now().UTC(), AppTokenID: agent.TokenID, AppTokenName: agent.TokenName}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if _, ok := r.actors[id]; ok {
+		return "", ErrForeignActor
+	}
+	if err := r.store.StoreActorBinding(id, b); err != nil {
+		return "", err
+	}
+	r.actors[id] = b
+	return id, nil
+}
+
+// Binding returns the binding of an actor id
+func (r *ActorRegistry) Binding(actorID string) (auth.ActorBinding, bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	b, ok := r.actors[actorID]
+	return b, ok
+}
+
 // NewServerActor creates and binds a fresh actor id for changes made by the server
 func (r *ActorRegistry) NewServerActor(pseudoUser string) (string, error) {
 	id := newRandomID()

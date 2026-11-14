@@ -18,6 +18,8 @@ type Commit struct {
 	Author    Signature
 	CoAuthors []Signature
 	Subject   string
+	// AppTokens are the names of the app tokens of the Via-App-Token trailers
+	AppTokens []string
 	// Path of the file in this commit, relative to the docs folder (it changes with renames)
 	Path string
 }
@@ -75,13 +77,13 @@ func (g *Repo) FileHistory(path string, limit int) ([]Commit, error) {
 }
 
 // gitLogFormat separates records with 0x1e and fields with 0x00. parseLogRecord reads it.
-const gitLogFormat = "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00"
+const gitLogFormat = "%x1e%H%x00%aI%x00%an%x00%ae%x00%s%x00%(trailers:key=Co-authored-by,valueonly,separator=%x01)%x00%(trailers:key=Via-App-Token,valueonly,separator=%x01)%x00"
 
 // parseLogRecord parses a record of "git log --name-status --format=gitLogFormat" for the file at
 // path. addsFile is true if the commit added the file.
 func parseLogRecord(record string, path string) (commit Commit, addsFile bool, err error) {
 	fields := strings.Split(record, "\x00")
-	if len(fields) < 7 {
+	if len(fields) < 8 {
 		return Commit{}, false, fmt.Errorf("unexpected git log output %q", record)
 	}
 	t, _ := time.Parse(time.RFC3339, fields[1])
@@ -90,6 +92,7 @@ func parseLogRecord(record string, path string) (commit Commit, addsFile bool, e
 		Time:      t,
 		Author:    Signature{Name: fields[2], Email: fields[3]},
 		CoAuthors: []Signature{},
+		AppTokens: []string{},
 		Subject:   fields[4],
 		Path:      path,
 	}
@@ -98,12 +101,27 @@ func parseLogRecord(record string, path string) (commit Commit, addsFile bool, e
 			commit.CoAuthors = append(commit.CoAuthors, sig)
 		}
 	}
-	for line := range strings.SplitSeq(fields[6], "\n") {
+	for v := range strings.SplitSeq(fields[6], "\x01") {
+		if name := appTokenName(strings.TrimSpace(v)); name != "" {
+			commit.AppTokens = append(commit.AppTokens, name)
+		}
+	}
+	for line := range strings.SplitSeq(fields[7], "\n") {
 		if parts := strings.Split(strings.TrimSpace(line), "\t"); len(parts) == 2 && parts[0] == "A" {
 			addsFile = true
 		}
 	}
 	return commit, addsFile, nil
+}
+
+// appTokenName returns the token name of a Via-App-Token value "name (Name <email>)"
+func appTokenName(v string) string {
+	if lt := strings.LastIndex(v, " <"); lt >= 0 && strings.HasSuffix(v, ">)") {
+		if open := strings.LastIndex(v[:lt], " ("); open >= 0 {
+			return strings.TrimSpace(v[:open])
+		}
+	}
+	return v
 }
 
 // renameSource returns the old path if a commit renamed a file to path, else ""

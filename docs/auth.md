@@ -292,8 +292,8 @@ Without any method, endpoints that need authentication return 401 `unauthenticat
 |---|---|
 | `GET /alive/`, `GET /auth/status/`, the pre-login `/auth/…` endpoints, `GET /.well-known/assetlinks.json` | everyone, rate limited |
 | `GET /auth/forward/` | everyone; answers whether the request is logged in (below) |
-| content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, websockets) | any role; app tokens with `read` or `write` |
-| content changes (`POST`, `PUT`, `DELETE` on content routes, history restore) | `editor`, `admin`; app tokens with `write` |
+| content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, `/search/`, websockets) | any role; app tokens with `read` or `write` |
+| content changes (`POST`, `PUT`, `DELETE` on content routes, history restore, `POST /document/{id}/edits/`) | `editor`, `admin`; app tokens with `write` |
 | `/auth/whoami/`, `/auth/logout/`, `/auth/ws-ticket/`, `/auth/reauth/…` | sessions (any role); `whoami` and `ws-ticket` also app tokens |
 | `/account/…` | sessions only |
 | `/admin/…` | sessions of admins only |

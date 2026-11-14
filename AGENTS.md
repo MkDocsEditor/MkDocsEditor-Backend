@@ -2,7 +2,7 @@
 
 Notes for AI coding agents working on this repository. Human-oriented docs live in `README.md`;
 the account system is specified in `docs/auth.md`, the sync protocol in `docs/sync-protocol.md`,
-the dashboard in `docs/dashboard.md`, push notifications in `docs/push.md`, page metadata and the wiki config in `docs/page-meta.md`, QR codes in `docs/qr.md`.
+the dashboard in `docs/dashboard.md`, push notifications in `docs/push.md`, the content edit API and search in `docs/content-api.md`, page metadata and the wiki config in `docs/page-meta.md`, QR codes in `docs/qr.md`.
 
 ## Package layout
 

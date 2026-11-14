@@ -324,6 +324,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET(EndpointPathForward, rs.forwardAuth)
 	echoRest.GET("/qr/", rs.getQRCodes)
 	echoRest.GET("/qr/:"+urlParamKey+"/", rs.getQRCode)
+	echoRest.GET("/search/", rs.getSearch)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")
@@ -343,6 +344,8 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	groupDocuments.GET("/:"+urlParamID+"/", rs.describeItem(wiki.TypeDocument))
 	groupDocuments.GET("/:"+urlParamID+"/ws/", rs.handleWebsocket)
 	groupDocuments.GET("/:"+urlParamID+"/content/", rs.getDocumentContent)
+	groupDocuments.PUT("/:"+urlParamID+"/content/", rs.putDocumentContent)
+	groupDocuments.POST("/:"+urlParamID+"/edits/", rs.postDocumentEdits)
 	groupDocuments.GET("/:"+urlParamID+"/references/", rs.getDocumentReferences)
 	groupDocuments.GET("/:"+urlParamID+"/backlinks/", rs.getDocumentBacklinks)
 	groupDocuments.GET("/:"+urlParamID+"/authorship/", rs.getDocumentAuthorship)
@@ -372,7 +375,7 @@ func corsConfig(conf configuration.CorsConfiguration) middleware.CORSConfig {
 		AllowHeaders: []string{
 			echo.HeaderAuthorization, echo.HeaderContentType, echo.HeaderAccept, "X-Requested-With",
 		},
-		ExposeHeaders: []string{echo.HeaderContentDisposition, "Retry-After"},
+		ExposeHeaders: []string{echo.HeaderContentDisposition, "Retry-After", headerETag},
 		MaxAge:        3600,
 	}
 	if len(c.AllowMethods) == 0 {
@@ -462,24 +465,6 @@ func (rs *RestService) describeItem(itemType string) echo.HandlerFunc {
 		}
 		return c.JSONPretty(http.StatusOK, result, jsonIndent)
 	}
-}
-
-// returns the content of the document with the given id (if found)
-func (rs *RestService) getDocumentContent(c *echo.Context) error {
-	id := c.Param(urlParamID)
-
-	d := rs.treeManager.GetDocument(id)
-	if d == nil {
-		return rs.ReturnNotFound(c, id)
-	}
-	if text, ok := rs.sync.CurrentText(d); ok {
-		return c.String(http.StatusOK, text)
-	}
-	content, err := rs.treeManager.ReadDocumentContent(d)
-	if err != nil {
-		return rs.ReturnError(c, err)
-	}
-	return c.String(http.StatusOK, content)
 }
 
 // bindItemRequest reads a new item request and checks that the parent section exists. It answers
