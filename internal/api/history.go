@@ -227,6 +227,10 @@ func (rs *RestService) commitSummaries(repo *gitstore.Repo, commits []gitstore.C
 				data, err = nil, nil
 			}
 		}
+		if errors.Is(err, gitstore.ErrNotInRevision) {
+			// a commit that deleted the file: empty after it
+			data, err = nil, nil
+		}
 		if err != nil {
 			return "", err
 		}
