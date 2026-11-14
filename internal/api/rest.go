@@ -66,17 +66,19 @@ type (
 )
 
 type RestService struct {
-	echoRest       *echo.Echo
-	httpServer     *http.Server
-	server         configuration.ServerConfiguration
-	allowedOrigins []string
-	trustedProxies []*net.IPNet
-	authenticator  *auth.Service
-	treeManager    *wiki.TreeManager
-	sync           *collab.SyncServer
-	git            *gitstore.Committer
-	push           *push.Notifier
-	refs           *references.ReferenceIndex
+	// historySummaries caches the summaries of commits, see history.go
+	historySummaries summaryCache
+	echoRest         *echo.Echo
+	httpServer       *http.Server
+	server           configuration.ServerConfiguration
+	allowedOrigins   []string
+	trustedProxies   []*net.IPNet
+	authenticator    *auth.Service
+	treeManager      *wiki.TreeManager
+	sync             *collab.SyncServer
+	git              *gitstore.Committer
+	push             *push.Notifier
+	refs             *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
 	knownRoutes map[string]struct{}
 	// thumbnailSlots limits concurrent image decoding

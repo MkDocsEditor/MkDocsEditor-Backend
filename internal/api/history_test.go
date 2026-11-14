@@ -68,6 +68,42 @@ func TestHistory(t *testing.T) {
 	if entries[1].Author.Email != "alice@mkdocseditor.invalid" || entries[1].Time.IsZero() || len(entries[1].Revision) != 40 {
 		t.Errorf("entry %+v", entries[1])
 	}
+	// authors look like the feed's, every entry says what it changed
+	alice := e.authn.UserByUsername("alice")
+	if au := entries[1].Author; au.DisplayName != alice.DisplayName || au.Color != alice.Color || au.DisplayName == "" {
+		t.Errorf("author %+v", au)
+	}
+	if s := entries[1].Summary; s.LinesAdded != 3 || s.LinesRemoved != 0 || len(s.Headings) != 1 || s.Headings[0] != "Setup" {
+		t.Errorf("summary of the edit %+v", s)
+	}
+	if s := entries[0].Summary; s.LinesAdded != 0 || s.LinesRemoved != 0 {
+		t.Errorf("summary of the rename %+v", s)
+	}
+	if s := entries[2].Summary; s.LinesAdded != strings.Count(setupText, "\n") || s.LinesRemoved != 0 {
+		t.Errorf("summary of the first commit %+v", s)
+	}
+	if again := e.history(id); again[1].Summary.LinesAdded != 3 {
+		t.Errorf("cached summary %+v", again[1].Summary)
+	}
+
+	// structured diff
+	rec0 := e.do(http.MethodGet, "/document/"+id+"/history/diff/?from="+entries[2].Revision+"&to="+entries[1].Revision+"&format=json", "carol")
+	var sd HistoryDiffResponse
+	if err := json.Unmarshal(rec0.bytes(), &sd); err != nil || rec0.Code != http.StatusOK {
+		t.Fatalf("json diff: %d %s", rec0.Code, rec0.Body.String())
+	}
+	if len(sd.Hunks) != 1 || sd.From != entries[2].Revision || sd.To != entries[1].Revision || sd.Hunks[0].Heading == nil || *sd.Hunks[0].Heading != "Setup" {
+		t.Fatalf("json diff: %s", rec0.Body.String())
+	}
+	var added []string
+	for _, l := range sd.Hunks[0].Lines {
+		if l.Op == "+" {
+			added = append(added, l.Text)
+		}
+	}
+	if strings.Join(added, "|") != "by alice|more by alice|by bob" {
+		t.Errorf("added lines %v", added)
+	}
 
 	// content at a revision, also under the old path and with a short revision
 	edited := setupText + "by alice\nmore by alice\nby bob\n"

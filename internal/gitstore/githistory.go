@@ -20,8 +20,16 @@ type Commit struct {
 	Subject   string
 	// AppTokens are the names of the app tokens of the Via-App-Token trailers
 	AppTokens []string
+	// Agents are the Via-App-Token trailers: the token name and the account that used it
+	Agents []Agent
 	// Path of the file in this commit, relative to the docs folder (it changes with renames)
 	Path string
+}
+
+// Agent is an app token that made changes of a commit, and its account
+type Agent struct {
+	Name    string
+	Account Signature
 }
 
 // FileHistory returns the commits that changed a file, following renames, newest first.
@@ -93,6 +101,7 @@ func parseLogRecord(record string, path string) (commit Commit, addsFile bool, e
 		Author:    Signature{Name: fields[2], Email: fields[3]},
 		CoAuthors: []Signature{},
 		AppTokens: []string{},
+		Agents:    []Agent{},
 		Subject:   fields[4],
 		Path:      path,
 	}
@@ -102,8 +111,10 @@ func parseLogRecord(record string, path string) (commit Commit, addsFile bool, e
 		}
 	}
 	for v := range strings.SplitSeq(fields[6], "\x01") {
-		if name := appTokenName(strings.TrimSpace(v)); name != "" {
+		v = strings.TrimSpace(v)
+		if name := appTokenName(v); name != "" {
 			commit.AppTokens = append(commit.AppTokens, name)
+			commit.Agents = append(commit.Agents, Agent{Name: name, Account: appTokenAccount(v)})
 		}
 	}
 	for line := range strings.SplitSeq(fields[7], "\n") {
@@ -122,6 +133,17 @@ func appTokenName(v string) string {
 		}
 	}
 	return v
+}
+
+// appTokenAccount returns the account of a Via-App-Token value "name (Name <email>)"
+func appTokenAccount(v string) Signature {
+	if lt := strings.LastIndex(v, " <"); lt >= 0 && strings.HasSuffix(v, ">)") {
+		if open := strings.LastIndex(v[:lt], " ("); open >= 0 {
+			sig, _ := parseSignature(v[open+2 : len(v)-1])
+			return sig
+		}
+	}
+	return Signature{}
 }
 
 // renameSource returns the old path if a commit renamed a file to path, else ""
