@@ -139,7 +139,7 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 	}
 	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig, FeatureFeedRanges, FeatureQRCodes, FeatureForwardAuth, FeatureChanges}
 	if rs.git != nil {
-		features = append(features, FeatureHistory)
+		features = append(features, FeatureHistory, FeatureRevert)
 	}
 	if rs.authenticator.AccessRequestsAvailable() {
 		features = append(features, FeatureAccessRequests)

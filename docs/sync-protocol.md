@@ -790,6 +790,7 @@ Based on the git history of each file. Requires `git.enabled`.
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
 | `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. With `&format=json`: the structured diff below. |
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |
+| `POST` | `/document/{id}/history/{revision}/revert/` | Editors and admins only (write tokens too). Undoes only the change of that commit, later edits stay, details below. |
 | `GET` | `/document/{id}/changes/?since=seen` | What changed since the account last saw the page, details below. Needs no git. |
 | `PUT` | `/document/{id}/seen/` | `{"seenToken"}`: marks what the account saw. Every role and read tokens. |
 
@@ -817,6 +818,38 @@ The structured diff is `{"from", "to", "hunks": [...]}`. A hunk has:
 
 Hunks have 3 lines of context; changes closer than 6 lines share a hunk. Clients compute
 word-level highlights themselves.
+
+### Revert
+
+`POST /document/{id}/history/{revision}/revert/` (no body) undoes the change one commit made
+to the file and keeps everything edited since, like `git revert` for one file:
+
+1. The uncommitted edits of the document are committed first, so the revert commit holds
+   only the revert.
+2. The server compares the file before and after the commit line by line and undoes each
+   changed block in the live text. Edits next to a block do not matter; a block conflicts
+   when its lines were changed or removed since, or the place to put removed lines back
+   is gone.
+3. Without conflicts the live text changes as an edit of the requesting account (connected
+   clients get it as a normal change) and is committed right away as
+   `Revert <12 hex> on <path>` with the body `This reverts commit <hash>.`, authored by
+   the account; with an app token it has the `Via-App-Token` trailer.
+
+Answers:
+- `200` with the history entry of the revert commit.
+- `409 revert-conflict`: nothing changed. `details.conflicts` are
+  `[{"heading", "headingOccurrence", "line"}]`, 1-based lines of the live text with the
+  heading anchor above them (`heading` null above the first heading); `details.headings`
+  are the distinct headings, for a message like "conflicts in Setup".
+- `409 nothing-to-revert`: the change is no longer in the document (reverted already, or
+  undone by hand).
+- `400` for the commit that created the file (delete the document instead); `404` for a
+  revision not in the history of the document.
+
+Clients should confirm a revert with every author of the commit (`author`, `coAuthors`
+and `agents`). Since agent edits get commits of their own (section 10), the commit of an
+agent's edit has only that agent's account. Servers with revert list `revert` in
+`features` of `GET /server-info/`.
 
 ### Changed since you were here
 

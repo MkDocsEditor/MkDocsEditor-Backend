@@ -873,7 +873,7 @@ provider (from the AAGUID) and absent for unknown authenticators.
   `access-requests`: the server accepts access requests right now, see
   [Access request](#access-request-and-join-link). `changes`: what changed since an
   account last saw a page, `history`: git is enabled and the revision history has
-  summaries, agents and structured diffs, see
+  summaries, agents and structured diffs, `revert`: a single commit can be reverted, see
   [sync-protocol.md](sync-protocol.md#11-revision-history).
 - Nothing secret and nothing about accounts (no user counts, no usernames). `/auth/status/`
   stays as it is; `/server-info/` is the superset for onboarding screens.
