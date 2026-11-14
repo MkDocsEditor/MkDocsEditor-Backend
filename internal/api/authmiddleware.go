@@ -203,6 +203,10 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			// next to /api: the browser may send it along, it is no login of this backend
 			authorization = ""
 		}
+		if path == EndpointPathMCP && authorization == "" {
+			// MCP clients send a token; the session cookie of a browser does not count here
+			return rs.unauthorized(c)
+		}
 		cookie := rs.sessionCookie(c)
 		if err := rs.checkCSRF(c, authorization != "", cookie != ""); err != nil {
 			return stop(err)
@@ -308,6 +312,10 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	}
 	// readers may change their own pins and push subscriptions, the handler checks the family pins
 	isPins := strings.HasPrefix(path, "/pins/")
+	// MCP requests are all POST: readers and read tokens only get the read tools
+	if path == EndpointPathMCP {
+		return nil
+	}
 	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isPush && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))

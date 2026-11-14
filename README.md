@@ -148,7 +148,8 @@ The pinned documents and the change feed of the dashboard are specified in
 [docs/push.md](docs/push.md), page metadata (front matter) and the renderer settings of
 mkdocs.yml in [docs/page-meta.md](docs/page-meta.md), QR codes that open a page in
 [docs/qr.md](docs/qr.md). Scripts and agents edit and search pages over REST as described in
-[docs/content-api.md](docs/content-api.md).
+[docs/content-api.md](docs/content-api.md). LLM agents such as Claude Code connect to the MCP
+server at `/api/mcp`, see [docs/mcp.md](docs/mcp.md).
 
 Every route is served under the prefix `/api` (`/api/server-info/`, `/api/document/{id}/ws/`),
 so the web client, the MkDocs site and the API can share one host. Point `server.backendUrl`

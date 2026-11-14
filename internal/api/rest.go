@@ -123,6 +123,11 @@ func (rs *RestService) SetGitCommitter(c *gitstore.Committer) {
 // commitTree commits a tree change of the requesting user, if git is enabled.
 // format gets the paths relative to the docs folder.
 func (rs *RestService) commitTree(c *echo.Context, format string, absPaths ...string) {
+	rs.commitTreeAs(UserFromContext(c), format, absPaths...)
+}
+
+// commitTreeAs commits a tree change of a user, if git is enabled
+func (rs *RestService) commitTreeAs(user *auth.User, format string, absPaths ...string) {
 	if rs.git == nil {
 		return
 	}
@@ -138,7 +143,7 @@ func (rs *RestService) commitTree(c *echo.Context, format string, absPaths ...st
 		rels = append(rels, rel)
 		args = append(args, rel)
 	}
-	rs.git.CommitTreeChange(UserFromContext(c), fmt.Sprintf(format, args...), rels...)
+	rs.git.CommitTreeChange(user, fmt.Sprintf(format, args...), rels...)
 }
 
 // unescapePathParams decodes percent-encoded path parameters. Echo matches routes on the raw
@@ -325,6 +330,10 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/qr/", rs.getQRCodes)
 	echoRest.GET("/qr/:"+urlParamKey+"/", rs.getQRCode)
 	echoRest.GET("/search/", rs.getSearch)
+	mcpHandler := rs.newMCPHandler()
+	echoRest.GET(EndpointPathMCP, mcpHandler)
+	echoRest.POST(EndpointPathMCP, mcpHandler)
+	echoRest.DELETE(EndpointPathMCP, mcpHandler)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")
@@ -500,13 +509,22 @@ func (rs *RestService) createDocument(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	document, err := rs.treeManager.CreateDocument(r.Parent, r.Name)
+	document, err := rs.createDocumentAs(UserFromContext(c), r.Parent, r.Name)
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
-	rs.commitTree(c, "Create %s", document.Path)
-	rs.itemCreated(c, wiki.TypeDocument, document.Path)
 	return c.JSONPretty(http.StatusOK, document, jsonIndent)
+}
+
+// createDocumentAs creates a document for a user, commits it and adds it to the feed
+func (rs *RestService) createDocumentAs(user *auth.User, parentID string, name string) (*wiki.Document, error) {
+	document, err := rs.treeManager.CreateDocument(parentID, name)
+	if err != nil {
+		return nil, err
+	}
+	rs.commitTreeAs(user, "Create %s", document.Path)
+	rs.itemCreatedBy(user.ID, wiki.TypeDocument, document.Path)
+	return document, nil
 }
 
 // renameItem renames an item of the given type, with reference rewriting (see docs/references.md)

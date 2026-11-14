@@ -69,6 +69,8 @@ type docSession struct {
 
 	// apiActors are the actors of the agents that changed the document over the API, by Agent.key
 	apiActors map[string]apiActor
+	// agentPresences are the agents shown as peers, by Agent.key
+	agentPresences map[string]*agentPresence
 }
 
 // newDocument creates a new Automerge document with the given text, made by a server actor

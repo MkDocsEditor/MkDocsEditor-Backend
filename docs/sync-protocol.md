@@ -460,6 +460,14 @@ Presence is ephemeral. The server relays it and never stores it.
 - One user can have several connections (two devices, two tabs). The list of online
   users is the set of distinct account ids in the presence list.
 
+### Agents
+
+An agent that changes the document over the content API or the MCP server with an app token
+appears as a peer: a `presence` message with `"agent": {"tokenId", "name"}`, the token name as
+`deviceName` and no selections, also in the `peers` of `presence-snapshot`. A
+`presence-leave` without a ghost follows 60 seconds after its last change. See
+[mcp.md](mcp.md) section 4.
+
 ### Client instances
 
 Every client instance behaves the same, whatever its account, device or client type. An

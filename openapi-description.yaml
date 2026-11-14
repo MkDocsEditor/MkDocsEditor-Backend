@@ -60,6 +60,8 @@ tags:
     description: "Web Push subscriptions (sessions only), see docs/push.md"
   - name: QR
     description: "QR code keys of pages, see docs/qr.md"
+  - name: MCP
+    description: "Model Context Protocol server for LLM agents, see docs/mcp.md"
 
 paths:
   /alive/:
@@ -1887,6 +1889,55 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /mcp/:
+    post:
+      summary: "MCP server (streamable HTTP)"
+      description: |
+        The Model Context Protocol server for LLM agents: JSON-RPC messages of the MCP
+        streamable HTTP transport, without sessions (no `Mcp-Session-Id`). Requests need an
+        `Authorization` header, usually `Bearer mdp_…`; the session cookie is not accepted.
+        Readers and app tokens with the scope `read` get only the read tools. See docs/mcp.md.
+      operationId: postMCP
+      tags: [ MCP ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "A JSON-RPC request or notification of MCP"
+      responses:
+        "200":
+          description: "The JSON-RPC response"
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: "A notification was accepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      summary: "MCP server: no event stream"
+      description: "Without sessions there is no server-sent event stream: `405`."
+      operationId: getMCP
+      tags: [ MCP ]
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          description: "Not supported"
+    delete:
+      summary: "MCP server: no sessions to end"
+      description: "Without sessions there is nothing to end: `405`."
+      operationId: deleteMCP
+      tags: [ MCP ]
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          description: "Not supported"
 
   /mkdocs/config/:
     get:

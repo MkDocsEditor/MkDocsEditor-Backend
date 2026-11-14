@@ -124,7 +124,7 @@ func (rs *RestService) getDocumentBacklinks(c *echo.Context) error {
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
-	return rs.backlinks(c, references.DocumentRef(d), "", func(t *references.ItemRef) bool { return t.Type == wiki.TypeDocument && t.ID == d.ID })
+	return c.JSONPretty(http.StatusOK, rs.documentBacklinks(d), jsonIndent)
 }
 
 // GET /resource/:id/backlinks/
@@ -150,6 +150,16 @@ func (rs *RestService) getSectionBacklinks(c *echo.Context) error {
 // backlinks answers the references whose target matches. Sources inside section (a path,
 // "" for none) are marked as internal.
 func (rs *RestService) backlinks(c *echo.Context, item *references.ItemRef, section string, match func(*references.ItemRef) bool) error {
+	return c.JSONPretty(http.StatusOK, rs.backlinksOf(item, section, match), jsonIndent)
+}
+
+// documentBacklinks returns the references to a document
+func (rs *RestService) documentBacklinks(d *wiki.Document) *Backlinks {
+	return rs.backlinksOf(references.DocumentRef(d), "", func(t *references.ItemRef) bool { return t.Type == wiki.TypeDocument && t.ID == d.ID })
+}
+
+// backlinksOf returns the references to the items match accepts
+func (rs *RestService) backlinksOf(item *references.ItemRef, section string, match func(*references.ItemRef) bool) *Backlinks {
 	snap := rs.refs.Snapshot()
 	result := &Backlinks{Item: item, Backlinks: []*Backlink{}}
 	for _, r := range snap.Backlinks(match) {
@@ -164,7 +174,7 @@ func (rs *RestService) backlinks(c *echo.Context, item *references.ItemRef, sect
 			Internal:    item.Type == wiki.TypeSection && wiki.IsInside(r.Source.RelPath, section),
 		})
 	}
-	return c.JSONPretty(http.StatusOK, result, jsonIndent)
+	return result
 }
 
 // GET /references/broken/
