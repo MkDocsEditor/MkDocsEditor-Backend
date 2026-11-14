@@ -2702,7 +2702,8 @@ paths:
       summary: "Diff between two revisions"
       description: |
         Unified diff of the document between two revisions. A revision is a commit hash (7 to
-        64 hex characters) from the history, or `current` for the live text.
+        64 hex characters) from the history, or `current` for the live text. With
+        `format=json` the diff is structured, with the heading anchors of the feed.
       operationId: getDocumentRevisionDiff
       tags: [ History ]
       parameters:
@@ -2718,13 +2719,23 @@ paths:
           schema:
             type: string
             default: current
+        - name: format
+          in: query
+          required: false
+          description: "`json` for a structured diff; absent: unified diff as text"
+          schema:
+            type: string
+            enum: [ json ]
       responses:
         "200":
-          description: "The unified diff, empty if the texts are equal"
+          description: "The unified diff, empty if the texts are equal; with format=json the structured diff, no hunks if equal"
           content:
             text/plain:
               schema:
                 type: string
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryDiff"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -5756,7 +5767,7 @@ components:
 
     HistoryEntry:
       type: object
-      required: [ revision, time, author, coAuthors, message, path, appTokens ]
+      required: [ revision, time, author, coAuthors, message, path, appTokens, agents, summary ]
       properties:
         revision:
           type: string
@@ -5785,6 +5796,86 @@ components:
             `Via-App-Token` trailers
           items:
             type: string
+        agents:
+          type: array
+          description: "The same app tokens with the account that used each"
+          items:
+            type: object
+            required: [ name, accountId ]
+            properties:
+              name:
+                type: string
+              accountId:
+                type: string
+                description: "Empty if the account is unknown"
+        summary:
+          type: object
+          required: [ linesAdded, linesRemoved, headings ]
+          description: "What the commit changed, compared with the text before it"
+          properties:
+            linesAdded:
+              type: integer
+            linesRemoved:
+              type: integer
+            headings:
+              type: array
+              description: "Headings above the changed lines, at most 5, in document order"
+              items:
+                type: string
+
+    HistoryDiff:
+      type: object
+      required: [ from, to, hunks ]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        hunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiffHunk"
+
+    DiffHunk:
+      type: object
+      required: [ heading, headingOccurrence, offset, oldStart, oldLines, newStart, newLines, lines ]
+      description: |
+        Changed lines with 3 lines of context; changes closer than 6 lines share a hunk. The
+        anchor (heading, headingOccurrence, offset) has the meaning of the feed's ranges, on
+        the text after the change.
+      properties:
+        heading:
+          type: string
+          nullable: true
+          description: "Nearest heading at or above the first changed line (for removals: the line above them), null if none"
+        headingOccurrence:
+          type: integer
+          description: "Counts the headings with the same text from the top, 1 for the first"
+        offset:
+          type: integer
+          description: "newStart minus the line of the heading, or newStart - 1 without one; negative when the context starts above the heading"
+        oldStart:
+          type: integer
+          description: "1-based first line in the old text; with oldLines 0 the line before the hunk"
+        oldLines:
+          type: integer
+        newStart:
+          type: integer
+          description: "1-based first line in the new text; with newLines 0 the line before the hunk"
+        newLines:
+          type: integer
+        lines:
+          type: array
+          items:
+            type: object
+            required: [ op, text ]
+            properties:
+              op:
+                type: string
+                enum: [ " ", "-", "+" ]
+              text:
+                type: string
+                description: "The line without its line break"
 
     HistoryAuthor:
       type: object
@@ -5800,6 +5891,16 @@ components:
         accountId:
           type: string
           description: "Id of that account, empty if none"
+        displayName:
+          type: string
+          description: "The account's display name, else the git name"
+        color:
+          type: string
+          description: "The account's color, else one derived from the git name"
+        avatar:
+          type: string
+          nullable: true
+          description: "The account's avatar hash, as in the feed; null if none"
 
     Error:
       type: object

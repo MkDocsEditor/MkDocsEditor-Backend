@@ -776,10 +776,35 @@ Based on the git history of each file. Requires `git.enabled`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author":{"name","email","username"},"coAuthors":[…],"message","path"}]`. `path` is the file's path in that commit. `username` (current username) and `accountId` are empty for authors who are not accounts. |
+| `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author","coAuthors":[…],"message","path","appTokens","agents","summary"}]`, details below. |
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
-| `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. |
+| `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. With `&format=json`: the structured diff below. |
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |
+
+History entries:
+- `path` is the file's path in that commit.
+- Authors (`author`, `coAuthors`) have `name`, `email`, `username`, `accountId`,
+  `displayName`, `color` and `avatar`:
+  - For accounts, the last four are the account's, as in the feed.
+  - For other authors, `username` and `accountId` are empty, `displayName` is the git name,
+    and `color` is derived from it.
+- `appTokens` are the names of the app tokens (agents) from the `Via-App-Token` trailers.
+  `agents` are the same as `[{"name", "accountId"}]`.
+- `summary` (`{"linesAdded", "linesRemoved", "headings"}`) compares the commit with the text
+  before it, like the summaries of the feed. It is computed once per commit and then cached.
+
+The structured diff is `{"from", "to", "hunks": [...]}`. A hunk has:
+- `heading`, `headingOccurrence` and `offset`: the anchor of the feed's ranges, on the text
+  after the change. The heading is the one at or above the first changed line; for
+  removals, the line above them. `offset` is `newStart` minus the line of the heading (it
+  is negative when the context starts above the heading), or `newStart - 1` without a
+  heading.
+- `oldStart`, `oldLines`, `newStart`, `newLines`: as in a unified diff, 1-based. With 0 lines
+  on a side, the start is the line before the hunk.
+- `lines`: `[{"op": " "|"-"|"+", "text"}]`, without line breaks.
+
+Hunks have 3 lines of context; changes closer than 6 lines share a hunk. Clients compute
+word-level highlights themselves.
 
 A restore is applied as splices (the diff from the current text to the old one) by the
 **server** actor, so connected clients simply see an edit, and it can be undone like any

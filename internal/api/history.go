@@ -8,8 +8,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/activity"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
@@ -34,19 +36,73 @@ type HistoryEntry struct {
 	Path      string          `json:"path"`
 	// AppTokens are the names of the app tokens (agents) the changes were made with
 	AppTokens []string `json:"appTokens"`
+	// Agents are the app tokens with their accounts
+	Agents []HistoryAgent `json:"agents"`
+	// Summary compares the text of the commit with the one before
+	Summary HistorySummary `json:"summary"`
 }
 
-// HistoryAuthor is a commit author. Username and AccountID are empty if the author is not
-// an account. Username is the current username of the account.
-type HistoryAuthor struct {
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	Username  string `json:"username"`
+// HistoryDiffResponse is the structured diff of GET /document/{id}/history/diff/?format=json
+type HistoryDiffResponse struct {
+	From  string          `json:"from"`
+	To    string          `json:"to"`
+	Hunks []activity.Hunk `json:"hunks"`
+}
+
+// HistoryAgent is an app token (an agent such as Claude Code) that made changes of a commit
+type HistoryAgent struct {
+	Name string `json:"name"`
+	// AccountID is the account that used the token, "" if it is unknown
 	AccountID string `json:"accountId"`
 }
 
+// HistorySummary tells what a commit changed in the document
+type HistorySummary struct {
+	LinesAdded   int `json:"linesAdded"`
+	LinesRemoved int `json:"linesRemoved"`
+	// Headings are the headings above the changed lines, at most 5, in document order
+	Headings []string `json:"headings"`
+}
+
+// HistoryAuthor is a commit author. Username and AccountID are empty if the author is not
+// an account. Username is the current username of the account. DisplayName, Color and Avatar
+// are those of the account, as in the feed, else the git name and a color derived from it.
+type HistoryAuthor struct {
+	Name        string  `json:"name"`
+	Email       string  `json:"email"`
+	Username    string  `json:"username"`
+	AccountID   string  `json:"accountId"`
+	DisplayName string  `json:"displayName"`
+	Color       string  `json:"color"`
+	Avatar      *string `json:"avatar"`
+}
+
+// summaryCache holds the summaries of commits by revision and path: commits never change
+type summaryCache struct {
+	mu sync.Mutex
+	m  map[string]HistorySummary
+}
+
+const maxCachedSummaries = 20000
+
+func (c *summaryCache) get(key string) (HistorySummary, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.m[key]
+	return s, ok
+}
+
+func (c *summaryCache) put(key string, s HistorySummary) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil || len(c.m) >= maxCachedSummaries {
+		c.m = map[string]HistorySummary{}
+	}
+	c.m[key] = s
+}
+
 func (rs *RestService) historyAuthor(sig gitstore.Signature) HistoryAuthor {
-	a := HistoryAuthor{Name: sig.Name, Email: sig.Email}
+	a := HistoryAuthor{Name: sig.Name, Email: sig.Email, DisplayName: sig.Name, Color: auth.ColorForUsername(sig.Name)}
 	var user *auth.User
 	if name, ok := strings.CutSuffix(sig.Email, "@mkdocseditor.invalid"); ok {
 		// current or former username
@@ -61,6 +117,7 @@ func (rs *RestService) historyAuthor(sig gitstore.Signature) HistoryAuthor {
 	}
 	if user != nil {
 		a.Username, a.AccountID = user.Username, user.ID
+		a.DisplayName, a.Color, a.Avatar = user.DisplayName, user.Color, user.Avatar
 	}
 	return a
 }
@@ -115,23 +172,86 @@ func (rs *RestService) getDocumentHistory(c *echo.Context) error {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	summaries, err := rs.commitSummaries(repo, commits)
+	if err != nil {
+		return rs.ReturnError(c, err)
+	}
 	entries := make([]HistoryEntry, 0, len(commits))
-	for _, cm := range commits {
-		e := HistoryEntry{
-			Revision:  cm.Revision,
-			Time:      cm.Time,
-			Author:    rs.historyAuthor(cm.Author),
-			CoAuthors: []HistoryAuthor{},
-			Message:   cm.Subject,
-			Path:      cm.Path,
-			AppTokens: cm.AppTokens,
-		}
-		for _, co := range cm.CoAuthors {
-			e.CoAuthors = append(e.CoAuthors, rs.historyAuthor(co))
-		}
-		entries = append(entries, e)
+	for i, cm := range commits {
+		entries = append(entries, rs.historyEntry(cm, summaries[i]))
 	}
 	return c.JSONPretty(http.StatusOK, entries, jsonIndent)
+}
+
+// historyEntry turns a commit into its JSON
+func (rs *RestService) historyEntry(cm gitstore.Commit, summary HistorySummary) HistoryEntry {
+	e := HistoryEntry{
+		Revision:  cm.Revision,
+		Time:      cm.Time,
+		Author:    rs.historyAuthor(cm.Author),
+		CoAuthors: []HistoryAuthor{},
+		Message:   cm.Subject,
+		Path:      cm.Path,
+		AppTokens: cm.AppTokens,
+		Agents:    []HistoryAgent{},
+		Summary:   summary,
+	}
+	for _, co := range cm.CoAuthors {
+		e.CoAuthors = append(e.CoAuthors, rs.historyAuthor(co))
+	}
+	for _, a := range cm.Agents {
+		e.Agents = append(e.Agents, HistoryAgent{Name: a.Name, AccountID: rs.historyAuthor(a.Account).AccountID})
+	}
+	return e
+}
+
+// commitSummaries summarizes the commits of a file history (newest first). The file history
+// only has commits that changed the file, so the text before commit i is the text of commit
+// i+1: one read per commit, and none for cached ones.
+func (rs *RestService) commitSummaries(repo *gitstore.Repo, commits []gitstore.Commit) ([]HistorySummary, error) {
+	out := make([]HistorySummary, len(commits))
+	texts := map[int]string{}
+	textOf := func(i int) (string, error) {
+		if t, ok := texts[i]; ok {
+			return t, nil
+		}
+		var data []byte
+		var err error
+		if i < len(commits) {
+			data, err = repo.FileAt(commits[i].Revision, commits[i].Path)
+		} else {
+			// before the oldest listed commit: its parent, if the file was there
+			last := commits[len(commits)-1]
+			data, err = repo.FileAt(last.Revision+"^", last.Path)
+			if err != nil {
+				data, err = nil, nil
+			}
+		}
+		if err != nil {
+			return "", err
+		}
+		texts[i] = string(data)
+		return texts[i], nil
+	}
+	for i, cm := range commits {
+		key := cm.Revision + "\x00" + cm.Path
+		if s, ok := rs.historySummaries.get(key); ok {
+			out[i] = s
+			continue
+		}
+		after, err := textOf(i)
+		if err != nil {
+			return nil, err
+		}
+		before, err := textOf(i + 1)
+		if err != nil {
+			return nil, err
+		}
+		s := activity.Summarize(before, after)
+		out[i] = HistorySummary{LinesAdded: s.LinesAdded, LinesRemoved: s.LinesRemoved, Headings: s.Headings}
+		rs.historySummaries.put(key, out[i])
+	}
+	return out, nil
 }
 
 // revisionText returns the text of a document at a revision, or the live text for "current"
@@ -197,6 +317,9 @@ func (rs *RestService) getDocumentRevisionDiff(c *echo.Context) error {
 	}
 	if err != nil {
 		return rs.ReturnError(c, err)
+	}
+	if c.QueryParam("format") == "json" {
+		return c.JSONPretty(http.StatusOK, &HistoryDiffResponse{From: from, To: to, Hunks: activity.Hunks(fromText, toText)}, jsonIndent)
 	}
 	diff, err := repo.UnifiedDiff(fromText, toText, "a/"+fromPath+" ("+shortRevision(from)+")", "b/"+toPath+" ("+shortRevision(to)+")")
 	if err != nil {

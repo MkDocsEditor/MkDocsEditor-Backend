@@ -286,6 +286,10 @@ func TestContentEditCommit(t *testing.T) {
 	if len(history) != 2 || len(history[0].AppTokens) != 1 || history[0].AppTokens[0] != "claude" {
 		t.Errorf("history = %+v", history)
 	}
+	bob := e.authn.UserByUsername("bob")
+	if a := history[0].Agents; len(a) != 1 || a[0].Name != "claude" || a[0].AccountID != bob.ID {
+		t.Errorf("agents = %+v", a)
+	}
 }
 
 func TestSearch(t *testing.T) {
