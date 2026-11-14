@@ -32,6 +32,7 @@ type Repo struct {
 	prefix    string
 	committer Signature
 	mu        sync.Mutex
+	blames    blameCache
 }
 
 // Open checks that dir is inside a git work tree

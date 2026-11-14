@@ -25,7 +25,8 @@ const EndpointPathMCP = "/mcp/"
 
 const mcpInstructions = `A family wiki of markdown pages (MkDocs). Find pages with search or list_tree,
 read_document before changing a page, then change it with edit_document (preferred) or
-write_document. People may edit the same page at the same time: changes merge, so keep edits small.`
+write_document. People may edit the same page at the same time: changes merge, so keep edits small.
+changes_since shows what people changed since you last read a page; read_history lists its commits.`
 
 // mcpCaller is who calls a tool: the user and the app token of the HTTP request
 type mcpCaller struct {
@@ -91,8 +92,16 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 	mcp.AddTool(server, &mcp.Tool{Name: "list_tree", Annotations: readOnly, Description: "List the pages (path and title), " +
 		"optionally only those below a section path."}, tools.listTree)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_document", Annotations: readOnly, Description: "Read a page: its markdown and its revision. " +
-		"Read before you change a page."}, tools.readDocument)
+		"Read before you change a page. Next time, changes_since shows what people changed since."}, tools.readDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
+	mcp.AddTool(server, &mcp.Tool{Name: "changes_since", Annotations: readOnly, Description: "What people changed on a page since you " +
+		"last read or wrote it (or since a revision), as a diff with who changed it."}, tools.changesSince)
+	if rs.git != nil {
+		mcp.AddTool(server, &mcp.Tool{Name: "read_history", Annotations: readOnly, Description: "List the commits of a page, newest " +
+			"first: who, when, agents, lines changed and headings."}, tools.readHistory)
+		mcp.AddTool(server, &mcp.Tool{Name: "read_revision", Annotations: readOnly, Description: "Read a page as it was at a commit " +
+			"from read_history."}, tools.readRevision)
+	}
 	if !caller.user.CanWrite() {
 		return server
 	}
@@ -107,6 +116,11 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		Description: "Create a page in a section (a folder path, empty for the top level), optionally with content."}, tools.createDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "move_document", Description: "Move or rename a page. Links to it in other pages are " +
 		"updated. Give the target section path, the new name (without .md), or both."}, tools.moveDocument)
+	if rs.git != nil && caller.token != nil {
+		mcp.AddTool(server, &mcp.Tool{Name: "revert_change", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
+			Description: "Undo a commit you made with this app token (from read_history); later edits stay. " +
+				"Commits of others cannot be reverted."}, tools.revertChange)
+	}
 	return server
 }
 
@@ -289,6 +303,7 @@ func (t *mcpTools) readDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 	if err != nil {
 		return nil, nil, err
 	}
+	t.markSeen(d, revision, &content)
 	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\n---\n%s", d.RelPath, d.Title, revision, content)), nil, nil
 }
 
@@ -315,10 +330,12 @@ func (t *mcpTools) editDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 	if err = t.allowWrite(); err != nil {
 		return nil, nil, err
 	}
+	_, before, _ := t.rs.sync.ReadContent(d)
 	revision, err := t.rs.sync.ApplyEdits(d, in.Edits, in.BaseRevision, t.caller.agent())
 	if err != nil {
 		return nil, nil, contentToolError(err)
 	}
+	t.advanceSeen(d, before, revision)
 	return nil, &mcpRevision{Path: d.RelPath, Revision: revision}, nil
 }
 
@@ -333,10 +350,12 @@ func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in m
 	if err = t.allowWrite(); err != nil {
 		return nil, nil, err
 	}
+	_, before, _ := t.rs.sync.ReadContent(d)
 	revision, err := t.rs.sync.WriteContent(d, in.Content, in.BaseRevision, t.caller.agent())
 	if err != nil {
 		return nil, nil, contentToolError(err)
 	}
+	t.advanceSeen(d, before, revision)
 	return nil, &mcpRevision{Path: d.RelPath, Revision: revision}, nil
 }
 
@@ -361,6 +380,7 @@ func (t *mcpTools) createDocument(_ context.Context, _ *mcp.CallToolRequest, in 
 			return nil, nil, fmt.Errorf("the page %s was created, but writing its content failed: %w", d.RelPath, err)
 		}
 	}
+	t.markSeen(d, revision, nil)
 	return nil, &mcpCreated{ID: d.ID, Path: d.RelPath, Revision: revision}, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -77,7 +78,7 @@ func TestMCPTools(t *testing.T) {
 	token := e.appToken("bob", "claude", auth.ScopeWrite)
 	s := e.mcpSession(token)
 
-	want := []string{"create_document", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "search", "write_document"}
+	want := []string{"changes_since", "create_document", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "search", "write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
@@ -165,7 +166,7 @@ func TestMCPTools(t *testing.T) {
 func TestMCPReadScopeAndAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	s := e.mcpSession(e.appToken("bob", "reader", auth.ScopeRead))
-	if names := toolNames(t, s); !slices.Equal(names, []string{"get_backlinks", "list_tree", "read_document", "search"}) {
+	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "get_backlinks", "list_tree", "read_document", "search"}) {
 		t.Errorf("read scope tools = %v", names)
 	}
 	// readers get the read tools only, whatever the token scope
@@ -186,5 +187,73 @@ func TestMCPReadScopeAndAuth(t *testing.T) {
 	r := e.do(http.MethodGet, "/mcp", "bob")
 	if r.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d %s", r.Code, r.Body.String())
+	}
+}
+
+func TestMCPHistory(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterIdle: 300 * time.Millisecond})
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeWrite))
+	if names := toolNames(t, s); !slices.Contains(names, "read_history") || !slices.Contains(names, "revert_change") || !slices.Contains(names, "read_revision") {
+		t.Fatalf("tools = %v", names)
+	}
+	doc := map[string]any{"document": rel}
+	call := func(name string, args map[string]any, wantFail bool) string {
+		t.Helper()
+		out, failed := callTool(t, s, name, args)
+		if failed != wantFail {
+			t.Fatalf("%s failed=%v: %s", name, failed, out)
+		}
+		return out
+	}
+	if out := call("changes_since", doc, false); !strings.Contains(out, "you have not read this page before") {
+		t.Errorf("first changes_since = %q", out)
+	}
+	call("read_document", doc, false)
+
+	// a person edits: the agent sees it once
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.appendText("by alice\n")
+	eventually(t, "server", func() bool { return e.serverText(rel) == a.text() })
+	if out := call("changes_since", doc, false); !strings.Contains(out, "changed by: alice\n+1 -0 lines") || !strings.Contains(out, "\n+by alice") {
+		t.Errorf("changes_since = %q", out)
+	}
+	if out := call("changes_since", doc, false); !strings.HasSuffix(out, "no changes") {
+		t.Errorf("changes_since again = %q", out)
+	}
+	eventually(t, "alice's commit", func() bool { return len(e.commits()) == 2 })
+
+	// its own edit does not count as a change of others
+	call("edit_document", map[string]any{"document": rel, "edits": []map[string]string{{"old": "Some text.", "new": "Agent text."}}}, false)
+	if out := call("changes_since", doc, false); !strings.HasSuffix(out, "no changes") {
+		t.Errorf("changes_since after the own edit = %q", out)
+	}
+	eventually(t, "agent commit", func() bool { return len(e.commits()) == 3 })
+	h := e.history(id)
+	agentRev, aliceRev := h[0].Revision, h[1].Revision
+
+	out := call("read_history", doc, false)
+	if !strings.Contains(out, agentRev[:12]+" ") || !strings.Contains(out, "by bob (agent claude): Update guide/setup.md, +1 -1 lines in Setup") ||
+		!strings.Contains(out, "by alice: Update guide/setup.md, +1 -0 lines") {
+		t.Errorf("read_history = %q", out)
+	}
+	if out := call("read_revision", map[string]any{"document": rel, "revision": aliceRev[:12]}, false); !strings.HasSuffix(out, "---\n"+setupText+"by alice\n") {
+		t.Errorf("read_revision = %q", out)
+	}
+
+	// only its own commits
+	if out := call("revert_change", map[string]any{"document": rel, "revision": aliceRev[:12]}, true); !strings.Contains(out, "only revert commits made with your own app token") {
+		t.Errorf("revert of alice's commit = %q", out)
+	}
+	if out := call("revert_change", map[string]any{"document": rel, "revision": agentRev[:12]}, false); !strings.Contains(out, "reverted "+agentRev[:12]) {
+		t.Errorf("revert_change = %q", out)
+	}
+	if got := e.serverText(rel); got != setupText+"by alice\n" {
+		t.Errorf("text after the revert %q", got)
+	}
+	if out := call("revert_change", map[string]any{"document": rel, "revision": agentRev[:12]}, true); !strings.Contains(out, "not in the page anymore") {
+		t.Errorf("second revert = %q", out)
 	}
 }

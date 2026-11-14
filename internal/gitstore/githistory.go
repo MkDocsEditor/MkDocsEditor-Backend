@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 // Commit is one commit in the history of a file
@@ -225,26 +228,122 @@ type BlameLine struct {
 	Time     time.Time
 }
 
+// blameCacheSize is the number of blames of committed files the repository keeps
+const blameCacheSize = 32
+
+// blameCache keeps the blame of files at HEAD, by path and HEAD commit
+type blameCache struct {
+	mu    sync.Mutex
+	order []string
+	m     map[string]*committedBlame
+}
+
+// committedBlame is the blame of a file as committed
+type committedBlame struct {
+	text  string
+	lines []BlameLine
+}
+
+func (c *blameCache) get(key string) *committedBlame {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.m[key]
+}
+
+func (c *blameCache) put(key string, b *committedBlame) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]*committedBlame{}
+	}
+	if _, ok := c.m[key]; !ok {
+		c.order = append(c.order, key)
+	}
+	c.m[key] = b
+	for len(c.order) > blameCacheSize {
+		delete(c.m, c.order[0])
+		c.order = c.order[1:]
+	}
+}
+
 // Blame returns for every line of contents, a version of the file (path relative to the docs
-// folder) that may have uncommitted changes, the commit that last changed it. It follows
-// renames like the history.
+// folder) that may have uncommitted changes, the commit that last changed it. Lines that are
+// not in the committed file are NotCommitted. It follows renames like the history. The blame
+// of the committed file is cached by HEAD, so a text that changes does not run git blame again.
 func (g *Repo) Blame(path string, contents string) ([]BlameLine, error) {
-	file, err := os.CreateTemp("", "mkdocseditor-blame-")
-	if err != nil {
-		return nil, err
-	}
-	name := file.Name()
-	defer func() { _ = os.Remove(name) }()
-	_, err = file.WriteString(contents)
-	if cerr := file.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return nil, err
-	}
 	g.mu.Lock()
-	out, err := g.run(nil, "blame", "--porcelain", "--contents", name, "--", "./"+path)
+	head, err := g.run(nil, "rev-parse", "--verify", "HEAD")
 	g.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(head) + "\x00" + path
+	committed := g.blames.get(key)
+	if committed == nil {
+		if committed, err = g.blameHead(strings.TrimSpace(head), path); err != nil {
+			return nil, err
+		}
+		g.blames.put(key, committed)
+	}
+	// lines equal in the committed file and in contents keep their commit
+	out := make([]BlameLine, 0, strings.Count(contents, "\n")+1)
+	oldN := 0
+	for _, d := range lineDiff(committed.text, contents) {
+		n := len([]rune(d.Text))
+		switch d.Type {
+		case diffmatchpatch.DiffEqual:
+			out = append(out, committed.lines[oldN:oldN+n]...)
+			oldN += n
+		case diffmatchpatch.DiffDelete:
+			oldN += n
+		case diffmatchpatch.DiffInsert:
+			for range n {
+				out = append(out, BlameLine{Revision: NotCommitted})
+			}
+		}
+	}
+	return out, nil
+}
+
+// lineDiff diffs two texts by lines, every line one rune
+func lineDiff(a, b string) []diffmatchpatch.Diff {
+	ids := map[string]rune{}
+	encode := func(text string) []rune {
+		if text == "" {
+			return nil
+		}
+		lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+		out := make([]rune, len(lines))
+		for i, l := range lines {
+			id, ok := ids[l]
+			if !ok {
+				// above the surrogates, so every id is a valid rune
+				id = rune(0xE000 + len(ids))
+				if id >= 0xF900 {
+					id = rune(0x10000 + len(ids))
+				}
+				ids[l] = id
+			}
+			out[i] = id
+		}
+		return out
+	}
+	return diffmatchpatch.New().DiffMainRunes(encode(a), encode(b), false)
+}
+
+// blameHead runs git blame on the committed file
+func (g *Repo) blameHead(head string, path string) (*committedBlame, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, err := g.run(nil, "cat-file", "-e", head+":./"+path); err != nil {
+		// not committed under this path yet: every line is new
+		return &committedBlame{}, nil
+	}
+	text, err := g.run(nil, "show", head+":./"+path)
+	if err != nil {
+		return nil, err
+	}
+	out, err := g.run(nil, "blame", "--porcelain", head, "--", "./"+path)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +376,10 @@ func (g *Repo) Blame(path string, contents string) ([]BlameLine, error) {
 			}
 		}
 	}
-	return lines, nil
+	if want := len(strings.Split(strings.TrimSuffix(text, "\n"), "\n")); text != "" && len(lines) != want {
+		return nil, fmt.Errorf("git blame of %s returned %d lines for %d", path, len(lines), want)
+	}
+	return &committedBlame{text: text, lines: lines}, nil
 }
 
 func isHex(s string) bool {

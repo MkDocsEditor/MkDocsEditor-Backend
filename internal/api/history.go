@@ -419,6 +419,17 @@ func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, re
 	if n := len(section); n > 0 && end < len(lines) && !strings.HasSuffix(section[n-1], "\n") {
 		section[n-1] += "\n"
 	}
+	// the blank lines between the section and the next one stay as they are now: the
+	// section at the revision may have been the last one, without them
+	isBlank := func(l string) bool { return strings.TrimSpace(l) == "" }
+	for len(section) > 1 && isBlank(section[len(section)-1]) {
+		section = section[:len(section)-1]
+	}
+	blankEnd := end
+	for blankEnd > start+1 && isBlank(lines[blankEnd-1]) {
+		blankEnd--
+	}
+	section = append(section, lines[blankEnd:end]...)
 	restored := strings.Join(lines[:start], "") + strings.Join(section, "") + strings.Join(lines[end:], "")
 	if restored != live {
 		agent := agentOf(c)
