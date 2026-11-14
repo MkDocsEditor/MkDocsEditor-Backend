@@ -308,6 +308,8 @@ func (g *Repo) Blame(path string, contents string) ([]BlameLine, error) {
 // lineDiff diffs two texts by lines, every line one rune
 func lineDiff(a, b string) []diffmatchpatch.Diff {
 	ids := map[string]rune{}
+	// private use runes, so every id is a valid rune
+	next := rune(0xE000)
 	encode := func(text string) []rune {
 		if text == "" {
 			return nil
@@ -317,10 +319,9 @@ func lineDiff(a, b string) []diffmatchpatch.Diff {
 		for i, l := range lines {
 			id, ok := ids[l]
 			if !ok {
-				// above the surrogates, so every id is a valid rune
-				id = rune(0xE000 + len(ids))
-				if id >= 0xF900 {
-					id = rune(0x10000 + len(ids))
+				id = next
+				if next++; next == 0xF900 {
+					next = 0xF0000
 				}
 				ids[l] = id
 			}
