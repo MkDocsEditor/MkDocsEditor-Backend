@@ -40,7 +40,9 @@ type Agent struct {
 // It does not use "git log --follow": that also follows copies, and every new empty page is an
 // exact copy of any other empty file, so unrelated pages would show up in the history. Instead
 // it follows a file back to the commit that added it, and continues with the old path only if
-// that commit renamed the file (status R, the old path is gone in that commit).
+// that commit renamed the file (status R, the old path is gone in that commit). Commits of a
+// file deleted before the current one was created at the same path are not part of the
+// history: that was another document.
 func (g *Repo) FileHistory(path string, limit int) ([]Commit, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -66,11 +68,13 @@ func (g *Repo) FileHistory(path string, limit int) ([]Commit, error) {
 			if err != nil {
 				return nil, err
 			}
-			added = ""
-			if addsFile {
-				added = c.Revision
-			}
 			commits = append(commits, c)
+			if addsFile {
+				// the history ends where the file was created: a file deleted earlier at the
+				// same path was another document
+				added = c.Revision
+				break
+			}
 		}
 		if added == "" || len(commits) >= limit {
 			break
@@ -174,11 +178,20 @@ func parseSignature(s string) (Signature, bool) {
 	return Signature{Name: strings.TrimSpace(s[:open]), Email: s[open+1 : len(s)-1]}, true
 }
 
-// FileAt returns the content of a file at a revision
+// ErrNotInRevision is returned by FileAt for a revision without the file
+var ErrNotInRevision = errors.New("the file is not in this revision")
+
+// FileAt returns the content of a file at a revision, ErrNotInRevision if the revision exists
+// but does not have the file (deleted, or not created yet)
 func (g *Repo) FileAt(revision string, path string) ([]byte, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	out, err := g.run(nil, "show", revision+":./"+path)
+	var gerr *gitError
+	if errors.As(err, &gerr) && (strings.Contains(gerr.stderr, "exists on disk, but not in '") ||
+		strings.Contains(gerr.stderr, "does not exist in '")) {
+		return nil, ErrNotInRevision
+	}
 	return []byte(out), err
 }
 

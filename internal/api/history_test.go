@@ -193,3 +193,56 @@ func TestHistoryIgnoresCopiesOfEmptyPages(t *testing.T) {
 		t.Errorf("history of second.md: %+v", h)
 	}
 }
+
+// A page deleted and created again at the same path: its history starts at the new creation,
+// and nothing reads the file at a revision without it
+func TestHistoryRecreatedFile(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{})
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	e.appendCommitted(id, rel, "bob", "old line\n")
+	e.stop()
+	e.git0("rm", "-q", "docs/"+rel)
+	e.git0("commit", "-q", "-m", "Delete "+rel)
+	e.writeFile(rel, "# New\n")
+	e.git0("add", "docs/"+rel)
+	e.git0("commit", "-q", "-m", "Create "+rel)
+	e.start()
+	e.appendCommitted(id, rel, "alice", "new line\n")
+
+	h := e.history(id)
+	if len(h) != 2 || h[0].Author.Username != "alice" || h[1].Message != "Create "+rel {
+		t.Fatalf("history %+v", h)
+	}
+	if s := h[1].Summary; s.LinesAdded != 1 || s.LinesRemoved != 0 {
+		t.Errorf("summary of the creation %+v", s)
+	}
+	if s := h[0].Summary; s.LinesAdded != 1 || s.LinesRemoved != 0 {
+		t.Errorf("summary of the edit %+v", s)
+	}
+	created, edited := h[1].Revision, h[0].Revision
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/"+created+"/content/", "carol"); rec.Code != http.StatusOK || rec.Body.String() != "# New\n" {
+		t.Errorf("content %d %q", rec.Code, rec.Body.String())
+	}
+	// revisions of the deleted page are not in this history
+	old := strings.TrimSpace(e.git0("rev-list", "-1", "HEAD~3"))
+	for _, path := range []string{"/history/" + old + "/content/", "/history/diff/?from=" + old, "/history/" + old + "/revert/"} {
+		if rec := e.do(http.MethodGet, "/document/"+id+path, "carol"); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/diff/?from="+created, "carol"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "+new line") {
+		t.Errorf("diff %d %s", rec.Code, rec.Body.String())
+	}
+	// the creation has no text before it
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/"+created+"/revert/", "carol"); rec.Code != http.StatusBadRequest {
+		t.Errorf("check of the creation: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(http.MethodGet, "/document/"+id+"/history/"+edited+"/revert/", "carol"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"possible": true`) {
+		t.Errorf("check of the edit: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := e.do(http.MethodGet, "/document/"+id+"/blame/", "carol")
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), old) {
+		t.Errorf("blame %d %s", rec.Code, rec.Body.String())
+	}
+}

@@ -2665,7 +2665,8 @@ paths:
     get:
       summary: "Revision history of a document"
       description: |
-        The git commits that changed the file, newest first, following renames. Requires
+        The git commits that changed the file, newest first, following renames back to the
+        commit that created it; a page deleted earlier at the same path is not part of it. Requires
         `git.enabled`; without it the response is 404. Edits made with app tokens are in
         commits of their own. `features` of `GET /server-info/` contains `history` when
         git is enabled on a server with summaries, agents and `format=json` diffs.

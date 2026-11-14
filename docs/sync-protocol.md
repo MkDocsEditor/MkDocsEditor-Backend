@@ -792,11 +792,15 @@ Based on the git history of each file. Requires `git.enabled`.
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. With a body `{"heading", "headingOccurrence"}` only that section, details below. |
 | `GET` | `/document/{id}/blame/` | Who last changed each line, details below. |
 | `POST` | `/document/{id}/history/{revision}/revert/` | Editors and admins only (write tokens too). Undoes only the change of that commit, later edits stay, details below. |
+| `GET` | `/document/{id}/history/{revision}/revert/` | Every role. Checks the revert without changing anything, details below. |
 | `GET` | `/document/{id}/changes/?since=seen` | What changed since the account last saw the page, details below. Needs no git. |
 | `PUT` | `/document/{id}/seen/` | `{"seenToken"}`: marks what the account saw. Every role and read tokens. |
 
 History entries:
-- `path` is the file's path in that commit.
+- `path` is the file's path in that commit. The history follows renames back to the commit
+  that created the file. A page deleted earlier at the same path was another document: its
+  commits, and the commit that deleted it, are not in the history of the page created there
+  later. Its revisions answer `404` like any revision outside the history.
 - Authors (`author`, `coAuthors`) have `name`, `email`, `username`, `accountId`,
   `displayName`, `color` and `avatar`:
   - For accounts, the last four are the account's, as in the feed.
