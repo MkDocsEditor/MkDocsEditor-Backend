@@ -39,11 +39,16 @@ type EditError struct {
 	Code string
 	// Index is the position of the edit in the request
 	Index int
+	// Hint is a near miss of an edit that was not found, "" for none
+	Hint string
 }
 
 func (e *EditError) Error() string {
 	switch e.Code {
 	case EditNotFound:
+		if e.Hint != "" {
+			return fmt.Sprintf("edit %d: old does not occur in the text; %s", e.Index, e.Hint)
+		}
 		return fmt.Sprintf("edit %d: old does not occur in the text", e.Index)
 	case EditAmbiguous:
 		return fmt.Sprintf("edit %d: old occurs more than once in the text, add context to make it unique", e.Index)
@@ -299,7 +304,7 @@ func placeEdits(text string, edits []TextEdit) ([]splice, error) {
 		}
 		at := strings.Index(text, e.Old)
 		if at < 0 {
-			return nil, &EditError{Code: EditNotFound, Index: i}
+			return nil, &EditError{Code: EditNotFound, Index: i, Hint: notFoundHint(text, e.Old)}
 		}
 		// overlapping occurrences count too: "aa" occurs twice in "aaa"
 		if strings.Contains(text[at+1:], e.Old) {

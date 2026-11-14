@@ -90,6 +90,9 @@ func (rs *RestService) contentError(c *echo.Context, err error) error {
 	switch {
 	case errors.As(err, &editErr):
 		details := map[string]any{editIndexDetailKey: editErr.Index, editReasonDetailKey: editErr.Code}
+		if editErr.Hint != "" {
+			details["hint"] = editErr.Hint
+		}
 		switch editErr.Code {
 		case collab.EditNotFound:
 			return apiError(c, http.StatusConflict, CodeEditNotFound, err.Error(), details)

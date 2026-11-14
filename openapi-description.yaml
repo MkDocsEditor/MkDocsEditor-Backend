@@ -3628,7 +3628,8 @@ components:
       description: |
         `edit-not-found` or `edit-ambiguous` (an `old` of the edit at `details.index` occurs not
         or more than once), or `unknown-revision` (the document does not have the base
-        revision any more: read it again)
+        revision any more: read it again). For `edit-not-found`, `details.hint` may name a
+        near miss: a whitespace difference or the closest line.
       content:
         application/json:
           schema:

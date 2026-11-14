@@ -61,7 +61,7 @@ create no change, and the revision stays the same.
 
 | Status | `code` | Meaning |
 |---|---|---|
-| 409 | `edit-not-found` | the `old` of edit `details.index` does not occur |
+| 409 | `edit-not-found` | the `old` of edit `details.index` does not occur. `details.hint`, if present, names a near miss: `old` without its leading or trailing whitespace or newline occurs, or it occurs if `\r\n` and spaces at line ends are ignored, or the line closest to the first line of `old`. The message has the hint too (MCP tools return the message). |
 | 409 | `edit-ambiguous` | the `old` of edit `details.index` occurs more than once: add context |
 | 409 | `unknown-revision` | the document does not know `baseRevision`; read it again |
 | 400 | `bad-request` | no edits or too many, an empty `old` (`details.reason: "empty-old"`), an invalid revision |
