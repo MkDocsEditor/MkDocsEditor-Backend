@@ -62,10 +62,30 @@ means the top level.
 | `list_tree` | | Paths and titles of all pages, or of those below `section` |
 | `read_document` | | The markdown of a page with a header: `path`, `title`, `revision` |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
+| `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
+| `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
+| `read_revision` | | The markdown of a page at a commit from `read_history`. Only with git |
 | `edit_document` | yes | Replaces text: each `old` must occur exactly once. Optional `baseRevision`. Like `POST /document/{id}/edits/` |
 | `write_document` | yes | Replaces the whole text against a required `baseRevision`, merged three-way. Like `PUT /document/{id}/content/` |
 | `create_document` | yes | Creates a page in `section` with the file name `name` (without `.md`), optionally with `content` |
 | `move_document` | yes | Moves and/or renames a page. Links in other pages are updated, like `POST /move/` |
+| `revert_change` | yes | Undoes a commit made with the caller's own app token, keeping later edits, like `POST /document/{id}/history/{revision}/revert/`. Only with git and an app token |
+
+`changes_since` keeps what each app token saw of each page, apart from the token's person
+(the `seen` marks of [sync-protocol.md](sync-protocol.md) section 11 under the key
+`token:<id>`):
+- `read_document` and `changes_since` mark the text they returned as seen. The first
+  `changes_since` of a page only says that there is nothing to compare with yet.
+- `edit_document` and `write_document` move the mark over the agent's own change only when
+  the agent had seen the text it changed; otherwise the next `changes_since` also shows the
+  edits of others it never read, together with its own.
+- The output lists `changed by` (accounts, with their agents) and the hunks like a unified
+  diff with the heading of each hunk.
+
+`revert_change` refuses commits with other authors than the caller's account and app token
+(by name): an agent can undo its own mistake, not the work of people or other agents. Since
+agent edits get commits of their own, each of its edits is one commit to revert. Conflicts
+with later edits change nothing and name the headings.
 
 Errors are tool results with `isError` and a message the agent can act on, for example
 "edit 0: old occurs more than once in the text, add context to make it unique".
