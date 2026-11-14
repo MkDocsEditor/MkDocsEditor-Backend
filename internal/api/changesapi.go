@@ -117,7 +117,7 @@ func (rs *RestService) getDocumentChanges(c *echo.Context) error {
 		return rs.ReturnError(c, err)
 	}
 	resp := &ChangesResponse{SeenToken: token, Authors: []ChangeAuthor{}, Hunks: []activity.Hunk{}, Summary: HistorySummary{Headings: []string{}}}
-	var base string
+	var base, sinceToken string
 	var since time.Time
 	switch s := c.QueryParam("since"); s {
 	case "", sinceSeen:
@@ -128,13 +128,14 @@ func (rs *RestService) getDocumentChanges(c *echo.Context) error {
 		if seen == nil {
 			return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 		}
-		base, since = seen.Text, seen.Time
+		base, since, sinceToken = seen.Text, seen.Time, seen.Token
 		resp.Since = &ChangesSince{Time: formatTime(seen.Time), SeenToken: seen.Token}
 	default:
 		if base, since, err = rs.sync.ReadContentAt(d, s); err != nil {
 			return rs.revisionError(c, err)
 		}
 		resp.Since = &ChangesSince{Time: formatTime(since), SeenToken: s}
+		sinceToken = s
 	}
 	if base == current {
 		return c.JSONPretty(http.StatusOK, resp, jsonIndent)
@@ -142,13 +143,26 @@ func (rs *RestService) getDocumentChanges(c *echo.Context) error {
 	resp.Hunks = activity.Hunks(base, current)
 	sum := activity.Summarize(base, current)
 	resp.Summary = HistorySummary{LinesAdded: sum.LinesAdded, LinesRemoved: sum.LinesRemoved, Headings: sum.Headings}
-	resp.Authors = rs.changeAuthors(d.RelPath, since)
+	resp.Authors = rs.changeAuthors(d, sinceToken, since)
 	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
 }
 
-// changeAuthors are the accounts that edited a document after a time (from the feed), with the
-// agents of the commits since and of the changes not committed yet
-func (rs *RestService) changeAuthors(rel string, since time.Time) []ChangeAuthor {
+// changeAuthors are the accounts that changed a document after a revision, with their app
+// tokens, from the Automerge changes. If the document no longer has the revision (a new
+// epoch), they come from the feed after the time of the revision, with the agents of the
+// commits since and of the changes not committed yet: edit sessions of the feed and commits
+// can include edits from before, so this lists too many rather than too few.
+func (rs *RestService) changeAuthors(d *wiki.Document, sinceToken string, since time.Time) []ChangeAuthor {
+	if found, err := rs.sync.AuthorsSince(d, sinceToken); err == nil {
+		out := make([]ChangeAuthor, 0, len(found))
+		for _, a := range found {
+			out = append(out, ChangeAuthor{Author: rs.author(a.AccountID), Agents: a.AppTokens})
+		}
+		return out
+	} else if !errors.Is(err, collab.ErrUnknownRevision) && !errors.Is(err, collab.ErrInvalidRevision) {
+		log.Printf("Unable to read the authors of %s: %v", d.RelPath, err)
+	}
+	rel := d.RelPath
 	ids, err := rs.sync.Activity().EditAuthorsSince(rel, since)
 	if err != nil {
 		log.Printf("Unable to read the authors of %s: %v", rel, err)

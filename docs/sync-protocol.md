@@ -863,9 +863,12 @@ is stored, the starting point survives epochs, restarts and commits.
      there are no hunks.
    - `hunks` (structured diff, as above) and `summary` lead from the seen text to the live
      text, including edits not yet written or committed.
-   - `authors` are the accounts that edited since (from the feed, feed author fields), each
-     with `agents`: the app tokens it used (from the commits since and the uncommitted
-     changes). An edit session that started before the seen time may add an earlier author.
+   - `authors` are the accounts with Automerge changes after the starting point, in the
+     order of their first change (feed author fields), each with `agents`: the names of the
+     app tokens it made them with. Changes of the server (`:disk`, `:server`) do not count.
+     Only when the document no longer has the starting point (a new epoch) they come from
+     the feed and the commits after its time; then an edit session that started before it
+     may add an earlier author.
 2. The client shows the changes, then sends `PUT /document/{id}/seen/` with
    `{"seenToken": <seenToken of the answer>}`. The server stores the text of that revision,
    so an edit that landed while the user read is still new next time.
