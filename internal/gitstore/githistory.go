@@ -213,3 +213,78 @@ func exitCode(err error) int {
 	}
 	return -1
 }
+
+// NotCommitted is the revision git blame gives lines that are not committed yet
+const NotCommitted = "0000000000000000000000000000000000000000"
+
+// BlameLine is the commit that last changed a line
+type BlameLine struct {
+	// Revision is the full hash, NotCommitted for lines that differ from HEAD
+	Revision string
+	Author   Signature
+	Time     time.Time
+}
+
+// Blame returns for every line of contents, a version of the file (path relative to the docs
+// folder) that may have uncommitted changes, the commit that last changed it. It follows
+// renames like the history.
+func (g *Repo) Blame(path string, contents string) ([]BlameLine, error) {
+	file, err := os.CreateTemp("", "mkdocseditor-blame-")
+	if err != nil {
+		return nil, err
+	}
+	name := file.Name()
+	defer func() { _ = os.Remove(name) }()
+	_, err = file.WriteString(contents)
+	if cerr := file.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	out, err := g.run(nil, "blame", "--porcelain", "--contents", name, "--", "./"+path)
+	g.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	type info struct {
+		author Signature
+		time   time.Time
+	}
+	commits := map[string]*info{}
+	var lines []BlameLine
+	var current *info
+	var revision string
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(l, "\t"):
+			lines = append(lines, BlameLine{Revision: revision, Author: current.author, Time: current.time})
+		case len(l) > 41 && l[40] == ' ' && isHex(l[:40]):
+			revision = l[:40]
+			if current = commits[revision]; current == nil {
+				current = &info{}
+				commits[revision] = current
+			}
+		case current == nil:
+		case strings.HasPrefix(l, "author "):
+			current.author.Name = strings.TrimPrefix(l, "author ")
+		case strings.HasPrefix(l, "author-mail "):
+			current.author.Email = strings.Trim(strings.TrimPrefix(l, "author-mail "), "<>")
+		case strings.HasPrefix(l, "author-time "):
+			if s, err := strconv.ParseInt(strings.TrimPrefix(l, "author-time "), 10, 64); err == nil {
+				current.time = time.Unix(s, 0).UTC()
+			}
+		}
+	}
+	return lines, nil
+}
+
+func isHex(s string) bool {
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}

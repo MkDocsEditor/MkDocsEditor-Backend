@@ -257,3 +257,35 @@ func HeadingAbove(text string, line int) (*string, int) {
 	}
 	return &title, occurrence
 }
+
+// SectionLines finds a section: the heading with this text and occurrence (1 for the first
+// heading with the text) and the lines below it up to the next heading of the same or a higher
+// level. It returns the 0-based lines [start, end) and false if there is no such heading.
+func SectionLines(text string, heading string, occurrence int) (int, int, bool) {
+	titles := headingTexts(text)
+	lines := splitLines(text)
+	start, seen := -1, 0
+	for i := range lines {
+		if titles[i] == heading && heading != "" {
+			if seen++; seen == occurrence {
+				start = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return 0, 0, false
+	}
+	level := headingLevel(lines[start])
+	for i := start + 1; i < len(lines); i++ {
+		if _, ok := titles[i]; ok && headingLevel(lines[i]) <= level {
+			return start, i, true
+		}
+	}
+	return start, len(lines), true
+}
+
+// headingLevel is the number of # of an ATX heading line
+func headingLevel(line string) int {
+	return strings.Count(strings.SplitN(strings.TrimLeft(line, " "), " ", 2)[0], "#")
+}

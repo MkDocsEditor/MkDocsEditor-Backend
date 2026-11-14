@@ -789,7 +789,8 @@ Based on the git history of each file. Requires `git.enabled`.
 | `GET` | `/document/{id}/history/?limit=100` | Commits that touched the file, newest first: `[{"revision","time","author","coAuthors":[…],"message","path","appTokens","agents","summary"}]`, details below. |
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
 | `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. With `&format=json`: the structured diff below. |
-| `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |
+| `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. With a body `{"heading", "headingOccurrence"}` only that section, details below. |
+| `GET` | `/document/{id}/blame/` | Who last changed each line, details below. |
 | `POST` | `/document/{id}/history/{revision}/revert/` | Editors and admins only (write tokens too). Undoes only the change of that commit, later edits stay, details below. |
 | `GET` | `/document/{id}/changes/?since=seen` | What changed since the account last saw the page, details below. Needs no git. |
 | `PUT` | `/document/{id}/seen/` | `{"seenToken"}`: marks what the account saw. Every role and read tokens. |
@@ -850,6 +851,41 @@ Clients should confirm a revert with every author of the commit (`author`, `coAu
 and `agents`). Since agent edits get commits of their own (section 10), the commit of an
 agent's edit has only that agent's account. Servers with revert list `revert` in
 `features` of `GET /server-info/`.
+
+### Section restore
+
+`POST /document/{id}/history/{revision}/restore/` with `{"heading": "Setup",
+"headingOccurrence": 1}` (occurrence as in the hunk anchors, default 1) restores one
+section: the heading and the lines below it up to the next heading of the same or a higher
+level, subsections included. The rest of the live text stays. Uncommitted edits are
+committed first, then the restore is committed as `Restore section "<heading>" of <path>
+to <12 hex>`. `204` on success (also when the section is already as at the revision),
+`409 section-not-found` with `details.in` = `revision` or `current` when that text has no
+such section, `400` for an empty heading.
+
+### Blame
+
+`GET /document/{id}/blame/`:
+
+```json
+{"revision": "<seenToken>", "lines": 6, "blocks": [
+  {"start": 1, "end": 3, "pending": false, "revision": "<40 hex>", "time": "…",
+   "message": "Update guide/setup.md", "author": {…}, "agents": []},
+  {"start": 5, "end": 5, "pending": true, "revision": null, "time": null, "message": null,
+   "author": {…}, "agents": ["claude"]}]}
+```
+
+- git blame of the live text (following renames). Consecutive lines of the same commit are
+  one block; `start` and `end` are 1-based and inclusive.
+- `author` is the commit's author, in the form of the feed's authors. `agents` are the app
+  tokens of the commit.
+- `pending` lines differ from the last commit. Their `author` is the account that wrote
+  most of the line's characters (from the authorship, the line end included), `agents`
+  the app token it used; consecutive pending lines of the same account and token are one
+  block. `author` is null when nobody known wrote it.
+- `revision` is the text's revision: the blame belongs to that text, which may be a little
+  behind the live text while it changes fast.
+- Servers with blame and section restore list `blame` in `features` of `GET /server-info/`.
 
 ### Changed since you were here
 

@@ -345,6 +345,12 @@ func (rs *RestService) restoreDocumentRevision(c *echo.Context) error {
 	if revision == RevisionCurrent {
 		return rs.returnUnknownRevision(c, revision)
 	}
+	var section RestoreSectionRequest
+	if c.Request().ContentLength != 0 {
+		if err = bindLimitedJSON(c, &section); err != nil {
+			return err
+		}
+	}
 	text, _, err := rs.revisionText(d, rel, repo, revision)
 	if errors.Is(err, ErrUnknownRevision) {
 		return rs.returnUnknownRevision(c, revision)
@@ -352,10 +358,79 @@ func (rs *RestService) restoreDocumentRevision(c *echo.Context) error {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	if section.Heading != nil {
+		return rs.restoreSection(c, d, rel, revision, text, section)
+	}
 	if err = rs.sync.ReplaceText(d, text, UserFromContext(c), "restore "+shortRevision(revision)); err != nil {
 		return rs.ReturnError(c, err)
 	}
 	// committed right away, with the pending edits of the document
 	rs.commitTree(c, "Restore %s to "+shortRevision(revision), d.Path)
+	return c.NoContent(http.StatusNoContent)
+}
+
+// RestoreSectionRequest is the optional body of POST /document/{id}/history/{revision}/restore/:
+// with a heading only that section is restored
+type RestoreSectionRequest struct {
+	Heading *string `json:"heading"`
+	// HeadingOccurrence counts the headings with the same text from the top, 1 (default) for
+	// the first
+	HeadingOccurrence int `json:"headingOccurrence"`
+}
+
+// CodeSectionNotFound means the section of a restore is missing in the revision or the live text
+const CodeSectionNotFound = "section-not-found"
+
+// keepLines splits a text after each line end
+func keepLines(text string) []string {
+	lines := strings.SplitAfter(text, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// restoreSection replaces a section of the live text by the section at a revision
+func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, revision, old string, r RestoreSectionRequest) error {
+	heading := strings.TrimSpace(*r.Heading)
+	if r.HeadingOccurrence == 0 {
+		r.HeadingOccurrence = 1
+	}
+	if heading == "" || r.HeadingOccurrence < 1 {
+		return apiError(c, http.StatusBadRequest, CodeBadRequest, "heading must not be empty and headingOccurrence must be at least 1", nil)
+	}
+	start, end, ok := activity.SectionLines(old, heading, r.HeadingOccurrence)
+	if !ok {
+		return apiError(c, http.StatusConflict, CodeSectionNotFound, "the revision has no such section", map[string]any{"in": "revision"})
+	}
+	section := keepLines(old)[start:end]
+
+	// a commit of its own, without the edits pending until now
+	rs.git.CommitPending(rel)
+	live, liveRevision, err := rs.sync.ReadContent(d)
+	if err != nil {
+		return rs.contentError(c, err)
+	}
+	start, end, ok = activity.SectionLines(live, heading, r.HeadingOccurrence)
+	if !ok {
+		return apiError(c, http.StatusConflict, CodeSectionNotFound, "the document has no such section anymore", map[string]any{"in": "current"})
+	}
+	lines := keepLines(live)
+	if n := len(section); n > 0 && end < len(lines) && !strings.HasSuffix(section[n-1], "\n") {
+		section[n-1] += "\n"
+	}
+	restored := strings.Join(lines[:start], "") + strings.Join(section, "") + strings.Join(lines[end:], "")
+	if restored != live {
+		agent := agentOf(c)
+		tokenName := agent.TokenName
+		agent.TokenName = ""
+		if _, err = rs.sync.WriteContent(d, restored, liveRevision, agent); err != nil {
+			return rs.contentError(c, err)
+		}
+		if tokenName != "" {
+			rs.git.RecordAgent(rel, agent.AccountID, tokenName)
+		}
+		rs.git.CommitTreeChangeWithBody(UserFromContext(c), "Restore section \""+strings.ReplaceAll(heading, "\"", "'")+"\" of "+rel+" to "+shortRevision(revision), "", rel)
+	}
 	return c.NoContent(http.StatusNoContent)
 }
