@@ -381,15 +381,6 @@ type RestoreSectionRequest struct {
 // CodeSectionNotFound means the section of a restore is missing in the revision or the live text
 const CodeSectionNotFound = "section-not-found"
 
-// keepLines splits a text after each line end
-func keepLines(text string) []string {
-	lines := strings.SplitAfter(text, "\n")
-	if lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
-}
-
 // restoreSection replaces a section of the live text by the section at a revision
 func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, revision, old string, r RestoreSectionRequest) error {
 	heading := strings.TrimSpace(*r.Heading)
@@ -399,11 +390,9 @@ func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, re
 	if heading == "" || r.HeadingOccurrence < 1 {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "heading must not be empty and headingOccurrence must be at least 1", nil)
 	}
-	start, end, ok := activity.SectionLines(old, heading, r.HeadingOccurrence)
-	if !ok {
+	if _, missing := activity.ReplaceSection(old, old, heading, r.HeadingOccurrence); missing != "" {
 		return apiError(c, http.StatusConflict, CodeSectionNotFound, "the revision has no such section", map[string]any{"in": "revision"})
 	}
-	section := keepLines(old)[start:end]
 
 	// a commit of its own, without the edits pending until now
 	rs.git.CommitPending(rel)
@@ -411,15 +400,10 @@ func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, re
 	if err != nil {
 		return rs.contentError(c, err)
 	}
-	start, end, ok = activity.SectionLines(live, heading, r.HeadingOccurrence)
-	if !ok {
+	restored, missing := activity.ReplaceSection(live, old, heading, r.HeadingOccurrence)
+	if missing != "" {
 		return apiError(c, http.StatusConflict, CodeSectionNotFound, "the document has no such section anymore", map[string]any{"in": "current"})
 	}
-	lines := keepLines(live)
-	if n := len(section); n > 0 && end < len(lines) && !strings.HasSuffix(section[n-1], "\n") {
-		section[n-1] += "\n"
-	}
-	restored := strings.Join(lines[:start], "") + strings.Join(section, "") + strings.Join(lines[end:], "")
 	if restored != live {
 		agent := agentOf(c)
 		tokenName := agent.TokenName

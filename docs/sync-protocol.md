@@ -857,7 +857,8 @@ agent's edit has only that agent's account. Servers with revert list `revert` in
 `POST /document/{id}/history/{revision}/restore/` with `{"heading": "Setup",
 "headingOccurrence": 1}` (occurrence as in the hunk anchors, default 1) restores one
 section: the heading and the lines below it up to the next heading of the same or a higher
-level, subsections included. The rest of the live text stays. Uncommitted edits are
+level, subsections included. The rest of the live text stays, and so do the blank lines
+between the section and the next one now. Uncommitted edits are
 committed first, then the restore is committed as `Restore section "<heading>" of <path>
 to <12 hex>`. `204` on success (also when the section is already as at the revision),
 `409 section-not-found` with `details.in` = `revision` or `current` when that text has no

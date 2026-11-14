@@ -153,4 +153,17 @@ func TestRestoreSection(t *testing.T) {
 	if got := e.git0("show", "HEAD:docs/"+rel); got != want {
 		t.Errorf("committed %q", got)
 	}
+
+	// the last section of a revision keeps the blank line before the section after it now
+	a.appendText("\n## C\nc1\n")
+	a.edit(func(text *automerge.Text) error {
+		s, _ := text.Get()
+		return text.Splice(strings.Index(s, "b2"), 2, "b3\n")
+	})
+	eventually(t, "server", func() bool { return e.serverText(rel) == a.text() })
+	if rec := restore(`{"heading":"B"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("restore last section: %d %s", rec.Code, rec.Body.String())
+	}
+	want = setupText + "## A\na1\n### A.1\nsub\n## B\nb1\n\n\n## C\nc1\n"
+	a.waitFor("restored last section", func() bool { return a.textLocked() == want })
 }
