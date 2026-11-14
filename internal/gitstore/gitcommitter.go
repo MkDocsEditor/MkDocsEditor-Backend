@@ -433,6 +433,13 @@ func (c *Committer) commitEdits(relPath string) {
 	}
 }
 
+// CommitPending commits the uncommitted edits of a document now, so the next commit of it
+// holds only what follows
+func (c *Committer) CommitPending(relPath string) {
+	c.commitEdits(relPath)
+	c.saveIfDirty()
+}
+
 // CommitTreeChange commits a create, rename, delete or upload over REST right away, together
 // with the pending edits below the affected paths. The requesting user is the author.
 func (c *Committer) CommitTreeChange(user *auth.User, subject string, paths ...string) {

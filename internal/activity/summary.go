@@ -235,3 +235,25 @@ func headingsByLine(text string) []int {
 	}
 	return out
 }
+
+// HeadingAbove returns the nearest heading at or above a line (0-based) and how often its
+// text occurs as a heading up to there, 1 for the first. nil above the first heading.
+func HeadingAbove(text string, line int) (*string, int) {
+	byLine := headingsByLine(text)
+	if len(byLine) == 0 {
+		return nil, 0
+	}
+	line = min(max(line, 0), len(byLine)-1)
+	if byLine[line] < 0 {
+		return nil, 0
+	}
+	titles := headingTexts(text)
+	title := titles[byLine[line]]
+	occurrence := 0
+	for l, t := range titles {
+		if t == title && l <= byLine[line] {
+			occurrence++
+		}
+	}
+	return &title, occurrence
+}

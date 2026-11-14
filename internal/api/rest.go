@@ -368,6 +368,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	groupDocuments.GET("/:"+urlParamID+"/history/diff/", rs.getDocumentRevisionDiff)
 	groupDocuments.GET("/:"+urlParamID+"/history/:"+urlParamRevision+"/content/", rs.getDocumentRevisionContent)
 	groupDocuments.POST("/:"+urlParamID+"/history/:"+urlParamRevision+"/restore/", rs.restoreDocumentRevision)
+	groupDocuments.POST("/:"+urlParamID+"/history/:"+urlParamRevision+"/revert/", rs.revertDocumentRevision)
 	groupDocuments.POST("/", rs.createDocument)
 	groupDocuments.PUT("/:"+urlParamID+"/", rs.renameItem(wiki.TypeDocument))
 	groupDocuments.DELETE("/:"+urlParamID+"/", rs.deleteItem(wiki.TypeDocument))

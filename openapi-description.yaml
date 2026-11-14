@@ -2871,6 +2871,43 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /document/{documentId}/history/{revision}/revert/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+      - $ref: "#/components/parameters/revision"
+    post:
+      summary: "Revert the change of one commit"
+      description: |
+        Undoes only the change the commit made to the file, line by line; later edits stay.
+        Uncommitted edits are committed first, then the revert is applied as an edit of the
+        requesting account and committed as `Revert <12 hex> on <path>`. A block of the
+        change conflicts when its lines were changed or removed since: then nothing changes
+        and the answer is `409 revert-conflict` with `details.conflicts` (heading anchor and
+        1-based line in the live text) and `details.headings`. `409 nothing-to-revert` when
+        the change is no longer in the document. Requires the editor or admin role, or a
+        write token. `features` of `GET /server-info/` contains `revert`.
+      operationId: revertDocumentRevision
+      tags: [ History ]
+      responses:
+        "200":
+          description: "Reverted: the history entry of the revert commit"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /document/{documentId}/ws/:
     parameters:
       - $ref: "#/components/parameters/documentId"
