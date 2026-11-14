@@ -97,6 +97,18 @@ CREATE TABLE qr_codes (
 	last_scanned_at INTEGER NOT NULL DEFAULT 0
 );
 `,
+	// 6: what each account last saw of a document: the text and its revision (heads)
+	`
+CREATE TABLE seen (
+	account_id TEXT NOT NULL,
+	path       TEXT NOT NULL,
+	seen_at    INTEGER NOT NULL,
+	seen_token TEXT NOT NULL,
+	text       TEXT NOT NULL,
+	PRIMARY KEY (account_id, path)
+);
+CREATE INDEX seen_path ON seen(path);
+`,
 }
 
 // Store is the activity database

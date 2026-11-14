@@ -285,6 +285,9 @@ func (rs *RestService) itemDeleted(c *echo.Context, itemType string, absPath str
 		return
 	}
 	rs.sync.Activity().RecordItem(activity.KindDeleted, itemType, rel, "", UserFromContext(c).ID)
+	if err := rs.sync.Activity().DeleteSeen(rel); err != nil {
+		log.Printf("Unable to forget what was seen of %s: %v", rel, err)
+	}
 	changes, err := rs.sync.Activity().DeletePins(rel)
 	if err != nil {
 		log.Printf("Unable to remove the pins of %s: %v", rel, err)
@@ -302,6 +305,9 @@ func (rs *RestService) itemMoved(m *collab.CompletedMove) {
 		author = m.User.ID
 	}
 	rs.sync.Activity().RecordItem(activity.KindMoved, m.ItemType, m.NewRel, m.OldRel, author)
+	if err := rs.sync.Activity().MoveSeen(m.OldRel, m.NewRel); err != nil {
+		log.Printf("Unable to move what was seen of %s: %v", m.OldRel, err)
+	}
 	changes, err := rs.sync.Activity().MovePins(m.OldRel, m.NewRel)
 	if err != nil {
 		log.Printf("Unable to move the pins of %s: %v", m.OldRel, err)

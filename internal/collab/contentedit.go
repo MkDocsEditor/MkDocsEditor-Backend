@@ -317,3 +317,29 @@ func placeEdits(text string, edits []TextEdit) ([]splice, error) {
 	}
 	return out, nil
 }
+
+// ReadContentAt returns the text of a document at a revision and the time of its newest
+// change. ErrUnknownRevision if the document does not have it (any more).
+func (s *SyncServer) ReadContentAt(d *wiki.Document, revision string) (text string, at time.Time, err error) {
+	err = s.withSession(d, func(ds *docSession) error {
+		heads, err := ds.baseHeadsLocked(revision)
+		if err != nil {
+			return err
+		}
+		if heads == nil {
+			return ErrInvalidRevision
+		}
+		for _, h := range heads {
+			if c, err := ds.doc.Change(h); err == nil && c.Timestamp().After(at) {
+				at = c.Timestamp()
+			}
+		}
+		fork, err := ds.doc.Fork(heads...)
+		if err != nil {
+			return err
+		}
+		text, err = ContentText(fork)
+		return err
+	})
+	return text, at, err
+}

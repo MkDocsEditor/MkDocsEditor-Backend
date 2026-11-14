@@ -296,6 +296,7 @@ Without any method, endpoints that need authentication return 401 `unauthenticat
 | `GET /alive/`, `GET /auth/status/`, the pre-login `/auth/…` endpoints, `GET /.well-known/assetlinks.json` | everyone, rate limited |
 | `GET /auth/forward/` | everyone; answers whether the request is logged in (below) |
 | content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, `/search/`, websockets) | any role; app tokens with `read` or `write` |
+| `PUT /document/{id}/seen/` (what the account saw, [sync-protocol.md](sync-protocol.md) §11) | any role; app tokens with `read` or `write` |
 | content changes (`POST`, `PUT`, `DELETE` on content routes, history restore, `POST /document/{id}/edits/`) | `editor`, `admin`; app tokens with `write` |
 | `POST /mcp/` (MCP server, [mcp.md](mcp.md)) | any role, `Authorization` header required (no cookie, `401` with `WWW-Authenticate`); readers and `read` tokens get only the read tools |
 | OAuth metadata, `/oauth/authorize/`, `/oauth/token/`, `/oauth/register/`, `/oauth/revoke/` ([oauth.md](oauth.md)) | everyone, rate limited; credentials are ignored |
