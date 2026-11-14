@@ -239,6 +239,20 @@ jobs:
           echo "newest glibc symbol: $(objdump -T "${BINARY}" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)"
           "${BINARY}" --version
 
+      # TEMPORARY, removed before merge: the binary must be the same with the original
+      # (bitcode) and the stripped automerge libraries. Go from go.mod still accepts both.
+      - name: Compare with the original automerge libraries
+        run: |
+          go build -trimpath -o /tmp/stripped .
+          go mod download -json github.com/automerge/automerge-go@v0.0.0-20241030180337-6fb4f2d08244 > /tmp/am.json
+          ORIG="$(jq -r .Dir /tmp/am.json)"
+          cp -f "$ORIG"/deps/*.a third_party/automerge-go/deps/
+          go build -trimpath -o /tmp/original .
+          git checkout -- third_party
+          go version
+          sha256sum /tmp/stripped /tmp/original
+          cmp /tmp/stripped /tmp/original && echo "IDENTICAL"
+
       - name: Save the Go modules and the release build
         if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
