@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the minimum version from go.mod and the latest stable release
+        # the minimum version from go.mod and the newest release CI can use (pinned, see below)
         go: [ go.mod, stable ]
     steps:
       - name: Checkout the repository
@@ -37,7 +37,10 @@ jobs:
         if: matrix.go == 'stable'
         uses: actions/setup-go@v7
         with:
-          go-version: stable
+        # Pinned: Go 1.27.4 refuses the prebuilt libraries of automerge-go, which contain LLVM
+        # bitcode ("disallowed LTO section" in #cgo LDFLAGS). Keep this in step with the
+        # Dockerfile until automerge-go ships libraries without it.
+          go-version: "1.27.3"
           cache: false
 
       # Not the setup-go cache: its key is shared with the other jobs and whichever finishes first
@@ -113,12 +116,15 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v7
 
-      # the latest stable release, like the Docker image, so the standard library is current
+      # the release of the Docker image, so the standard library is checked as it ships
       - name: Set up Go
         id: go
         uses: actions/setup-go@v7
         with:
-          go-version: stable
+        # Pinned: Go 1.27.4 refuses the prebuilt libraries of automerge-go, which contain LLVM
+        # bitcode ("disallowed LTO section" in #cgo LDFLAGS). Keep this in step with the
+        # Dockerfile until automerge-go ships libraries without it.
+          go-version: "1.27.3"
           cache: false
 
       # Saved by the test job on master
