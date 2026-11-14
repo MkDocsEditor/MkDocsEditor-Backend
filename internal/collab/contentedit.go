@@ -3,6 +3,7 @@ package collab
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -344,4 +345,49 @@ func (s *SyncServer) ReadContentAt(d *wiki.Document, revision string) (text stri
 		return err
 	})
 	return text, at, err
+}
+
+// RevisionAuthor is an account that changed a document after a revision, with the names of the
+// app tokens it used (empty for edits without a token)
+type RevisionAuthor struct {
+	AccountID string
+	AppTokens []string
+}
+
+// AuthorsSince returns who changed the document after a revision, in the order of their first
+// change, from the Automerge changes themselves. The server's own actors (:disk, :server) are
+// left out. A revision the document does not have is ErrUnknownRevision.
+func (s *SyncServer) AuthorsSince(d *wiki.Document, revision string) ([]RevisionAuthor, error) {
+	var out []RevisionAuthor
+	err := s.withSession(d, func(ds *docSession) error {
+		heads, err := ds.baseHeadsLocked(revision)
+		if err != nil {
+			return err
+		}
+		if heads == nil {
+			return ErrInvalidRevision
+		}
+		changes, err := ds.doc.Changes(heads...)
+		if err != nil {
+			return err
+		}
+		index := map[string]int{}
+		for _, ch := range changes {
+			b, ok := s.actors.Binding(ch.ActorID())
+			if !ok || b.Subject == "" || strings.HasPrefix(b.Subject, ":") {
+				continue
+			}
+			i, ok := index[b.Subject]
+			if !ok {
+				i = len(out)
+				index[b.Subject] = i
+				out = append(out, RevisionAuthor{AccountID: b.Subject, AppTokens: []string{}})
+			}
+			if b.AppTokenName != "" && !slices.Contains(out[i].AppTokens, b.AppTokenName) {
+				out[i].AppTokens = append(out[i].AppTokens, b.AppTokenName)
+			}
+		}
+		return nil
+	})
+	return out, err
 }

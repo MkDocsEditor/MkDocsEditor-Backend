@@ -96,6 +96,17 @@ func TestChangesSinceSeen(t *testing.T) {
 	if got := addedLines(e.changes(id, "carol", "")); len(got) != 1 || got[0] != "while reading" {
 		t.Errorf("after seen: added %v", got)
 	}
+	// only who changed something after the seen mark, though alice's edits share the feed's
+	// edit session with the agent's
+	e.markSeen(id, "carol", e.changes(id, "carol", "").SeenToken)
+	expectCode(t, e.doToken(http.MethodPost, "/document/"+id+"/edits/", token, map[string]any{"edits": []map[string]string{{"old": "Some agent text.", "new": "Some better agent text."}}}), http.StatusOK, "")
+	// the feed has the edit session of both
+	eventually(t, "file written", func() bool { return strings.Contains(e.readFile("guide/setup.md"), "better agent text") })
+	e.ss.Activity().Wait()
+	c = e.changes(id, "carol", "")
+	if len(c.Authors) != 1 || c.Authors[0].Username != "bob" || len(c.Authors[0].Agents) != 1 || c.Authors[0].Agents[0] != "Claude Code" {
+		t.Errorf("authors after the agent edit %+v", c.Authors)
+	}
 	// another account has its own starting point
 	if c := e.changes(id, "bob", ""); c.Since != nil {
 		t.Errorf("bob never saw it: %+v", c.Since)
