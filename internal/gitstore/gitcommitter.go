@@ -463,6 +463,19 @@ func (c *Committer) PendingStats() (documents int, changes int) {
 	return documents, changes
 }
 
+// PendingAgents returns the app tokens of the uncommitted changes of a document, by account id
+func (c *Committer) PendingAgents(relPath string) map[string][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := map[string][]string{}
+	if e := c.pending[relPath]; e != nil {
+		for account, names := range e.Agents {
+			out[account] = slices.Clone(names)
+		}
+	}
+	return out
+}
+
 // Abandon stops the committer without committing anything, as a crash would. The pending changes
 // stay in the state folder. Do not call Close afterwards.
 func (c *Committer) Abandon() {

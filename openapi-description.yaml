@@ -2743,6 +2743,88 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /document/{documentId}/changes/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    get:
+      summary: "What changed since the account last saw the page"
+      description: |
+        Diff from what the account last saw (`PUT …/seen/`) to the live text, with who made
+        the changes. Needs no git. `since` is `seen` (default) or a seenToken; with
+        `seen` and no stored starting point, `since` is null and there are no hunks. Show the
+        changes, then PUT the answer's `seenToken` to `…/seen/`, so edits that land while
+        the user reads do not count as seen.
+      operationId: getDocumentChanges
+      tags: [ History ]
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            default: seen
+      responses:
+        "200":
+          description: "The changes, no hunks if nothing changed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Changes"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ContentConflict"
+
+  /document/{documentId}/seen/:
+    parameters:
+      - $ref: "#/components/parameters/documentId"
+    put:
+      summary: "Mark what the account saw of the page"
+      description: |
+        Stores the text of the seenToken (a revision: the `seenToken` of a changes answer or
+        the ETag of `GET …/content/`) as what the account last saw. Allowed for every role and
+        for read tokens: it is the account's own state. Follows the page through moves.
+        `409 unknown-revision` if the document no longer has that revision: get the changes
+        again.
+      operationId: putDocumentSeen
+      tags: [ History ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ seenToken ]
+              properties:
+                seenToken:
+                  type: string
+      responses:
+        "200":
+          description: "Stored"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ seenAt, seenToken ]
+                properties:
+                  seenAt:
+                    type: string
+                    format: date-time
+                  seenToken:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ContentConflict"
+
   /document/{documentId}/history/{revision}/content/:
     parameters:
       - $ref: "#/components/parameters/documentId"
@@ -5822,6 +5904,53 @@ components:
               description: "Headings above the changed lines, at most 5, in document order"
               items:
                 type: string
+
+    Changes:
+      type: object
+      required: [ since, seenToken, authors, hunks, summary ]
+      properties:
+        since:
+          type: object
+          nullable: true
+          description: "The starting point; null if the account never saw the page"
+          required: [ time, seenToken ]
+          properties:
+            time:
+              type: string
+              format: date-time
+              description: "When the account saw it, or the time of the newest change of an explicit seenToken"
+            seenToken:
+              type: string
+        seenToken:
+          type: string
+          description: "The revision of the live text the hunks lead to: PUT it to seen/ after showing the changes"
+        authors:
+          type: array
+          description: |
+            Accounts that edited the page since (from the feed, in the order they first
+            edited; an edit session that started before may add an earlier author), with the
+            app tokens (agents) they used. Empty if nothing changed.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Author"
+              - type: object
+                required: [ agents ]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: string
+        hunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiffHunk"
+        summary:
+          type: object
+          required: [ linesAdded, linesRemoved, headings ]
+          properties:
+            linesAdded: { type: integer }
+            linesRemoved: { type: integer }
+            headings: { type: array, items: { type: string } }
 
     HistoryDiff:
       type: object

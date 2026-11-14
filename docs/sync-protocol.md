@@ -780,6 +780,8 @@ Based on the git history of each file. Requires `git.enabled`.
 | `GET` | `/document/{id}/history/{revision}/content/` | The file content at that revision (`text/plain`) |
 | `GET` | `/document/{id}/history/diff/?from={rev}&to={rev}` | Unified diff between two revisions (`text/plain`, empty if equal). `to` defaults to `current`, the live text; `from` may be `current` too. With `&format=json`: the structured diff below. |
 | `POST` | `/document/{id}/history/{revision}/restore/` | Editors and admins only. The server sets the live document to the content of that revision. |
+| `GET` | `/document/{id}/changes/?since=seen` | What changed since the account last saw the page, details below. Needs no git. |
+| `PUT` | `/document/{id}/seen/` | `{"seenToken"}`: marks what the account saw. Every role and read tokens. |
 
 History entries:
 - `path` is the file's path in that commit.
@@ -805,6 +807,34 @@ The structured diff is `{"from", "to", "hunks": [...]}`. A hunk has:
 
 Hunks have 3 lines of context; changes closer than 6 lines share a hunk. Clients compute
 word-level highlights themselves.
+
+### Changed since you were here
+
+The server keeps what each account last saw of each page: the text itself and its revision
+(the `seenToken`, the same value as the content API's ETag: Automerge heads). Because the text
+is stored, the starting point survives epochs, restarts and commits.
+
+1. When a page opens, the client asks `GET /document/{id}/changes/`:
+   `{"since", "seenToken", "authors", "hunks", "summary"}`.
+   - `since` is `{"time", "seenToken"}`, or `null` if the account never saw the page. Then
+     there are no hunks.
+   - `hunks` (structured diff, as above) and `summary` lead from the seen text to the live
+     text, including edits not yet written or committed.
+   - `authors` are the accounts that edited since (from the feed, feed author fields), each
+     with `agents`: the app tokens it used (from the commits since and the uncommitted
+     changes). An edit session that started before the seen time may add an earlier author.
+2. The client shows the changes, then sends `PUT /document/{id}/seen/` with
+   `{"seenToken": <seenToken of the answer>}`. The server stores the text of that revision,
+   so an edit that landed while the user read is still new next time.
+
+`?since=<seenToken>` compares with any revision instead; `since.time` is then the time of
+its newest change.
+
+Errors:
+- An invalid token is `400`.
+- A revision the document no longer has (after a new epoch) is `409 unknown-revision`.
+
+What was seen follows pages through moves and is deleted with them.
 
 A restore is applied as splices (the diff from the current text to the old one) by the
 **server** actor, so connected clients simply see an edit, and it can be undone like any

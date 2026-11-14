@@ -318,6 +318,8 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	}
 	// readers may change their own pins and push subscriptions, the handler checks the family pins
 	isPins := strings.HasPrefix(path, "/pins/")
+	// what an account saw is its own state, like pins: readers and read tokens set it too
+	isSeen := strings.HasPrefix(path, "/document/") && strings.HasSuffix(path, "/seen/") && req.Method == http.MethodPut
 	if t := AppTokenFromContext(c); t != nil && t.OAuthClientID != "" && path != EndpointPathMCP {
 		// OAuth grants are bound to their resource, the MCP endpoint (RFC 8707)
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "this OAuth token is only valid for the MCP endpoint", nil))
@@ -326,11 +328,11 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	if path == EndpointPathMCP {
 		return nil
 	}
-	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isPush && !isOAuthConsent && !strings.HasPrefix(path, "/auth/") {
+	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isSeen && !isPush && !isOAuthConsent && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))
 	}
-	if t := AppTokenFromContext(c); t != nil && t.Scope != auth.ScopeWrite && !isReadOnlyMethod(req.Method) {
+	if t := AppTokenFromContext(c); t != nil && t.Scope != auth.ScopeWrite && !isReadOnlyMethod(req.Method) && !isSeen {
 		// also no websocket tickets: a ticket carries the account, not the token's scope
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "the app token has the scope 'read' and may not change anything", nil))
 	}
