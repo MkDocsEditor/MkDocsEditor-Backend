@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 )
@@ -223,6 +224,33 @@ func TestGitCommitOnShutdownAndAfterCrash(t *testing.T) {
 	eventually(t, "commit after restart", func() bool { return len(e.commits()) == 3 })
 	if got := e.git0("log", "-1", "--format=%an"); got != "bob\n" {
 		t.Errorf("author %q", got)
+	}
+}
+
+// the queued edits of an app token survive a crash and keep their own commit
+func TestGitAgentSnapshotSurvivesCrash(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{})
+	id := e.docID("guide/setup.md")
+	token := e.appToken("bob", "claude", auth.ScopeWrite)
+	r := e.doToken(http.MethodPost, "/document/"+id+"/edits/", token, map[string]any{
+		"edits": []map[string]string{{"old": "text.", "new": "agent text."}},
+	})
+	expectCode(t, r, http.StatusOK, "")
+	eventually(t, "snapshot saved", func() bool {
+		data, err := os.ReadFile(filepath.Join(e.stateDir, gitstore.SnapshotsFile))
+		return err == nil && strings.Contains(string(data), "agent text.")
+	})
+	e.git.Abandon()
+	e.git = nil
+	e.stop()
+	e.gitOpts.AfterAgentIdle = 50 * time.Millisecond
+	e.start()
+	eventually(t, "commit after restart", func() bool { return len(e.commits()) == 2 })
+	if got := strings.TrimSpace(e.git0("log", "-1", "--format=%an|%(trailers:key=Via-App-Token,valueonly)")); got != "bob|claude (bob <bob@mkdocseditor.invalid>)" {
+		t.Errorf("commit %q", got)
+	}
+	if got := e.git0("show", "HEAD:docs/guide/setup.md"); !strings.Contains(got, "agent text.") {
+		t.Errorf("committed text %q", got)
 	}
 }
 

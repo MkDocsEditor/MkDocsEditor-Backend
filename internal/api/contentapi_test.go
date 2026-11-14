@@ -292,6 +292,41 @@ func TestContentEditCommit(t *testing.T) {
 	}
 }
 
+// an agent edit in the middle of human edits gets a commit of its own: the human edits before
+// it are committed with the text before the agent edit, the ones after it separately
+func TestAgentEditOwnCommit(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{AfterIdle: 400 * time.Millisecond})
+	id := e.docID("guide/setup.md")
+	token := e.appToken("bob", "claude", auth.ScopeWrite)
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.appendText("Alice before.\n")
+	eventually(t, "server text", func() bool { return strings.Contains(e.serverText("guide/setup.md"), "Alice before.") })
+
+	for _, edit := range []string{"One", "Two"} {
+		r := e.doToken(http.MethodPost, "/document/"+id+"/edits/", token, map[string]any{
+			"edits": []map[string]string{{"old": "text.", "new": "text. " + edit + "."}},
+		})
+		expectCode(t, r, http.StatusOK, "")
+	}
+	a.waitFor("agent edit", func() bool { return strings.Contains(a.textLocked(), "One.") })
+	a.appendText("Alice after.\n")
+	eventually(t, "commits", func() bool { return len(e.commits()) == 4 })
+
+	log := e.git0("log", "--format=%an|%(trailers:key=Via-App-Token,valueonly,separator=;)", "-3")
+	want := "alice|\nbob|claude (bob <bob@mkdocseditor.invalid>)\nalice|\n"
+	if log != want {
+		t.Errorf("log = %q, want %q", log, want)
+	}
+	if got := e.git0("show", "HEAD~2:docs/guide/setup.md"); got != "# Setup\n\nSome text.\nAlice before.\n" {
+		t.Errorf("human commit = %q", got)
+	}
+	if got := e.git0("show", "HEAD~1:docs/guide/setup.md"); got != "# Setup\n\nSome text. Two. One.\nAlice before.\n" {
+		t.Errorf("agent commit = %q", got)
+	}
+	eventually(t, "clean work tree", func() bool { return e.git0("status", "--porcelain", "--", "docs") == "" })
+}
+
 func TestSearch(t *testing.T) {
 	e := newSyncEnv(t)
 	e.writeFile("index.md", "# Home\n\nWelcome to the wiki.\nThe SETUP guide is linked below.\n")
