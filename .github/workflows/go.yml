@@ -239,7 +239,6 @@ jobs:
           echo "newest glibc symbol: $(objdump -T "${BINARY}" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)"
           "${BINARY}" --version
 
-
       - name: Save the Go modules and the release build
         if: github.ref == 'refs/heads/master' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
