@@ -507,6 +507,7 @@ var authErrorResponses = []struct {
 	{auth.ErrInvalidTokenName, http.StatusBadRequest, CodeBadRequest},
 	{auth.ErrInvalidTokenScope, http.StatusBadRequest, CodeBadRequest},
 	{auth.ErrInvalidTokenExpiry, http.StatusBadRequest, CodeBadRequest},
+	{auth.ErrInvalidTokenExpiresAt, http.StatusBadRequest, CodeBadRequest},
 	{auth.ErrDeviceLinkRedeemed, http.StatusConflict, CodeConflict},
 	{auth.ErrInvalidAccessRequest, http.StatusBadRequest, CodeInvalidAccessRequest},
 	{auth.ErrInvalidAccessRequestName, http.StatusBadRequest, CodeBadRequest},

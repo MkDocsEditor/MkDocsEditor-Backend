@@ -129,13 +129,27 @@ For the web app; sessions only, app tokens get `403`.
   - `redirectUri`
   - `scope`: the requested scope, `read` or `write`
   - `allowedScopes`: `["read"]` for readers, else `["read", "write"]`
-  - `resource`, `expiresAt`
+  - `resource`
+  - `expiresAt`: when the request ends (10 minutes), not the grant
+  - `defaults`, to prefill the consent page:
+    - `name`: the client's name, cut to 64 characters
+    - `expiresAt`: always `null`, no fixed end
+    - `maxExpiresAt`: the latest end an approval may set
 
   Unknown, decided and expired requests are `404`.
-- `POST /api/oauth/requests/{id}/approve/` with an optional body `{"scope": "read"}` lowers
-  the scope; readers always get `read`. Like creating an app token, it needs a recent login:
-  `403 reauth-required`, then `POST /api/auth/reauth/` and approve again. The answer is
-  `{"redirectUrl": "…"}` with `code` and `state`.
+- `POST /api/oauth/requests/{id}/approve/` takes an optional body
+  `{"scope"?, "name"?, "expiresAt"?}`:
+  - `scope: "read"` lowers the scope; readers always get `read`.
+  - `name`: the name of the grant, 1 to 64 characters without control characters. Absent
+    or empty: the client's name.
+  - `expiresAt`: the fixed end of the grant, an RFC 3339 date-time (a date alone is `400`),
+    in the future and at most 3650 days ahead. Absent or `null`: no fixed end, the grant
+    lives while it is used (section 3).
+
+  Invalid values are `400 bad-request`, and the request stays pending. Like creating an app
+  token, approving needs a recent login: `403 reauth-required`, then
+  `POST /api/auth/reauth/` and approve again. The answer is `{"redirectUrl": "…"}` with
+  `code` and `state`.
 - `POST /api/oauth/requests/{id}/deny/` answers `{"redirectUrl": "…"}` with
   `error=access_denied` and `state`.
 
@@ -178,8 +192,16 @@ tokens are no error.
 - Edits made with an access token are attributed like those of an app token: to the
   account, with the grant's name as the agent (see [content-api.md](content-api.md) and
   [mcp.md](mcp.md)).
-- A refresh returns a new access and refresh token. The old access token ends, and the grant
-  lasts another 30 days. The app token's `expiresAt` shows when it ends without a refresh.
+- A refresh returns a new access and refresh token. The old access token ends.
+- **The end of a grant** is chosen on approval and never changes:
+  - Without a fixed end (`slidingExpiry: true`), the grant lives while it is used. Each
+    refresh moves its end 30 days ahead, and `expiresAt` shows when it ends without a
+    refresh.
+  - With a fixed end (`slidingExpiry: false`), the grant ends at `expiresAt`. Refreshes never
+    move it, and no access or refresh token outlives it: the last access token is shorter
+    than an hour (`expires_in`).
+
+  To end a grant early, revoke it. For a longer life, authorize the client again.
 - **Replays end the grant:**
   - a code that is used a second time
   - a refresh token that is used a second time
@@ -191,6 +213,9 @@ tokens are no error.
 In `GET /api/account/tokens/`, grants are app tokens with:
 - `oauthClientId`
 - `resource`
+- `slidingExpiry`: `true` without a fixed end
+
+`PATCH /api/account/tokens/{id}/` with `{"name": "…"}` renames a grant like any app token.
 
 Their `mdp_` token is never handed out.
 
@@ -199,9 +224,10 @@ Their `mdp_` token is never handed out.
 | Event | When |
 |---|---|
 | `oauth.client-registered` | a client registered (with name and redirect URIs, no account) |
-| `oauth.approved` | the user approved a request (client, scope, redirect URI) |
+| `oauth.approved` | the user approved a request (client, scope, redirect URI, name, end) |
 | `oauth.denied` | the user denied a request |
 | `app-token.created` | the client got its first tokens; details have `oauthClientId` |
+| `app-token.updated` | the grant was renamed |
 | `app-token.revoked` | the grant ended; `reason` is `code-reused`, `refresh-token-reused` or `client` for the revocation endpoint |
 
 ## 5. Security notes

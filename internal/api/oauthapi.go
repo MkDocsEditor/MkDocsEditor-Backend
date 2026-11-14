@@ -410,15 +410,32 @@ type OAuthRequestView struct {
 	// Scope is the requested scope, read or write
 	Scope string `json:"scope"`
 	// AllowedScopes are the scopes the user may grant: readers only read
-	AllowedScopes []string  `json:"allowedScopes"`
-	Resource      string    `json:"resource"`
-	ExpiresAt     time.Time `json:"expiresAt"`
+	AllowedScopes []string `json:"allowedScopes"`
+	Resource      string   `json:"resource"`
+	// ExpiresAt is when the request ends (10 minutes), not the grant
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Defaults of the grant, to prefill the consent page
+	Defaults OAuthGrantDefaults `json:"defaults"`
+}
+
+// OAuthGrantDefaults are the name and end a grant gets when the approval does not set them
+type OAuthGrantDefaults struct {
+	Name string `json:"name"`
+	// ExpiresAt nil: no fixed end, the grant lives while it is used (30 days after the last
+	// refresh)
+	ExpiresAt *time.Time `json:"expiresAt"`
+	// MaxExpiresAt is the latest end an approval may set
+	MaxExpiresAt time.Time `json:"maxExpiresAt"`
 }
 
 // OAuthDecisionRequest is the body of POST /oauth/requests/{id}/approve/
 type OAuthDecisionRequest struct {
 	// Scope lowers the requested scope to read; empty keeps it
 	Scope string `json:"scope"`
+	// Name of the grant (1 to 64 characters); empty: the client's name
+	Name string `json:"name"`
+	// ExpiresAt is the fixed end of the grant (RFC 3339); null or absent: no fixed end
+	ExpiresAt *time.Time `json:"expiresAt"`
 }
 
 // OAuthDecisionResponse tells the web client where to send the browser
@@ -438,7 +455,8 @@ func (rs *RestService) getOAuthRequest(c *echo.Context) error {
 	}
 	c.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	return c.JSONPretty(http.StatusOK, &OAuthRequestView{ID: r.ID, ClientID: r.Client.ID, ClientName: r.Client.Name, RedirectURI: r.RedirectURI,
-		Scope: r.Scope, AllowedScopes: allowed, Resource: r.Resource, ExpiresAt: r.ExpiresAt.UTC()}, jsonIndent)
+		Scope: r.Scope, AllowedScopes: allowed, Resource: r.Resource, ExpiresAt: r.ExpiresAt.UTC(),
+		Defaults: OAuthGrantDefaults{Name: auth.OAuthGrantName(r.Client), MaxExpiresAt: time.Now().UTC().Add(auth.MaxAppTokenLifetime).Truncate(time.Second)}}, jsonIndent)
 }
 
 // POST /oauth/requests/{id}/approve/: like creating an app token, it needs a recent login
@@ -452,7 +470,7 @@ func (rs *RestService) approveOAuthRequest(c *echo.Context) error {
 			return err
 		}
 	}
-	location, err := rs.authenticator.ApproveOAuthRequest(UserFromContext(c), c.Param(urlParamID), r.Scope, requestInfo(c))
+	location, err := rs.authenticator.ApproveOAuthRequest(UserFromContext(c), c.Param(urlParamID), r.Scope, r.Name, r.ExpiresAt, requestInfo(c))
 	if err != nil {
 		return rs.authError(c, err)
 	}

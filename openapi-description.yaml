@@ -1014,6 +1014,36 @@ paths:
   /account/tokens/{tokenId}/:
     parameters:
       - $ref: "#/components/parameters/tokenId"
+    patch:
+      summary: "Rename an app token or OAuth grant"
+      description: |
+        Sessions of the owner only. Only `name` can change. The end of a token never changes:
+        a body with `expiresAt` (also `null`) is `400`. To end a token early, revoke it; for a
+        longer life, create a new token or authorize the OAuth client again. Writes the audit
+        event `app-token.updated`.
+      operationId: updateAppToken
+      tags: [ Account ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppTokenUpdateRequest"
+      responses:
+        "200":
+          description: "The renamed token"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       summary: "Revoke an app token"
       operationId: revokeAppToken
@@ -4808,7 +4838,7 @@ components:
 
     AppToken:
       type: object
-      required: [ id, name, scope, createdAt, lastUsedAt, expiresAt ]
+      required: [ id, name, scope, createdAt, lastUsedAt, expiresAt, slidingExpiry ]
       properties:
         id:
           type: string
@@ -4834,6 +4864,12 @@ components:
         resource:
           type: string
           description: "The only resource an OAuth grant may use (the MCP endpoint)"
+        slidingExpiry:
+          type: boolean
+          description: |
+            True for OAuth grants without a fixed end: they live while they are used, and
+            `expiresAt` moves 30 days ahead with every refresh. False for app tokens and for
+            grants that end at `expiresAt`.
 
     ProtectedResourceMetadata:
       type: object
@@ -4926,7 +4962,7 @@ components:
 
     OAuthRequest:
       type: object
-      required: [ id, clientId, clientName, redirectUri, scope, allowedScopes, resource, expiresAt ]
+      required: [ id, clientId, clientName, redirectUri, scope, allowedScopes, resource, expiresAt, defaults ]
       properties:
         id: { type: string }
         clientId: { type: string }
@@ -4943,7 +4979,27 @@ components:
           items: { type: string, enum: [ read, write ] }
           description: "What the user may grant: readers only read"
         resource: { type: string }
-        expiresAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: "When the request ends (10 minutes), not the grant"
+        defaults:
+          type: object
+          required: [ name, expiresAt, maxExpiresAt ]
+          description: "What the grant gets without a choice, to prefill the consent page"
+          properties:
+            name:
+              type: string
+              description: "The client's name, cut to 64 characters"
+            expiresAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: "Always null: no fixed end, the grant lives while it is used (30 days after the last refresh)"
+            maxExpiresAt:
+              type: string
+              format: date-time
+              description: "The latest end an approval may set"
 
     OAuthDecisionRequest:
       type: object
@@ -4952,6 +5008,18 @@ components:
           type: string
           enum: [ read, write ]
           description: "Absent: the requested scope. `read` lowers it."
+        name:
+          type: string
+          maxLength: 64
+          description: "Name of the grant, 1 to 64 characters. Absent or empty: the client's name."
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Fixed end of the grant (RFC 3339 date-time; a date alone is 400), in the future and
+            at most 3650 days ahead. Refreshes never extend it, and no token outlives it.
+            Absent or null: no fixed end. The end never changes later.
 
     OAuthDecision:
       type: object
@@ -4976,6 +5044,19 @@ components:
           minimum: 1
           maximum: 3650
           description: "Absent: no expiry"
+        expiresAt:
+          type: string
+          format: date-time
+          description: "Absolute end instead of expiresInDays (not both): in the future, at most 3650 days ahead"
+
+    AppTokenUpdateRequest:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
 
     CreatedAppToken:
       type: object

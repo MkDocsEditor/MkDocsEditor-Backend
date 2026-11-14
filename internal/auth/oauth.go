@@ -127,7 +127,10 @@ type oauthCode struct {
 	scope         string
 	resource      string
 	accountID     string
-	expiresAt     time.Time
+	// name and end of the grant, chosen on approval; end nil slides
+	name      string
+	end       *time.Time
+	expiresAt time.Time
 	// grantID is the app token made with the code; a second use of the code revokes it
 	grantID string
 	used    bool
@@ -404,11 +407,34 @@ func OAuthErrorRedirect(redirectURI, state string, e *OAuthError) string {
 	return redirectWith(redirectURI, params)
 }
 
+// OAuthGrantName is the default name of the grant of a client
+func OAuthGrantName(c *OAuthClient) string {
+	return tokenName(c.Name)
+}
+
 // ApproveOAuthRequest approves a request for an account and returns the redirect with the
 // code. scope "" keeps the requested scope; it can only be lowered, and readers get read.
-func (s *Service) ApproveOAuthRequest(u *User, id, scope string, ri RequestInfo) (string, error) {
+// name "" is the client's name; expiresAt nil gives a grant that lives while it is used (30
+// days after the last refresh), else the grant ends then.
+func (s *Service) ApproveOAuthRequest(u *User, id, scope, name string, expiresAt *time.Time, ri RequestInfo) (string, error) {
 	if scope != "" && scope != ScopeRead && scope != ScopeWrite {
 		return "", ErrInvalidTokenScope
+	}
+	if name != "" {
+		var err error
+		if name, err = cleanTokenName(name); err != nil {
+			return "", err
+		}
+	}
+	if err := s.checkExpiresAt(expiresAt); err != nil {
+		return "", err
+	}
+	if expiresAt != nil {
+		e := expiresAt.UTC()
+		expiresAt = &e
+	}
+	if _, err := s.PendingOAuthRequest(id); err != nil {
+		return "", err
 	}
 	r, err := s.takeOAuthRequest(id)
 	if err != nil {
@@ -419,6 +445,9 @@ func (s *Service) ApproveOAuthRequest(u *User, id, scope string, ri RequestInfo)
 		granted = ScopeRead
 	}
 	granted = capScope(granted, u)
+	if name == "" {
+		name = OAuthGrantName(r.Client)
+	}
 	code := newToken(PrefixOAuthCode)
 	now := s.now()
 	o := &s.oauth
@@ -432,10 +461,10 @@ func (s *Service) ApproveOAuthRequest(u *User, id, scope string, ri RequestInfo)
 		o.codes = map[string]*oauthCode{}
 	}
 	o.codes[string(tokenHash(code))] = &oauthCode{clientID: r.Client.ID, redirectURI: r.RedirectURI, codeChallenge: r.CodeChallenge,
-		scope: granted, resource: r.Resource, accountID: u.ID, expiresAt: now.Add(OAuthCodeLifetime)}
+		scope: granted, resource: r.Resource, accountID: u.ID, name: name, end: expiresAt, expiresAt: now.Add(OAuthCodeLifetime)}
 	o.mu.Unlock()
 	s.Audit(AuditEvent{Type: AuditOAuthApproved, ActorID: u.ID, TargetID: u.ID, IP: ri.IP, UserAgent: ri.UserAgent,
-		Details: map[string]any{"clientId": r.Client.ID, "clientName": r.Client.Name, "scope": granted, "redirectUri": r.RedirectURI}})
+		Details: map[string]any{"clientId": r.Client.ID, "clientName": r.Client.Name, "scope": granted, "redirectUri": r.RedirectURI, "name": name, "expiresAt": expiresAt}})
 	params := url.Values{"code": {code}}
 	if r.State != "" {
 		params.Set("state", r.State)
@@ -509,7 +538,10 @@ func (s *Service) ExchangeOAuthCode(clientID, code, redirectURI, verifier, resou
 	if u == nil || u.Status != StatusActive {
 		return nil, errInvalidCode
 	}
-	tokens, grantID, err := s.createGrant(u, client, capScope(c.scope, u), c.resource, ri)
+	if c.end != nil && !now.Before(*c.end) {
+		return nil, errInvalidCode
+	}
+	tokens, grantID, err := s.createGrant(u, client, c, capScope(c.scope, u), ri)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +561,7 @@ func tokenName(clientName string) string {
 }
 
 // createGrant makes the app token of a grant and its first tokens
-func (s *Service) createGrant(u *User, client *OAuthClient, scope, resource string, ri RequestInfo) (*OAuthTokens, string, error) {
+func (s *Service) createGrant(u *User, client *OAuthClient, c *oauthCode, scope string, ri RequestInfo) (*OAuthTokens, string, error) {
 	now := s.now().UTC()
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -539,21 +571,25 @@ func (s *Service) createGrant(u *User, client *OAuthClient, scope, resource stri
 	if _, err = tx.Exec("DELETE FROM oauth_tokens WHERE expires_at <= ?", toMillis(now)); err != nil {
 		return nil, "", err
 	}
-	id, name := newID(), tokenName(client.Name)
+	id, name := newID(), c.name
+	end, sliding := now.Add(OAuthRefreshTokenLifetime), true
+	if c.end != nil {
+		end, sliding = *c.end, false
+	}
 	// the app token itself is never handed out: the grant is used with its access tokens
-	if _, err = tx.Exec("INSERT INTO app_tokens (id, account_id, name, scope, token_hash, created_at, expires_at, oauth_client_id, resource) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		id, u.ID, name, scope, tokenHash(newToken(PrefixAppToken)), toMillis(now), toMillis(now.Add(OAuthRefreshTokenLifetime)), client.ID, resource); err != nil {
+	if _, err = tx.Exec("INSERT INTO app_tokens (id, account_id, name, scope, token_hash, created_at, expires_at, oauth_client_id, resource, sliding_expiry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		id, u.ID, name, scope, tokenHash(newToken(PrefixAppToken)), toMillis(now), toMillis(end), client.ID, c.resource, sliding); err != nil {
 		return nil, "", err
 	}
 	if _, err = tx.Exec("UPDATE oauth_clients SET last_used_at = ? WHERE id = ?", toMillis(now), client.ID); err != nil {
 		return nil, "", err
 	}
-	tokens, err := insertTokenPair(tx, id, scope, now)
+	tokens, err := insertTokenPair(tx, id, scope, now, end)
 	if err != nil {
 		return nil, "", err
 	}
 	if err = insertAudit(tx, now, AuditEvent{Type: AuditAppTokenCreated, ActorID: u.ID, TargetID: u.ID, IP: ri.IP, UserAgent: ri.UserAgent,
-		Details: map[string]any{"tokenId": id, "name": name, "scope": scope, "oauthClientId": client.ID}}); err != nil {
+		Details: map[string]any{"tokenId": id, "name": name, "scope": scope, "oauthClientId": client.ID, "slidingExpiry": sliding}}); err != nil {
 		return nil, "", err
 	}
 	if err = tx.Commit(); err != nil {
@@ -562,16 +598,24 @@ func (s *Service) createGrant(u *User, client *OAuthClient, scope, resource stri
 	return tokens, id, nil
 }
 
-// insertTokenPair stores a new access and refresh token of a grant
-func insertTokenPair(tx *sql.Tx, grantID, scope string, now time.Time) (*OAuthTokens, error) {
+// insertTokenPair stores a new access and refresh token of a grant. Neither outlives end.
+func insertTokenPair(tx *sql.Tx, grantID, scope string, now, end time.Time) (*OAuthTokens, error) {
+	access := now.Add(OAuthAccessTokenLifetime)
+	if end.Before(access) {
+		access = end
+	}
 	t := &OAuthTokens{AccessToken: newToken(PrefixOAuthAccess), RefreshToken: newToken(PrefixOAuthRefresh),
-		ExpiresIn: int(OAuthAccessTokenLifetime / time.Second), Scope: scope}
+		ExpiresIn: int(access.Sub(now) / time.Second), Scope: scope}
 	for _, row := range []struct {
 		token, kind string
 		lifetime    time.Duration
 	}{{t.AccessToken, "access", OAuthAccessTokenLifetime}, {t.RefreshToken, "refresh", OAuthRefreshTokenLifetime}} {
+		expires := now.Add(row.lifetime)
+		if end.Before(expires) {
+			expires = end
+		}
 		if _, err := tx.Exec("INSERT INTO oauth_tokens (token_hash, app_token_id, kind, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-			tokenHash(row.token), grantID, row.kind, toMillis(now), toMillis(now.Add(row.lifetime))); err != nil {
+			tokenHash(row.token), grantID, row.kind, toMillis(now), toMillis(expires)); err != nil {
 			return nil, err
 		}
 	}
@@ -642,12 +686,20 @@ func (s *Service) RefreshOAuthToken(clientID, refreshToken, scope string, ri Req
 	if _, err = tx.Exec("DELETE FROM oauth_tokens WHERE app_token_id = ? AND (kind = 'access' OR expires_at <= ?)", grantID, toMillis(now)); err != nil {
 		return nil, err
 	}
-	tokens, err := insertTokenPair(tx, grantID, granted, now)
+	// a sliding grant lives another 30 days, a fixed one ends where it ends
+	end := now.Add(OAuthRefreshTokenLifetime)
+	if !g.SlidingExpiry && g.ExpiresAt != nil {
+		end = *g.ExpiresAt
+		if !now.Before(end) {
+			return nil, errInvalidRefreshToken
+		}
+	}
+	tokens, err := insertTokenPair(tx, grantID, granted, now, end)
 	if err != nil {
 		return nil, err
 	}
 	if _, err = tx.Exec("UPDATE app_tokens SET scope = ?, expires_at = ?, last_used_at = ? WHERE id = ?",
-		granted, toMillis(now.Add(OAuthRefreshTokenLifetime)), toMillis(now), grantID); err != nil {
+		granted, toMillis(end), toMillis(now), grantID); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {

@@ -30,6 +30,7 @@ const (
 	AuditPasskeyRemoved          = "passkey.removed"
 	AuditAppTokenCreated         = "app-token.created"
 	AuditAppTokenRevoked         = "app-token.revoked"
+	AuditAppTokenUpdated         = "app-token.updated"
 	AuditOAuthClientRegistered   = "oauth.client-registered"
 	AuditOAuthApproved           = "oauth.approved"
 	AuditOAuthDenied             = "oauth.denied"

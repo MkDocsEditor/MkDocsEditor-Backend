@@ -179,7 +179,7 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 `session.revoked`, `reauth.succeeded`, `reauth.failed`, `password.changed`,
 `password.removed`, `totp.enabled`, `totp.disabled`, `recovery-codes.generated`,
 `recovery-code.used`, `passkey.added`, `passkey.renamed`, `passkey.removed`,
-`app-token.created`, `app-token.revoked`, `device-link.created`,
+`app-token.created`, `app-token.updated`, `app-token.revoked`, `device-link.created`,
 `device-link.revoked`, `device-link.redeemed`, `setup.link-created`, `setup.completed`,
 `invite.created`, `invite.revoked`, `invite.redeemed`, `access-request.created`,
 `access-request.approved`, `access-request.rejected`, `reset.created`,
@@ -942,7 +942,8 @@ give 400 `invalid-link`.
 | DELETE | `/account/sessions/{id}/` | | | 204 (the current session too: that is a logout) |
 | POST | `/account/sessions/revoke-others/` | | | `{"revoked": 3}` |
 | GET | `/account/tokens/` | | | `[app token object]` |
-| POST | `/account/tokens/` | yes | `{name, scope, expiresInDays?}` (`scope`: `read`/`write`, `expiresInDays` 1–3650 or absent for no expiry) | `{"appToken": {…}, "token": "mdp_…"}` |
+| POST | `/account/tokens/` | yes | `{name, scope, expiresInDays?, expiresAt?}` (`scope`: `read`/`write`; `expiresInDays` 1–3650, or `expiresAt` an RFC 3339 date-time at most 3650 days ahead, not both; neither for no expiry) | `{"appToken": {…}, "token": "mdp_…"}` |
+| PATCH | `/account/tokens/{id}/` | | `{name}`: renames an app token or OAuth grant. The end never changes: `expiresAt` in the body (also `null`) is 400. Audit `app-token.updated`. | the app token object |
 | DELETE | `/account/tokens/{id}/` | | | 204 |
 | GET | `/account/device-links/` | | | `[device link object]`, newest first (the last 24 hours) |
 | POST | `/account/device-links/` | yes | `{deviceName?}` | `{"deviceLink": {…}, "token": "mdd_…", "expiresAt": "…", "connectUrl": "…" or null}` |
