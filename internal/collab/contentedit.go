@@ -271,9 +271,11 @@ func (ds *docSession) commitAgentForkLocked(fork *automerge.Doc, agent Agent, me
 	ds.meta.LastChange = time.Now().UTC()
 	ds.addEditorLocked(agent.AccountID)
 	if r := ds.server.changeRecorder; r != nil {
-		r.RecordChanges(ds.meta.Path, map[string]int{agent.AccountID: 1})
 		if agent.TokenName != "" {
-			r.RecordAgent(ds.meta.Path, agent.AccountID, agent.TokenName)
+			// a commit of its own, apart from the edits of people
+			r.RecordAgentEdit(ds.meta.Path, agent.AccountID, agent.TokenName, before, after)
+		} else {
+			r.RecordChanges(ds.meta.Path, map[string]int{agent.AccountID: 1})
 		}
 	}
 	return nil

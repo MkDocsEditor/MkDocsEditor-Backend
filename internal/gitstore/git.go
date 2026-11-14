@@ -230,3 +230,83 @@ func (g *Repo) Push(remote string, branch string) error {
 	_, err := g.run(nil, args...)
 	return err
 }
+
+// ErrNoHead is returned by CommitText in a repository without commits
+var ErrNoHead = errors.New("the repository has no commits yet")
+
+// CommitText commits text as the content of one file (relative to the docs folder) on top of
+// HEAD, without touching the work tree: the committer records the exact state of a document
+// after an agent's edit, while people may already type on. The index entry of the file is
+// set to the commit, so a work tree that has the same text shows no change. It returns the
+// abbreviated hash, or "" if HEAD already has this text.
+func (g *Repo) CommitText(relPath string, text string, author Signature, coAuthors []Signature, subject string, trailers ...string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	f := path.Clean(g.prefix + relPath)
+	if f == ".." || strings.HasPrefix(f, "../") || path.IsAbs(f) || strings.ContainsAny(f, "\n\x00") {
+		return "", fmt.Errorf("%s is outside the work tree", relPath)
+	}
+	out, err := g.runIn(g.top, nil, "", "rev-parse", "--verify", "--quiet", "HEAD")
+	if err != nil {
+		return "", ErrNoHead
+	}
+	head := strings.TrimSpace(out)
+	out, err = g.runIn(g.top, nil, text, "hash-object", "-w", "--stdin")
+	if err != nil {
+		return "", err
+	}
+	blob := strings.TrimSpace(out)
+	// the blob of the file in HEAD, "missing" if it is not there
+	out, err = g.runIn(g.top, nil, "HEAD:"+f+"\n", "cat-file", "--batch-check=%(objectname)")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == blob {
+		return "", nil
+	}
+	indexEntry := "100644 " + blob + "\t" + f + "\n"
+
+	tmp, err := os.CreateTemp("", "mkdocseditor-index-")
+	if err != nil {
+		return "", err
+	}
+	index := tmp.Name()
+	_ = tmp.Close()
+	_ = os.Remove(index) // git creates it; an empty file is no valid index
+	defer func() { _ = os.Remove(index) }()
+	indexEnv := []string{"GIT_INDEX_FILE=" + index}
+	if _, err = g.runIn(g.top, indexEnv, "", "read-tree", head); err != nil {
+		return "", err
+	}
+	if _, err = g.runIn(g.top, indexEnv, indexEntry, "update-index", "--index-info"); err != nil {
+		return "", err
+	}
+	out, err = g.runIn(g.top, indexEnv, "", "write-tree")
+	if err != nil {
+		return "", err
+	}
+	tree := strings.TrimSpace(out)
+
+	messageFile, err := writeCommitMessage(subject, "", coAuthors, trailers)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.Remove(messageFile) }()
+	env := []string{
+		"GIT_AUTHOR_NAME=" + author.Name, "GIT_AUTHOR_EMAIL=" + author.Email,
+		"GIT_COMMITTER_NAME=" + g.committer.Name, "GIT_COMMITTER_EMAIL=" + g.committer.Email,
+	}
+	out, err = g.runIn(g.top, env, "", "-c", "commit.gpgsign=false", "commit-tree", tree, "-p", head, "-F", messageFile)
+	if err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(out)
+	// only if nobody moved HEAD meanwhile
+	if _, err = g.runIn(g.top, nil, "", "update-ref", "HEAD", commit, head); err != nil {
+		return "", err
+	}
+	if _, err = g.runIn(g.top, nil, indexEntry, "update-index", "--index-info"); err != nil {
+		return "", err
+	}
+	return commit[:12], nil
+}

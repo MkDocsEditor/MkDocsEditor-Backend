@@ -755,6 +755,16 @@ volume), and without commit signing or hooks.
 - A REST tree operation is authored by the user who made the request.
 - Changes made with an app token add a `Via-App-Token: <token name> (Name <email>)`
   trailer per account and token, see [content-api.md](content-api.md) section 5.
+- Changes made with an app token get commits of their own, so a commit never mixes the
+  edits of people and agents. When an agent edits a document with uncommitted human
+  changes, those are committed first, with the text right before the agent's edit. The
+  agent's edits follow in a commit of their own: consecutive edits of the same token are
+  one commit, made when the token has not edited the document for a minute
+  (`AfterIdle` if that is shorter), or before the next commit of the document. Edits of
+  people after the agent's edit are committed as usual. These commits are written from
+  the exact texts without touching the work tree; the queue survives a restart
+  (`git-snapshots.json` in the state folder). Servers with this list `history` in
+  `features` of `GET /server-info/`.
 - The committer is the backend (`git.committerName`, `git.committerEmail`).
 
 Commit message: `Update guide/setup.md` (or `Create`, `Rename … to …`, `Move … to …`,

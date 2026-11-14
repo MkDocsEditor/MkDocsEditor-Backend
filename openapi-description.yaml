@@ -2666,7 +2666,9 @@ paths:
       summary: "Revision history of a document"
       description: |
         The git commits that changed the file, newest first, following renames. Requires
-        `git.enabled`; without it the response is 404.
+        `git.enabled`; without it the response is 404. Edits made with app tokens are in
+        commits of their own. `features` of `GET /server-info/` contains `history` when
+        git is enabled on a server with summaries, agents and `format=json` diffs.
       operationId: getDocumentHistory
       tags: [ History ]
       parameters:
@@ -2753,7 +2755,8 @@ paths:
         the changes. Needs no git. `since` is `seen` (default) or a seenToken; with
         `seen` and no stored starting point, `since` is null and there are no hunks. Show the
         changes, then PUT the answer's `seenToken` to `…/seen/`, so edits that land while
-        the user reads do not count as seen.
+        the user reads do not count as seen. `features` of `GET /server-info/` contains
+        `changes`.
       operationId: getDocumentChanges
       tags: [ History ]
       parameters:

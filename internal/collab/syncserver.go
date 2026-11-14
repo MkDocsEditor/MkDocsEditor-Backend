@@ -256,6 +256,9 @@ type ChangeRecorder interface {
 	RecordChanges(relPath string, countsByUser map[string]int)
 	// RecordAgent notes that an account changed the document with the named app token
 	RecordAgent(relPath string, accountID string, tokenName string)
+	// RecordAgentEdit notes that an account changed the document with the named app token
+	// from before to after, so the edit can get a commit of its own
+	RecordAgentEdit(relPath string, accountID string, tokenName string, before string, after string)
 }
 
 // SetChangeRecorder sets the recorder of user changes. Call it before serving requests.

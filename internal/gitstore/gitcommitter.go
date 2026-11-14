@@ -17,7 +17,10 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 )
 
-const PendingFile = "git-pending.json"
+const (
+	PendingFile   = "git-pending.json"
+	SnapshotsFile = "git-snapshots.json"
+)
 
 // CommitterOptions are the commit triggers, see docs/sync-protocol.md section 10
 type CommitterOptions struct {
@@ -27,6 +30,9 @@ type CommitterOptions struct {
 	AfterIdle time.Duration
 	// MaxInterval commits a document when its oldest uncommitted change is this old
 	MaxInterval time.Duration
+	// AfterAgentIdle commits the edits of an app token when the token has not edited the
+	// document for this long (default 1 min, at most AfterIdle)
+	AfterAgentIdle time.Duration
 	// CheckInterval is how often the triggers are checked (default 15 s)
 	CheckInterval time.Duration
 	Push          bool
@@ -43,6 +49,20 @@ type pendingEdits struct {
 	LastChange  time.Time           `json:"lastChange"`
 	// leftAt is when the committer first saw the document without connections
 	leftAt time.Time
+}
+
+// snapshot is a text of a document waiting to be committed. The edits of app tokens become
+// snapshots, so they get commits of their own: the human edits before an agent edit are
+// committed with the text before it, the agent edit with the text after it. Consecutive edits
+// of the same token coalesce into one snapshot.
+type snapshot struct {
+	Text    string              `json:"text"`
+	Changes map[string]int      `json:"changes"`
+	Agents  map[string][]string `json:"agents,omitempty"`
+	// Account and Token are set for the snapshot of an app token's edits
+	Account string    `json:"account,omitempty"`
+	Token   string    `json:"token,omitempty"`
+	Updated time.Time `json:"updated"`
 }
 
 // DocumentSync is what the committer needs from the sync server
@@ -65,7 +85,11 @@ type Committer struct {
 
 	mu      sync.Mutex
 	pending map[string]*pendingEdits
-	dirty   bool
+	// snapshots are the texts to commit before the pending edits of a path, oldest first
+	snapshots map[string][]*snapshot
+	dirty     bool
+	// snapshotMu keeps the commits of the snapshots in order
+	snapshotMu sync.Mutex
 
 	stop     chan struct{}
 	done     chan struct{}
@@ -77,12 +101,19 @@ func NewCommitter(repo *Repo, authn *auth.Service, stateDir string, opts Committ
 	if opts.CheckInterval <= 0 {
 		opts.CheckInterval = 15 * time.Second
 	}
+	if opts.AfterAgentIdle <= 0 {
+		opts.AfterAgentIdle = time.Minute
+		if opts.AfterIdle > 0 {
+			opts.AfterAgentIdle = min(opts.AfterAgentIdle, opts.AfterIdle)
+		}
+	}
 	c := &Committer{
 		repo:      repo,
 		authn:     authn,
 		opts:      opts,
 		statePath: filepath.Join(stateDir, PendingFile),
 		pending:   map[string]*pendingEdits{},
+		snapshots: map[string][]*snapshot{},
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 	}
@@ -102,6 +133,16 @@ func NewCommitter(repo *Repo, authn *auth.Service, stateDir string, opts Committ
 			continue
 		}
 		e.Changes = c.migrateSubjects(e.Changes)
+	}
+	data, err = os.ReadFile(filepath.Join(stateDir, SnapshotsFile))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil {
+		if err = json.Unmarshal(data, &c.snapshots); err != nil {
+			log.Printf("Ignoring the invalid %s: %v", SnapshotsFile, err)
+			c.snapshots = map[string][]*snapshot{}
+		}
 	}
 	return c, nil
 }
@@ -150,6 +191,112 @@ func (c *Committer) RecordAgent(relPath string, accountID string, tokenName stri
 		e.Agents[accountID] = append(e.Agents[accountID], tokenName)
 		c.dirty = true
 	}
+}
+
+// RecordAgentEdit implements ChangeRecorder: an account changed a document with an app token
+// from before to after. The edit gets a commit of its own, see snapshot.
+func (c *Committer) RecordAgentEdit(relPath string, accountID string, tokenName string, before string, after string) {
+	if strings.HasPrefix(accountID, ":") {
+		return
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dirty = true
+	queue := c.snapshots[relPath]
+	if e := c.pending[relPath]; e != nil && len(e.Changes) > 0 {
+		// the human edits so far, without the agent edit
+		queue = append(queue, &snapshot{Text: before, Changes: e.Changes, Agents: e.Agents, Updated: now})
+		delete(c.pending, relPath)
+	} else if n := len(queue); n > 0 && queue[n-1].Account == accountID && queue[n-1].Token == tokenName {
+		last := queue[n-1]
+		last.Text = after
+		last.Changes[accountID]++
+		last.Updated = now
+		return
+	}
+	c.snapshots[relPath] = append(queue, &snapshot{
+		Text:    after,
+		Changes: map[string]int{accountID: 1},
+		Agents:  map[string][]string{accountID: {tokenName}},
+		Account: accountID,
+		Token:   tokenName,
+		Updated: now,
+	})
+}
+
+// commitSnapshots commits the snapshots of the given paths and everything below them. With
+// due set, only those whose last snapshot is AfterAgentIdle old; of the others, all but the
+// last one.
+func (c *Committer) commitSnapshots(now time.Time, due bool, paths ...string) {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	type job struct {
+		path  string
+		queue []*snapshot
+	}
+	var jobs []job
+	c.mu.Lock()
+	for p, queue := range c.snapshots {
+		inside := len(paths) == 0
+		for _, q := range paths {
+			inside = inside || wiki.IsInside(p, q)
+		}
+		if !inside || len(queue) == 0 {
+			continue
+		}
+		take := len(queue)
+		if due && now.Sub(queue[take-1].Updated) < c.opts.AfterAgentIdle {
+			take--
+		}
+		if take == 0 {
+			continue
+		}
+		jobs = append(jobs, job{p, queue[:take]})
+		if take == len(queue) {
+			delete(c.snapshots, p)
+		} else {
+			c.snapshots[p] = slices.Clone(queue[take:])
+		}
+		c.dirty = true
+	}
+	c.mu.Unlock()
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].path < jobs[j].path })
+
+	for _, j := range jobs {
+		for i, s := range j.queue {
+			if err := c.commitSnapshot(j.path, s); err != nil {
+				// put back the rest, before anything queued meanwhile
+				c.mu.Lock()
+				c.snapshots[j.path] = append(slices.Clone(j.queue[i:]), c.snapshots[j.path]...)
+				c.mu.Unlock()
+				break
+			}
+		}
+	}
+}
+
+// commitSnapshot commits one snapshot without touching the work tree
+func (c *Committer) commitSnapshot(relPath string, s *snapshot) error {
+	users := c.rankUsers(s.Changes)
+	if len(users) == 0 {
+		return nil
+	}
+	author := c.signature(users[0])
+	var coAuthors []Signature
+	for _, u := range users[1:] {
+		coAuthors = append(coAuthors, c.signature(u))
+	}
+	subject := "Update " + relPath
+	start := time.Now()
+	hash, err := c.repo.CommitText(relPath, s.Text, author, coAuthors, subject, c.agentTrailers(s.Agents)...)
+	metrics.GitCommitDuration.Observe(time.Since(start).Seconds())
+	if errors.Is(err, ErrNoHead) {
+		// nothing to commit on top of: the next commit of the work tree takes the edits along
+		c.restorePending(relPath, s.Changes, s.Agents)
+		return nil
+	}
+	return c.committed(subject, author, hash, err, relPath)
 }
 
 func (c *Committer) loop() {
@@ -202,6 +349,7 @@ func (c *Committer) check(now time.Time) {
 	}
 	c.mu.Unlock()
 
+	c.commitSnapshots(now, true)
 	for _, p := range due {
 		c.commitEdits(p)
 	}
@@ -269,6 +417,7 @@ func (c *Committer) commitEdits(relPath string) {
 	if c.sync != nil {
 		c.sync.FlushPath(relPath)
 	}
+	c.commitSnapshots(time.Time{}, false, relPath)
 	changes, agents := c.takePending(relPath)
 	if len(changes) == 0 {
 		return
@@ -296,6 +445,7 @@ func (c *Committer) CommitTreeChangeWithBody(user *auth.User, subject string, bo
 	if c.sync != nil {
 		c.sync.FlushAll()
 	}
+	c.commitSnapshots(time.Time{}, false, paths...)
 	changes, agents := c.takePending(paths...)
 	author := c.signature(user.ID)
 	var coAuthors []Signature
@@ -317,14 +467,22 @@ func (c *Committer) commit(paths []string, author Signature, coAuthors []Signatu
 	start := time.Now()
 	hash, err := c.repo.Commit(paths, author, coAuthors, subject, body, trailers...)
 	metrics.GitCommitDuration.Observe(time.Since(start).Seconds())
+	if err = c.committed(subject, author, hash, err, paths...); err != nil {
+		return "", err
+	}
+	return hash, nil
+}
+
+// committed counts a commit and pushes it
+func (c *Committer) committed(subject string, author Signature, hash string, err error, paths ...string) error {
 	if err != nil {
 		metrics.GitCommits.WithLabelValues(metrics.ResultError).Inc()
 		log.Printf("Unable to commit %s: %v", strings.Join(paths, ", "), err)
-		return "", err
+		return err
 	}
 	if hash == "" {
 		metrics.GitCommits.WithLabelValues(metrics.ResultEmpty).Inc()
-		return "", nil
+		return nil
 	}
 	metrics.GitCommits.WithLabelValues(metrics.ResultOK).Inc()
 	log.Printf("Committed %q by %s", subject, author)
@@ -337,7 +495,7 @@ func (c *Committer) commit(paths []string, author Signature, coAuthors []Signatu
 			metrics.GitPushes.WithLabelValues(metrics.ResultOK).Inc()
 		}
 	}
-	return hash, nil
+	return nil
 }
 
 // rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the
@@ -415,6 +573,12 @@ func (c *Committer) saveIfDirty() {
 	if err == nil {
 		err = wiki.WriteFile(c.statePath, data)
 	}
+	if err == nil {
+		data, err = json.Marshal(c.snapshots)
+	}
+	if err == nil {
+		err = wiki.WriteFile(filepath.Join(filepath.Dir(c.statePath), SnapshotsFile), data)
+	}
 	if err != nil {
 		log.Printf("Unable to save %s: %v", c.statePath, err)
 		return
@@ -430,6 +594,7 @@ func (c *Committer) Close() {
 		if c.sync != nil {
 			<-c.done
 		}
+		c.commitSnapshots(time.Time{}, false)
 		c.mu.Lock()
 		paths := make([]string, 0, len(c.pending))
 		for p := range c.pending {
@@ -460,6 +625,16 @@ func (c *Committer) PendingStats() (documents int, changes int) {
 			changes += n
 		}
 	}
+	for p, queue := range c.snapshots {
+		if c.pending[p] == nil {
+			documents++
+		}
+		for _, s := range queue {
+			for _, n := range s.Changes {
+				changes += n
+			}
+		}
+	}
 	return documents, changes
 }
 
@@ -468,10 +643,20 @@ func (c *Committer) PendingAgents(relPath string) map[string][]string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := map[string][]string{}
-	if e := c.pending[relPath]; e != nil {
-		for account, names := range e.Agents {
-			out[account] = slices.Clone(names)
+	add := func(agents map[string][]string) {
+		for account, names := range agents {
+			for _, name := range names {
+				if !slices.Contains(out[account], name) {
+					out[account] = append(out[account], name)
+				}
+			}
 		}
+	}
+	for _, s := range c.snapshots[relPath] {
+		add(s.Agents)
+	}
+	if e := c.pending[relPath]; e != nil {
+		add(e.Agents)
 	}
 	return out
 }

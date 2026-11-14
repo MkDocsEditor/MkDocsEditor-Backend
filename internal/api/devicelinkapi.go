@@ -69,6 +69,15 @@ const FeaturePageMeta = "page-meta"
 // FeatureWikiConfig means the server has GET /wiki/config/, see docs/page-meta.md
 const FeatureWikiConfig = "wiki-config"
 
+// FeatureChanges means the server has GET /document/{id}/changes/ and PUT
+// /document/{id}/seen/, see docs/sync-protocol.md section 11
+const FeatureChanges = "changes"
+
+// FeatureHistory means git is enabled and history entries have summary and agents, with
+// format=json for diffs and agent edits in commits of their own, see docs/sync-protocol.md
+// section 11
+const FeatureHistory = "history"
+
 // FeatureMovedLookup in GET /server-info/ says that the server has GET /moved/?id=…&id=…
 const FeatureMovedLookup = "moved-lookup"
 
@@ -128,7 +137,10 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 		}
 		methods = append(methods, "device-link")
 	}
-	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig, FeatureFeedRanges, FeatureQRCodes, FeatureForwardAuth}
+	features := []string{FeatureMovedLookup, FeatureJoinPresence, FeatureInstancePresence, FeatureAvatars, FeaturePins, FeatureFeed, FeaturePinOrder, FeaturePageMeta, FeatureWikiConfig, FeatureFeedRanges, FeatureQRCodes, FeatureForwardAuth, FeatureChanges}
+	if rs.git != nil {
+		features = append(features, FeatureHistory)
+	}
 	if rs.authenticator.AccessRequestsAvailable() {
 		features = append(features, FeatureAccessRequests)
 	}
