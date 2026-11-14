@@ -23,6 +23,11 @@ Dependencies point one way, top to bottom:
 | `internal/nativemem` | Limits and releases the malloc memory of Automerge (glibc only) |
 | `internal/configuration` | Configuration file |
 
+automerge-go comes from `third_party/automerge-go` (a `replace` in `go.mod`): a copy whose prebuilt
+libraries have their LLVM bitcode stripped, because newer Go releases refuse it. Do not upgrade
+Automerge: the backend stays on core 0.5.0 on purpose, Automerge 3 was a lot slower. Details in
+`third_party/automerge-go/README.md`.
+
 `collab`, `gitstore` and `references` do not know about HTTP or echo. They reach each other through
 small interfaces (`references.LiveTexts`, `gitstore.DocumentSync`), so a new dependency that points
 upward means the code is in the wrong package.

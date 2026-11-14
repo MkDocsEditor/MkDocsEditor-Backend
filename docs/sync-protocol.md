@@ -51,7 +51,7 @@ disk.
 
 | Component | Library | Automerge core |
 |---|---|---|
-| Backend | `github.com/automerge/automerge-go` v0.0.0-20241030180337-6fb4f2d08244 (latest, no tagged release) | automerge-rs 0.5.0 |
+| Backend | `github.com/automerge/automerge-go` v0.0.0-20241030180337-6fb4f2d08244 (latest, no tagged release), patched in `third_party/automerge-go` | automerge-rs 0.5.0 |
 | Web | `@automerge/automerge` 3.5.0 (npm) | current |
 | Android | `org.automerge:automerge` (automerge-java) 0.0.9 | current |
 
@@ -59,6 +59,13 @@ All of them speak the same binary document format and sync protocol (Automerge 2
 columnar format, sync message type `0x42`). Interop between the backend and
 `@automerge/automerge` 3.5.0 is covered by a test in CI: loading the server document,
 syncing in both directions, and non-ASCII text.
+
+The backend stays on Automerge core 0.5.0 (Automerge 2) on purpose: Automerge 3 was a lot
+slower in the backend. automerge-go has had no change since October 2024. The backend uses a
+copy in `third_party/automerge-go` (a `replace` in `go.mod`) whose prebuilt libraries have
+their LLVM bitcode removed, because Go 1.27.4 and later refuse to link them otherwise. The
+backend binary is the same with and without the bitcode. See
+[third_party/automerge-go/README.md](../third_party/automerge-go/README.md).
 
 Text indices differ between libraries: automerge-go counts Unicode code points, JS counts
 UTF-16 code units. Indices never go over the wire. Positions that are shared (cursors)

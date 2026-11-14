@@ -25,3 +25,5 @@ jobs:
         uses: codespell-project/actions-codespell@v2
         with:
           ignore_words_file: .codespellignore
+          # unchanged sources of automerge-go, see third_party/automerge-go/README.md
+          skip: ./third_party

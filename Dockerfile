@@ -2,7 +2,7 @@
 
 # Build stage. automerge-go links a prebuilt Rust static library through cgo,
 # so the binary is built with cgo and linked statically against glibc.
-FROM golang:1.27.3-trixie AS build
+FROM golang:1.27.4-trixie AS build
 
 WORKDIR /src
 
@@ -11,6 +11,8 @@ ENV CGO_ENABLED=1
 ENV GOFLAGS="-trimpath -tags=netgo,osusergo"
 
 COPY go.mod go.sum ./
+# the patched automerge-go of the replace in go.mod, see third_party/automerge-go/README.md
+COPY third_party ./third_party
 RUN go mod download
 
 # Compile the dependencies in a layer of their own. The final build runs for every commit because
