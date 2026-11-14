@@ -289,3 +289,54 @@ func SectionLines(text string, heading string, occurrence int) (int, int, bool) 
 func headingLevel(line string) int {
 	return strings.Count(strings.SplitN(strings.TrimLeft(line, " "), " ", 2)[0], "#")
 }
+
+// ReplaceSection replaces a section of current (see SectionLines) by the same section of old.
+// The blank lines between the section and the next one stay as they are in current, and so
+// does the end of current: the section in old may have been the last one, with or without a
+// line end. missing is "old" or "current" when that text has no such section.
+func ReplaceSection(current, old string, heading string, occurrence int) (string, string) {
+	start, end, ok := SectionLines(old, heading, occurrence)
+	if !ok {
+		return "", "old"
+	}
+	section := keepLines(old)[start:end]
+	start, end, ok = SectionLines(current, heading, occurrence)
+	if !ok {
+		return "", "current"
+	}
+	lines := keepLines(current)
+	isBlank := func(l string) bool { return strings.TrimSpace(l) == "" }
+	for len(section) > 1 && isBlank(section[len(section)-1]) {
+		section = section[:len(section)-1]
+	}
+	blankEnd := end
+	for blankEnd > start+1 && isBlank(lines[blankEnd-1]) {
+		blankEnd--
+	}
+	section = slices.Clone(section)
+	last := len(section) - 1
+	section[last] = strings.TrimSuffix(section[last], "\n")
+	// a line end unless the section ends current without one
+	if end < len(lines) || blankEnd < end || strings.HasSuffix(current, "\n") {
+		section[last] += "\n"
+	}
+	var b strings.Builder
+	for _, part := range [][]string{lines[:start], section, lines[blankEnd:end], lines[end:]} {
+		for _, l := range part {
+			b.WriteString(l)
+		}
+	}
+	return b.String(), ""
+}
+
+// keepLines splits a text after each line end
+func keepLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	lines := strings.SplitAfter(text, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
