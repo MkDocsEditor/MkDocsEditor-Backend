@@ -149,11 +149,15 @@ The pinned documents and the change feed of the dashboard are specified in
 mkdocs.yml in [docs/page-meta.md](docs/page-meta.md), QR codes that open a page in
 [docs/qr.md](docs/qr.md). Scripts and agents edit and search pages over REST as described in
 [docs/content-api.md](docs/content-api.md). LLM agents such as Claude Code connect to the MCP
-server at `/api/mcp`, see [docs/mcp.md](docs/mcp.md).
+server at `/api/mcp`, see [docs/mcp.md](docs/mcp.md); they log in with OAuth, see
+[docs/oauth.md](docs/oauth.md).
 
 Every route is served under the prefix `/api` (`/api/server-info/`, `/api/document/{id}/ws/`),
 so the web client, the MkDocs site and the API can share one host. Point `server.backendUrl`
-at the public URL including `/api`.
+at the public URL including `/api`. The only exception is the OAuth metadata under
+`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server` and
+`/.well-known/openid-configuration`: the backend answers it at the root as well, where MCP
+clients look for it. Route these paths to the backend too.
 
 The REST API is described in the [OpenAPI file](openapi-description.yaml), which you can
 [browse in Swagger Editor](https://editor-next.swagger.io/?url=https://raw.githubusercontent.com/MkDocsEditor/MkDocsEditor-Backend/master/openapi-description.yaml).

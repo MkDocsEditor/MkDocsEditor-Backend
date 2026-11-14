@@ -197,6 +197,28 @@ CREATE TABLE avatars (
 ALTER TABLE actor_bindings ADD COLUMN app_token_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE actor_bindings ADD COLUMN app_token_name TEXT NOT NULL DEFAULT '';
 `,
+	// 10: OAuth clients and grants, see docs/oauth.md. A grant is an app token with an
+	// oauth_client_id; its access and refresh tokens are in oauth_tokens.
+	`
+CREATE TABLE oauth_clients (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL,
+	redirect_uris TEXT NOT NULL,
+	created_at    INTEGER NOT NULL,
+	last_used_at  INTEGER NOT NULL DEFAULT 0
+);
+ALTER TABLE app_tokens ADD COLUMN oauth_client_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE app_tokens ADD COLUMN resource TEXT NOT NULL DEFAULT '';
+CREATE TABLE oauth_tokens (
+	token_hash   BLOB PRIMARY KEY,
+	app_token_id TEXT NOT NULL REFERENCES app_tokens(id) ON DELETE CASCADE,
+	kind         TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+	created_at   INTEGER NOT NULL,
+	expires_at   INTEGER NOT NULL,
+	used_at      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX oauth_tokens_app_token ON oauth_tokens(app_token_id);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

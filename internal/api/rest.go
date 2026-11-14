@@ -221,6 +221,7 @@ func (rs *RestService) createRestService() *echo.Echo {
 	rs.registerAccountRoutes(echoRest)
 	rs.registerAdminRoutes(echoRest)
 	rs.registerContentRoutes(echoRest)
+	rs.registerOAuthRoutes(echoRest)
 	rs.knownRoutes = knownRoutesOf(echoRest)
 
 	return echoRest
@@ -740,10 +741,14 @@ func (rs *RestService) handleWebsocket(c *echo.Context) error {
 }
 
 // stripAPIPrefix serves the routes under APIPrefix: it removes the prefix before routing, and
-// answers every other path with 404
+// answers every other path with 404. The OAuth metadata is also served at the root, where
+// clients look for it.
 func stripAPIPrefix(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		req := c.Request()
+		if isRootWellKnownPath(req.URL.Path) {
+			return next(c)
+		}
 		p, ok := cutAPIPrefix(req.URL.Path)
 		if !ok {
 			c.Response().Header().Set(echo.HeaderCacheControl, "no-store")

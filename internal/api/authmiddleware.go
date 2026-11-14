@@ -197,6 +197,10 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			return next(c)
 		}
 
+		if isOAuthPublicPath(path) {
+			// these authenticate the client (PKCE, refresh token), not a user
+			return next(c)
+		}
 		authorization := req.Header.Get(echo.HeaderAuthorization)
 		if isForeignBasicAuth(req) {
 			// the Basic auth of another app on the same host, such as a protected MkDocs site
@@ -271,7 +275,7 @@ func (rs *RestService) authenticateHeader(c *echo.Context, authorization string)
 			c.Set(contextKeyAuthMethod, AuthMethodSession)
 			return nil
 		}
-		if auth.ValidAppToken(value) {
+		if auth.ValidAppToken(value) || auth.ValidOAuthAccessToken(value) {
 			return rs.authenticateAppToken(c, value, "")
 		}
 		return responded(rs.unauthorized(c))
@@ -299,7 +303,9 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	isAdmin := strings.HasPrefix(path, "/admin/")
 	// push subscriptions end with the session that made them
 	isPush := strings.HasPrefix(path, "/push/")
-	needsSession := isAccount || isAdmin || isPush || path == "/auth/logout/" || strings.HasPrefix(path, "/auth/reauth/")
+	// the decision on an OAuth request is the user's, never an app's
+	isOAuthConsent := strings.HasPrefix(path, "/oauth/requests/")
+	needsSession := isAccount || isAdmin || isPush || isOAuthConsent || path == "/auth/logout/" || strings.HasPrefix(path, "/auth/reauth/")
 
 	if needsSession && method != AuthMethodSession {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "this endpoint needs a session (log in with a password or passkey)", nil))
@@ -312,11 +318,15 @@ func (rs *RestService) authorize(c *echo.Context, user *auth.User) error {
 	}
 	// readers may change their own pins and push subscriptions, the handler checks the family pins
 	isPins := strings.HasPrefix(path, "/pins/")
+	if t := AppTokenFromContext(c); t != nil && t.OAuthClientID != "" && path != EndpointPathMCP {
+		// OAuth grants are bound to their resource, the MCP endpoint (RFC 8707)
+		return responded(apiError(c, http.StatusForbidden, CodeForbidden, "this OAuth token is only valid for the MCP endpoint", nil))
+	}
 	// MCP requests are all POST: readers and read tokens only get the read tools
 	if path == EndpointPathMCP {
 		return nil
 	}
-	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isPush && !strings.HasPrefix(path, "/auth/") {
+	if !user.CanWrite() && !isReadOnlyMethod(req.Method) && !isAccount && !isPins && !isPush && !isOAuthConsent && !strings.HasPrefix(path, "/auth/") {
 		return responded(apiError(c, http.StatusForbidden, CodeForbidden,
 			"user '"+user.Username+"' has the role '"+user.Role+"' and may not change anything", nil))
 	}
@@ -449,6 +459,9 @@ func (rs *RestService) clearSessionCookie(c *echo.Context) {
 
 // unauthorized writes a 401 response
 func (rs *RestService) unauthorized(c *echo.Context) error {
+	if c.Request().URL.Path == EndpointPathMCP && rs.authenticator.Enabled() {
+		c.Response().Header().Set(echo.HeaderWWWAuthenticate, rs.mcpChallenge(c))
+	}
 	return apiError(c, http.StatusUnauthorized, CodeUnauthenticated, "missing or invalid credentials", nil)
 }
 

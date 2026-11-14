@@ -9,9 +9,22 @@ The tools are thin wrappers over the content API ([content-api.md](content-api.m
 
 ## 1. Connecting
 
+With OAuth (see [oauth.md](oauth.md)), add the server without a token:
+
+```sh
+claude mcp add --transport http wiki https://wiki.markusressel.de/api/mcp
+```
+
+1. In Claude Code, run `/mcp` and choose the server to log in.
+2. The browser opens the web app. Approve the request there, with `write` to let the agent
+   edit or `read` to let it only read.
+3. The grant appears in Settings, App tokens, with the client's name.
+
+Without OAuth, use an app token:
+
 1. Create an app token in the web app: Settings, App tokens. Use the scope `write` to let
    the agent edit, `read` to let it only read.
-2. Add the server to the client. For Claude Code:
+2. Add the server with the token:
 
    ```sh
    claude mcp add --transport http wiki https://wiki.markusressel.de/api/mcp --header "Authorization: Bearer mdp_…"
@@ -19,8 +32,8 @@ The tools are thin wrappers over the content API ([content-api.md](content-api.m
 
    Other clients take the URL `https://<host>/api/mcp` and the same header.
 
-Revoking the token disconnects the agent. A password change revokes all app tokens of the
-account.
+Revoking the token or grant disconnects the agent. A password change revokes all app tokens
+and grants of the account.
 
 ## 2. Transport and authentication
 
@@ -28,9 +41,13 @@ account.
   (`github.com/modelcontextprotocol/go-sdk`), up to protocol revision 2026-07-28.
 - The server keeps no sessions: every request is a `POST` with a JSON-RPC message, the
   answer is JSON, and there is no `Mcp-Session-Id`. `GET` and `DELETE` answer `405`.
-- Every request needs an `Authorization` header: an app token (`Bearer mdp_…`), or a session
-  token (`Bearer mds_…`). Without one the answer is `401`. The session cookie is not
-  accepted, so a web page cannot call the server in the name of a signed-in user.
+- Every request needs an `Authorization` header. It can hold:
+  - an OAuth access token (`Bearer mdo_…`, [oauth.md](oauth.md))
+  - an app token (`Bearer mdp_…`)
+  - a session token (`Bearer mds_…`)
+- Without a header the answer is `401`, with `WWW-Authenticate` pointing to the OAuth
+  metadata. The session cookie is not accepted, so a web page cannot call the server in the
+  name of a signed-in user.
 - Readers and app tokens with the scope `read` get only the read tools.
 
 ## 3. Tools

@@ -62,6 +62,8 @@ tags:
     description: "QR code keys of pages, see docs/qr.md"
   - name: MCP
     description: "Model Context Protocol server for LLM agents, see docs/mcp.md"
+  - name: OAuth
+    description: "OAuth 2.1 authorization of MCP clients, see docs/oauth.md"
 
 paths:
   /alive/:
@@ -1897,7 +1899,10 @@ paths:
         The Model Context Protocol server for LLM agents: JSON-RPC messages of the MCP
         streamable HTTP transport, without sessions (no `Mcp-Session-Id`). Requests need an
         `Authorization` header, usually `Bearer mdp_…`; the session cookie is not accepted.
-        Readers and app tokens with the scope `read` get only the read tools. See docs/mcp.md.
+        Readers and app tokens with the scope `read` get only the read tools. OAuth access tokens
+        (`mdo_…`, docs/oauth.md) work here and nowhere else. A `401` carries
+        `WWW-Authenticate: Bearer resource_metadata="<backendUrl>/.well-known/oauth-protected-resource/mcp"`.
+        See docs/mcp.md.
       operationId: postMCP
       tags: [ MCP ]
       requestBody:
@@ -1938,6 +1943,319 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "405":
           description: "Not supported"
+
+  /.well-known/oauth-protected-resource/:
+    get:
+      summary: "Protected resource metadata of the MCP endpoint (RFC 9728)"
+      description: |
+        Public. Also served at the root of the host (outside `/api`), where MCP clients look
+        first: `/.well-known/oauth-protected-resource` and
+        `/.well-known/oauth-protected-resource/api/mcp`. 404 when authentication is disabled.
+      operationId: getProtectedResourceMetadata
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+        "404":
+          $ref: "#/components/responses/Error"
+  /.well-known/oauth-protected-resource/mcp/:
+    get:
+      summary: "Protected resource metadata (the URL of WWW-Authenticate)"
+      description: "Same as `/.well-known/oauth-protected-resource/`."
+      operationId: getProtectedResourceMetadataMCP
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+  /.well-known/oauth-protected-resource/api/mcp/:
+    get:
+      summary: "Protected resource metadata (RFC 9728 location of <origin>/api/mcp)"
+      description: "Same as `/.well-known/oauth-protected-resource/`, meant for the root of the host."
+      operationId: getProtectedResourceMetadataRoot
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+  /.well-known/oauth-authorization-server/:
+    get:
+      summary: "Authorization server metadata (RFC 8414)"
+      description: |
+        Public. The issuer is the backend URL (`server.backendUrl`, else `<origin>/api`). Also
+        served at the root of the host, as `/.well-known/oauth-authorization-server`,
+        `/.well-known/oauth-authorization-server/api`, `/.well-known/openid-configuration` and
+        `/.well-known/openid-configuration/api`.
+      operationId: getAuthServerMetadata
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthServerMetadata"
+        "404":
+          $ref: "#/components/responses/Error"
+  /.well-known/oauth-authorization-server/api/:
+    get:
+      summary: "Authorization server metadata (RFC 8414 location of the issuer <origin>/api)"
+      description: "Same as `/.well-known/oauth-authorization-server/`, meant for the root of the host."
+      operationId: getAuthServerMetadataRoot
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthServerMetadata"
+  /.well-known/openid-configuration/:
+    get:
+      summary: "Authorization server metadata (OpenID Connect location)"
+      description: "Same as `/.well-known/oauth-authorization-server/`; there is no OpenID Connect."
+      operationId: getOpenIDConfiguration
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthServerMetadata"
+  /.well-known/openid-configuration/api/:
+    get:
+      summary: "Authorization server metadata (OpenID Connect location of the issuer <origin>/api)"
+      description: "Same as `/.well-known/oauth-authorization-server/`, meant for the root of the host."
+      operationId: getOpenIDConfigurationRoot
+      tags: [ OAuth ]
+      security: [ ]
+      responses:
+        "200":
+          description: "The metadata"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthServerMetadata"
+
+  /oauth/register/:
+    post:
+      summary: "Register a client (RFC 7591)"
+      description: |
+        Public, rate limited per address. Every client is public (`token_endpoint_auth_method`
+        `none`) and uses PKCE. Redirect URIs are https URLs, http URLs of `127.0.0.1`, `[::1]`
+        or `localhost` (any port matches later, RFC 8252), or private-use schemes of native
+        apps; never `javascript:`, `data:` and the like, no fragments. Clients that never get a
+        token are deleted after 24 hours.
+      operationId: oauthRegister
+      tags: [ OAuth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OAuthClientMetadata"
+      responses:
+        "201":
+          description: "The registered client"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthClient"
+        "400":
+          description: "`invalid_redirect_uri` or `invalid_client_metadata`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "429":
+          $ref: "#/components/responses/Error"
+  /oauth/authorize/:
+    get:
+      summary: "Start an authorization (browser)"
+      description: |
+        Public. Checks the request and redirects (302) the browser to the consent page of the
+        web client, `<clientUrl>/connect/authorize?request=<id>`; the request waits there 10
+        minutes. Requires `response_type=code`, a registered `redirect_uri` and PKCE with
+        `code_challenge_method=S256`. `scope` is `read` or `write` (also `read write`;
+        default write), `resource` must be the MCP endpoint if given. An unknown client or
+        redirect URI is a plain `400` page; other errors redirect to the client with `error`
+        and `state`.
+      operationId: oauthAuthorize
+      tags: [ OAuth ]
+      security: [ ]
+      parameters:
+        - { name: response_type, in: query, required: true, schema: { type: string, enum: [ code ] } }
+        - { name: client_id, in: query, required: true, schema: { type: string } }
+        - { name: redirect_uri, in: query, required: true, schema: { type: string } }
+        - { name: code_challenge, in: query, required: true, schema: { type: string } }
+        - { name: code_challenge_method, in: query, required: true, schema: { type: string, enum: [ S256 ] } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+      responses:
+        "302":
+          description: "To the consent page, or back to the client with an error"
+        "400":
+          description: "Unknown client or redirect URI (text/plain)"
+  /oauth/token/:
+    post:
+      summary: "Token endpoint"
+      description: |
+        Public, form-encoded. `authorization_code` (with `code`, `redirect_uri`, `client_id`,
+        `code_verifier`, optional `resource`) or `refresh_token` (with `refresh_token`,
+        `client_id`, optional `scope=read` to lower it). Access tokens (`mdo_…`) last an hour
+        and only work at `/mcp`; refresh tokens (`mdr_…`) last 30 days and rotate. A code
+        works once and a refresh token too: using either again revokes the grant.
+      operationId: oauthToken
+      tags: [ OAuth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [ grant_type ]
+              properties:
+                grant_type: { type: string, enum: [ authorization_code, refresh_token ] }
+                code: { type: string }
+                redirect_uri: { type: string }
+                client_id: { type: string }
+                code_verifier: { type: string }
+                refresh_token: { type: string }
+                scope: { type: string }
+                resource: { type: string }
+      responses:
+        "200":
+          description: "New tokens"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthTokenResponse"
+        "400":
+          description: "`invalid_grant`, `invalid_request`, `invalid_scope`, `invalid_target`, `unsupported_grant_type`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: "`invalid_client`: no client_id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "429":
+          $ref: "#/components/responses/Error"
+  /oauth/revoke/:
+    post:
+      summary: "Revoke a token (RFC 7009)"
+      description: "Public, form-encoded `token`: an access or refresh token. Ends the whole grant. Unknown tokens are no error."
+      operationId: oauthRevoke
+      tags: [ OAuth ]
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [ token ]
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string }
+      responses:
+        "200":
+          description: "Revoked, or unknown"
+  /oauth/requests/{id}/:
+    get:
+      summary: "A pending authorization request (consent page)"
+      description: "Sessions only. 404 for unknown, decided and expired requests."
+      operationId: getOAuthRequest
+      tags: [ OAuth ]
+      parameters:
+        - { name: id, in: path, required: true, description: "Id of the request (from `?request=` of the consent page)", schema: { type: string } }
+      responses:
+        "200":
+          description: "The request"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/Error"
+  /oauth/requests/{id}/approve/:
+    post:
+      summary: "Approve a request"
+      description: |
+        Sessions only, with a recent login like creating an app token (`403 reauth-required`,
+        then `POST /auth/reauth/`). The body may lower the scope to `read`; readers always get
+        `read`. The answer is where the browser goes next: the client's redirect URI with
+        `code` and `state`.
+      operationId: approveOAuthRequest
+      tags: [ OAuth ]
+      parameters:
+        - { name: id, in: path, required: true, description: "Id of the request (from `?request=` of the consent page)", schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OAuthDecisionRequest"
+      responses:
+        "200":
+          description: "Approved"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthDecision"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/Error"
+  /oauth/requests/{id}/deny/:
+    post:
+      summary: "Deny a request"
+      description: "Sessions only. The answer is the client's redirect URI with `error=access_denied` and `state`."
+      operationId: denyOAuthRequest
+      tags: [ OAuth ]
+      parameters:
+        - { name: id, in: path, required: true, description: "Id of the request (from `?request=` of the consent page)", schema: { type: string } }
+      responses:
+        "200":
+          description: "Denied"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthDecision"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/Error"
 
   /mkdocs/config/:
     get:
@@ -4509,6 +4827,138 @@ components:
           type: string
           format: date-time
           nullable: true
+        oauthClientId:
+          type: string
+          description: "The OAuth client of a grant (docs/oauth.md); absent for tokens made by hand"
+        resource:
+          type: string
+          description: "The only resource an OAuth grant may use (the MCP endpoint)"
+
+    ProtectedResourceMetadata:
+      type: object
+      required: [ resource, authorization_servers, scopes_supported, bearer_methods_supported ]
+      properties:
+        resource:
+          type: string
+          description: "The MCP endpoint, `<backendUrl>/mcp`"
+        authorization_servers:
+          type: array
+          items: { type: string }
+        scopes_supported:
+          type: array
+          items: { type: string }
+        bearer_methods_supported:
+          type: array
+          items: { type: string }
+        resource_name:
+          type: string
+
+    AuthServerMetadata:
+      type: object
+      required: [ issuer, authorization_endpoint, token_endpoint, registration_endpoint, code_challenge_methods_supported ]
+      properties:
+        issuer: { type: string }
+        authorization_endpoint: { type: string }
+        token_endpoint: { type: string }
+        registration_endpoint: { type: string }
+        revocation_endpoint: { type: string }
+        scopes_supported: { type: array, items: { type: string } }
+        response_types_supported: { type: array, items: { type: string } }
+        response_modes_supported: { type: array, items: { type: string } }
+        grant_types_supported: { type: array, items: { type: string } }
+        token_endpoint_auth_methods_supported: { type: array, items: { type: string } }
+        revocation_endpoint_auth_methods_supported: { type: array, items: { type: string } }
+        code_challenge_methods_supported: { type: array, items: { type: string } }
+        client_id_metadata_document_supported:
+          type: boolean
+          description: "Always false: clients register (RFC 7591)"
+
+    OAuthClientMetadata:
+      type: object
+      required: [ redirect_uris ]
+      properties:
+        redirect_uris:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string }
+        client_name:
+          type: string
+          maxLength: 100
+          description: "The name of the app token of the grant (default `MCP client`)"
+        grant_types:
+          type: array
+          items: { type: string, enum: [ authorization_code, refresh_token ] }
+        response_types:
+          type: array
+          items: { type: string, enum: [ code ] }
+
+    OAuthClient:
+      type: object
+      required: [ client_id, client_id_issued_at, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method ]
+      properties:
+        client_id: { type: string }
+        client_id_issued_at: { type: integer, format: int64 }
+        client_name: { type: string }
+        redirect_uris: { type: array, items: { type: string } }
+        grant_types: { type: array, items: { type: string } }
+        response_types: { type: array, items: { type: string } }
+        token_endpoint_auth_method: { type: string, enum: [ none ] }
+        scope: { type: string }
+
+    OAuthTokenResponse:
+      type: object
+      required: [ access_token, token_type, expires_in, refresh_token, scope ]
+      properties:
+        access_token: { type: string, description: "`mdo_…`, valid for an hour at /mcp only" }
+        token_type: { type: string, enum: [ Bearer ] }
+        expires_in: { type: integer }
+        refresh_token: { type: string, description: "`mdr_…`, valid for 30 days, rotates" }
+        scope: { type: string, enum: [ read, read write ] }
+
+    OAuthError:
+      type: object
+      required: [ error ]
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+
+    OAuthRequest:
+      type: object
+      required: [ id, clientId, clientName, redirectUri, scope, allowedScopes, resource, expiresAt ]
+      properties:
+        id: { type: string }
+        clientId: { type: string }
+        clientName:
+          type: string
+          description: "Chosen by the client itself: show it as a claim, together with the redirect URI"
+        redirectUri: { type: string }
+        scope:
+          type: string
+          enum: [ read, write ]
+          description: "The requested scope"
+        allowedScopes:
+          type: array
+          items: { type: string, enum: [ read, write ] }
+          description: "What the user may grant: readers only read"
+        resource: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    OAuthDecisionRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [ read, write ]
+          description: "Absent: the requested scope. `read` lowers it."
+
+    OAuthDecision:
+      type: object
+      required: [ redirectUrl ]
+      properties:
+        redirectUrl:
+          type: string
+          description: "Send the browser there (location.assign)"
 
     AppTokenRequest:
       type: object

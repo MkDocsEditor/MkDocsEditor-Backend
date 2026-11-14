@@ -95,13 +95,11 @@ func (rs *RestService) backendURL(c *echo.Context) string {
 	return rs.ownOrigin(c) + APIPrefix
 }
 
-// GET /server-info/
-func (rs *RestService) serverInfo(c *echo.Context) error {
-	srv := rs.server
-	wikiURL := strings.TrimRight(srv.WikiURL, "/")
-	clientURL := rs.authenticator.ClientURL()
-	name := strings.TrimSpace(srv.InstanceName)
-	for _, candidate := range []string{hostOf(wikiURL), hostOf(clientURL)} {
+// instanceName is server.instanceName, else the host of the wiki, of the web client or of the
+// request
+func (rs *RestService) instanceName(c *echo.Context) string {
+	name := strings.TrimSpace(rs.server.InstanceName)
+	for _, candidate := range []string{hostOf(strings.TrimRight(rs.server.WikiURL, "/")), hostOf(rs.authenticator.ClientURL())} {
 		if name == "" {
 			name = candidate
 		}
@@ -112,6 +110,15 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 			name = h
 		}
 	}
+	return name
+}
+
+// GET /server-info/
+func (rs *RestService) serverInfo(c *echo.Context) error {
+	srv := rs.server
+	wikiURL := strings.TrimRight(srv.WikiURL, "/")
+	clientURL := rs.authenticator.ClientURL()
+	name := rs.instanceName(c)
 	enabled := rs.authenticator.Enabled()
 	methods := []string{}
 	if enabled {
@@ -127,6 +134,9 @@ func (rs *RestService) serverInfo(c *echo.Context) error {
 	}
 	if rs.push != nil {
 		features = append(features, FeaturePush)
+	}
+	if enabled {
+		features = append(features, FeatureOAuth)
 	}
 	return c.JSONPretty(http.StatusOK, &ServerInfoResponse{
 		Name:            name,
