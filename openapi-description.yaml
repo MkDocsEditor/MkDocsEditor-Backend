@@ -2964,6 +2964,42 @@ paths:
     parameters:
       - $ref: "#/components/parameters/documentId"
       - $ref: "#/components/parameters/revision"
+    get:
+      summary: "Check whether the change of one commit can be reverted"
+      description: |
+        Runs the check of the revert on the live text, uncommitted edits included, and
+        changes nothing. `possible: false` comes with the `code` and `details` the `409` of
+        POST would have now; the answer may be stale once others edit, so POST can still
+        answer `409`. `400` for the commit that created the file, `404` for an unknown
+        revision. Readers may ask too. `features` of `GET /server-info/` contains
+        `revert-check`.
+      operationId: checkDocumentRevert
+      tags: [ History ]
+      responses:
+        "200":
+          description: "Whether a revert would work now"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ possible ]
+                properties:
+                  possible:
+                    type: boolean
+                  code:
+                    type: string
+                    enum: [ nothing-to-revert, revert-conflict ]
+                    description: "Only when not possible"
+                  details:
+                    type: object
+                    description: "Only for revert-conflict: `conflicts` and `headings` as in the 409 of POST"
+                    additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       summary: "Revert the change of one commit"
       description: |
