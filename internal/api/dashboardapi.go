@@ -268,8 +268,13 @@ func (rs *RestService) relOf(absPath string) string {
 
 // itemCreated adds a created document or section to the feed
 func (rs *RestService) itemCreated(c *echo.Context, itemType string, absPath string) {
+	rs.itemCreatedBy(UserFromContext(c).ID, itemType, absPath)
+}
+
+// itemCreatedBy adds a new document or section of an account to the feed
+func (rs *RestService) itemCreatedBy(accountID string, itemType string, absPath string) {
 	if rel := rs.relOf(absPath); rel != "" {
-		rs.sync.Activity().RecordItem(activity.KindCreated, itemType, rel, "", UserFromContext(c).ID)
+		rs.sync.Activity().RecordItem(activity.KindCreated, itemType, rel, "", accountID)
 	}
 }
 

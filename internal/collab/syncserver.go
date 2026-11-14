@@ -55,7 +55,9 @@ type SyncServer struct {
 	HeartbeatTimeout time.Duration
 	// GhostLifetime is how long the cursor of a user stays after they left
 	GhostLifetime time.Duration
-	HelloTimeout  time.Duration
+	// AgentPresenceLifetime is how long an agent stays present after its last change
+	AgentPresenceLifetime time.Duration
+	HelloTimeout          time.Duration
 
 	// OnFileWritten is called (with the session lock held) after the server wrote a document file
 	OnFileWritten func(relPath string)
@@ -136,24 +138,25 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 			WriteBufferSize: 4096,
 			CheckOrigin:     checkOrigin(allowedOrigins),
 		},
-		authorshipJobs:   map[string]*authorshipJob{},
-		authorshipSlots:  make(chan struct{}, authorshipParallelJobs),
-		FlushDelay:       2 * time.Second,
-		HeartbeatPeriod:  5 * time.Second,
-		HeartbeatTimeout: 15 * time.Second,
-		GhostLifetime:    defaultGhostLifetime,
-		HelloTimeout:     10 * time.Second,
-		sessions:         map[string]*docSession{},
-		treeChanges:      make(chan struct{}, 1),
-		stop:             make(chan struct{}),
-		workerDone:       make(chan struct{}),
-		eventConns:       map[*wsConn]struct{}{},
-		treeEvents:       make(chan struct{}, 1),
-		accessRequests:   make(chan struct{}, 1),
-		lastPending:      -1,
-		onlineChanges:    make(chan struct{}, 1),
-		feedChanges:      make(chan struct{}, 1),
-		eventsDone:       make(chan struct{}),
+		authorshipJobs:        map[string]*authorshipJob{},
+		authorshipSlots:       make(chan struct{}, authorshipParallelJobs),
+		FlushDelay:            2 * time.Second,
+		HeartbeatPeriod:       5 * time.Second,
+		HeartbeatTimeout:      15 * time.Second,
+		GhostLifetime:         defaultGhostLifetime,
+		AgentPresenceLifetime: defaultAgentPresenceLifetime,
+		HelloTimeout:          10 * time.Second,
+		sessions:              map[string]*docSession{},
+		treeChanges:           make(chan struct{}, 1),
+		stop:                  make(chan struct{}),
+		workerDone:            make(chan struct{}),
+		eventConns:            map[*wsConn]struct{}{},
+		treeEvents:            make(chan struct{}, 1),
+		accessRequests:        make(chan struct{}, 1),
+		lastPending:           -1,
+		onlineChanges:         make(chan struct{}, 1),
+		feedChanges:           make(chan struct{}, 1),
+		eventsDone:            make(chan struct{}),
 	}
 	treeManager.AddTreeChangeListener(func(_, _ *wiki.Section) {
 		metrics.TreeRebuilds.Inc()
@@ -1076,6 +1079,7 @@ func (c *wsConn) attachLocked(session *docSession) error {
 	for other := range session.conns {
 		peers = append(peers, other.presenceLocked())
 	}
+	peers = append(peers, session.agentPeersLocked()...)
 	c.send(&PresenceSnapshotMessage{Type: MsgPresenceSnapshot, DocumentID: session.docID, Peers: peers, LastPositions: session.lastPositionsLocked(), Ghosts: session.ghostsLocked(now)})
 	session.conns[c] = struct{}{}
 	session.announceActorLocked(c.actorID, c.user.ID, c)

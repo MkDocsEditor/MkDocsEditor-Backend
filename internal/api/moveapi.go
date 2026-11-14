@@ -94,12 +94,17 @@ func (rs *RestService) renameViaMove(c *echo.Context, itemType string, name stri
 
 // performMove runs a move and, unless it is a dry run, commits and audits it
 func (rs *RestService) performMove(c *echo.Context, req *collab.MoveRequest) (*collab.MoveResult, error) {
-	result, completed, err := rs.sync.Move(req, UserFromContext(c))
+	return rs.performMoveAs(UserFromContext(c), requestInfo(c), req)
+}
+
+// performMoveAs runs a move of a user and, unless it is a dry run, commits and audits it
+func (rs *RestService) performMoveAs(user *auth.User, info auth.RequestInfo, req *collab.MoveRequest) (*collab.MoveResult, error) {
+	result, completed, err := rs.sync.Move(req, user)
 	if err != nil || completed == nil {
 		return result, err
 	}
 	result.Commit = rs.commitMove(completed, len(result.Config) > 0)
-	rs.auditMove(c, completed, result)
+	rs.auditMove(info, completed, result)
 	rs.itemMoved(completed)
 	return result, nil
 }
@@ -138,7 +143,7 @@ func (rs *RestService) commitMove(m *collab.CompletedMove, configChanged bool) s
 }
 
 // auditMove writes the audit log entry of a move
-func (rs *RestService) auditMove(c *echo.Context, m *collab.CompletedMove, result *collab.MoveResult) {
+func (rs *RestService) auditMove(info auth.RequestInfo, m *collab.CompletedMove, result *collab.MoveResult) {
 	eventType := auth.AuditItemMoved
 	if m.Rename {
 		eventType = auth.AuditItemRenamed
@@ -147,7 +152,6 @@ func (rs *RestService) auditMove(c *echo.Context, m *collab.CompletedMove, resul
 	if m.User != nil {
 		actorID = m.User.ID
 	}
-	info := requestInfo(c)
 	rs.authenticator.Audit(auth.AuditEvent{Type: eventType, ActorID: actorID, IP: info.IP, UserAgent: info.UserAgent,
 		Details: map[string]any{
 			"type":      m.ItemType,

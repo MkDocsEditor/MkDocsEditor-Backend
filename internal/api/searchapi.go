@@ -64,8 +64,12 @@ func (rs *RestService) getSearch(c *echo.Context) error {
 		}
 		limit = n
 	}
-	terms := strings.Fields(strings.ToLower(q))
+	return c.JSONPretty(http.StatusOK, rs.search(q, limit), jsonIndent)
+}
 
+// search returns the documents with every word of q, the best first, at most limit
+func (rs *RestService) search(q string, limit int) *SearchResponse {
+	terms := strings.Fields(strings.ToLower(q))
 	results := []*SearchResult{}
 	for section := range rs.treeManager.Root().Walk() {
 		for _, d := range section.Documents {
@@ -91,7 +95,7 @@ func (rs *RestService) getSearch(c *echo.Context) error {
 	if len(results) > limit {
 		response.Results = results[:limit]
 	}
-	return c.JSONPretty(http.StatusOK, response, jsonIndent)
+	return response
 }
 
 // searchDocument returns the result of a document, or nil if a term is neither in its text nor

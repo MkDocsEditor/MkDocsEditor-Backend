@@ -294,6 +294,7 @@ Without any method, endpoints that need authentication return 401 `unauthenticat
 | `GET /auth/forward/` | everyone; answers whether the request is logged in (below) |
 | content reads (`GET` on `/section/`, `/document/`, `/resource/`, `/mkdocs/`, `/actors/`, `/search/`, websockets) | any role; app tokens with `read` or `write` |
 | content changes (`POST`, `PUT`, `DELETE` on content routes, history restore, `POST /document/{id}/edits/`) | `editor`, `admin`; app tokens with `write` |
+| `POST /mcp/` (MCP server, [mcp.md](mcp.md)) | any role, `Authorization` header required (no cookie); readers and `read` tokens get only the read tools |
 | `/auth/whoami/`, `/auth/logout/`, `/auth/ws-ticket/`, `/auth/reauth/…` | sessions (any role); `whoami` and `ws-ticket` also app tokens |
 | `/account/…` | sessions only |
 | `/admin/…` | sessions of admins only |

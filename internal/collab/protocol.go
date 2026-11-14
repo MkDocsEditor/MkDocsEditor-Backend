@@ -139,6 +139,9 @@ type (
 		// Viewport is the visible text. From a client, null clears it and a missing one keeps
 		// it. From the server, a missing one means there is none.
 		Viewport json.RawMessage `json:"viewport,omitempty"`
+		// Agent is set for the presence of an agent that changes the document over the API
+		// with an app token, see docs/content-api.md
+		Agent *AgentInfo `json:"agent,omitempty"`
 	}
 
 	PresenceSnapshotMessage struct {
