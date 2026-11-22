@@ -26,7 +26,8 @@ const EndpointPathMCP = "/mcp/"
 const mcpInstructions = `A family wiki of markdown pages (MkDocs). Find pages with search or list_tree,
 read_document before changing a page, then change it with edit_document (preferred) or
 write_document. People may edit the same page at the same time: changes merge, so keep edits small.
-changes_since shows what people changed since you last read a page; read_history lists its commits.`
+changes_since shows what people changed since you last read a page; read_history lists its commits.
+read_resource shows the images and other files pages link to.`
 
 // mcpCaller is who calls a tool: the user and the app token of the HTTP request
 type mcpCaller struct {
@@ -94,6 +95,9 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_document", Annotations: readOnly, Description: "Read a page: its markdown and its revision. " +
 		"Read before you change a page. Next time, changes_since shows what people changed since."}, tools.readDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
+	mcp.AddTool(server, &mcp.Tool{Name: "read_resource", Annotations: readOnly, Description: "Read a file of the wiki that " +
+		"is no page, like an image a page links to: images come back as images, text files as text. Give its path " +
+		"relative to the wiki root, or the link destination with the page as document."}, tools.readResource)
 	mcp.AddTool(server, &mcp.Tool{Name: "changes_since", Annotations: readOnly, Description: "What people changed on a page since you " +
 		"last read or wrote it (or since a revision), as a diff with who changed it."}, tools.changesSince)
 	if rs.git != nil {

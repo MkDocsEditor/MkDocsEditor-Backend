@@ -80,13 +80,7 @@ func (rs *RestService) getResourceThumbnail(c *echo.Context) error {
 		return c.NoContent(http.StatusNotModified)
 	}
 
-	dir := rs.thumbnailDir()
-	for _, ext := range []string{".jpg", ".png"} {
-		if data, err := os.ReadFile(filepath.Join(dir, key+ext)); err == nil {
-			return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
-		}
-	}
-	data, ext, err := rs.renderThumbnail(c.Request().Context(), r, size)
+	data, ext, err := rs.thumbnail(c.Request().Context(), r, size)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		// the client is gone, nobody reads this
 		return c.NoContent(http.StatusServiceUnavailable)
@@ -97,6 +91,23 @@ func (rs *RestService) getResourceThumbnail(c *echo.Context) error {
 	if err != nil {
 		return rs.ReturnError(c, err)
 	}
+	return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
+}
+
+// thumbnail returns the thumbnail of a resource and its extension (".jpg" or ".png"), from
+// the cache or rendered and cached. size must be one of thumbnailSizes.
+func (rs *RestService) thumbnail(ctx context.Context, r *wiki.Resource, size int) ([]byte, string, error) {
+	key := thumbnailKey(r, size)
+	dir := rs.thumbnailDir()
+	for _, ext := range []string{".jpg", ".png"} {
+		if data, err := os.ReadFile(filepath.Join(dir, key+ext)); err == nil {
+			return data, ext, nil
+		}
+	}
+	data, ext, err := rs.renderThumbnail(ctx, r, size)
+	if err != nil {
+		return nil, "", err
+	}
 	if err = os.MkdirAll(dir, 0o750); err == nil {
 		err = wiki.WriteFile(filepath.Join(dir, key+ext), data)
 	}
@@ -104,7 +115,7 @@ func (rs *RestService) getResourceThumbnail(c *echo.Context) error {
 		// serving it matters more than caching it
 		log.Printf("Unable to cache the thumbnail of %s: %v", r.RelPath, err)
 	}
-	return c.Blob(http.StatusOK, thumbnailContentType(ext), data)
+	return data, ext, nil
 }
 
 // renderThumbnail makes a thumbnail in one of the limited slots. It gives up waiting for a slot
