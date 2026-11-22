@@ -73,8 +73,8 @@ means the top level.
 | `revert_change` | yes | Undoes a commit made with the caller's own app token, keeping later edits, like `POST /document/{id}/history/{revision}/revert/`. Only with git and an app token |
 
 `read_resource` takes the file's path relative to the wiki root, its id, or a link destination
-as written in a page together with that page as `document` (`img/Foto%201.jpg` from
-`guide/setup.md` is `guide/img/Foto 1.jpg`):
+as written in a page together with that page as `document` (`img/photo%201.jpg` from
+`guide/setup.md` is `guide/img/photo 1.jpg`):
 - PNG, JPEG, GIF and WebP come back as image content, scaled so that the longer side is at most
   `size` pixels (64 to 1024, default 1024, rounded up like the thumbnails of
   [references.md](references.md) section 9) and with the EXIF orientation applied. They share the thumbnail
