@@ -59,7 +59,7 @@ means the top level.
 | Tool | Write | What it does |
 |---|---|---|
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |
-| `list_tree` | | Paths and titles of all pages, or of those below `section` |
+| `list_tree` | | Paths and titles of all pages, or of those below `section`. With `files`, also the sections and the files that are no pages, with size and type |
 | `read_document` | | The markdown of a page with a header: `path`, `title`, `revision` |
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `download_resource` | | A file unchanged, as an embedded resource. See below |
@@ -67,10 +67,21 @@ means the top level.
 | `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
 | `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
 | `read_revision` | | The markdown of a page at a commit from `read_history`. Only with git |
+| `blame` | | Who last changed each line of a page, as blocks with commit, time, author and agents, like `GET /document/{id}/blame/`. Only with git |
+| `check_links` | | Broken links and files nothing links to (`GET /references/broken/`, `GET /references/unused-resources/`), optionally below `section` |
+| `link_to` | | The link from a page to a page, file or section: `destination` and `markdown`, like `GET /link/` |
+| `recent_changes` | | The change feed of the wiki, newest first (`limit`, default 30, at most 200; `before`, a cursor), like `GET /feed/` |
 | `edit_document` | yes | Replaces text: each `old` must occur exactly once. Optional `baseRevision`. Like `POST /document/{id}/edits/` |
 | `write_document` | yes | Replaces the whole text against a required `baseRevision`, merged three-way. Like `PUT /document/{id}/content/` |
 | `create_document` | yes | Creates a page in `section` with the file name `name` (without `.md`), optionally with `content` |
 | `move_document` | yes | Moves and/or renames a page. Links in other pages are updated, like `POST /move/` |
+| `delete_document` | yes | Deletes a page; `force` when people have it open. Lists the links that broke |
+| `upload_resource` | yes | Creates or replaces (`replace`) a file that is no page. See below |
+| `move_resource` | yes | Moves and/or renames a file; links are updated |
+| `delete_resource` | yes | Deletes a file. Lists the links that broke |
+| `create_section` | yes | Creates a section and missing parent sections |
+| `move_section` | yes | Moves and/or renames a section with its content; links are updated |
+| `delete_section` | yes | Deletes a section: `recursive` if it is not empty, `force` when people have one of its pages open. Lists the links that broke |
 | `revert_change` | yes | Undoes a commit made with the caller's own app token, keeping later edits, like `POST /document/{id}/history/{revision}/revert/`. Only with git and an app token |
 
 `read_resource` takes the file's path relative to the wiki root, its id, or a link destination
@@ -98,6 +109,21 @@ embedded resource (`blob`, URI `wiki:///<path>`) after a text content with `path
 but forwards image blobs as images: images are therefore sent as `application/octet-stream`, the
 text names their real type.
 
+`upload_resource` takes the path of the file like `read_resource` (from the wiki root, or relative
+to `document`), and the content as `text` or as `base64`. A request is limited to 4 MiB, so
+binary files must be small. Missing sections are created. An existing file is only replaced
+with `replace`; pages (`.md`) are refused, they are created with `create_document`. The commit
+is `Upload <path>` or `Replace <path>`.
+
+The delete tools answer the links from outside the deleted item that broke, as
+`path:line destination`, for the agent to fix them. Deleting is committed like
+`DELETE /document/{id}/` and the other delete endpoints: the files stay in the git history.
+
+Not offered as tools: accounts, administration, pins, push subscriptions and QR codes (personal
+or admin matters), the restore of a page revision (`revert_change` undoes the agent's own
+commits; `read_revision` and `write_document` restore anything else), and the history of files
+that are no pages, which the backend only has for pages.
+
 The tools exist because agents cannot use `GET /resource/{id}/content/`: OAuth access tokens
 only work for the MCP endpoint ([oauth.md](oauth.md)), and the agent does not see its token.
 
@@ -121,7 +147,7 @@ Errors are tool results with `isError` and a message the agent can act on, for e
 "edit 0: old occurs more than once in the text, add context to make it unique".
 
 Content changes share the rate limit of the content API: a burst of 60, then one per
-second, per app token. Create and move count too.
+second, per app token. Creating, uploading, moving and deleting count too.
 
 ## 4. Agents in the editor
 

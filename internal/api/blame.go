@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v5"
 )
 
@@ -44,22 +46,42 @@ type (
 
 // GET /document/:id/blame/
 func (rs *RestService) getDocumentBlame(c *echo.Context) error {
-	d, rel, repo, err := rs.historyContext(c)
+	d, _, repo, err := rs.historyContext(c)
 	if d == nil {
 		return err
 	}
-	text, revision, lineAuthors, err := rs.sync.LineAuthors(d)
+	resp, err := rs.blame(d, repo)
+	var bf *blameFailure
+	if errors.As(err, &bf) {
+		return rs.ReturnError(c, bf.err)
+	}
 	if err != nil {
 		return rs.contentError(c, err)
 	}
+	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
+}
+
+// blameFailure is an error of git, as opposed to one of reading the live text
+type blameFailure struct{ err error }
+
+func (e *blameFailure) Error() string { return e.err.Error() }
+func (e *blameFailure) Unwrap() error { return e.err }
+
+// blame returns who last changed each line of the live text of a document
+func (rs *RestService) blame(d *wiki.Document, repo *gitstore.Repo) (*BlameResponse, error) {
+	rel := d.RelPath
+	text, revision, lineAuthors, err := rs.sync.LineAuthors(d)
+	if err != nil {
+		return nil, err
+	}
 	commits, err := repo.FileHistory(rel, 100000)
 	if err != nil {
-		return rs.ReturnError(c, err)
+		return nil, &blameFailure{err}
 	}
 	var lines []gitstore.BlameLine
 	if len(commits) > 0 {
 		if lines, err = repo.Blame(rel, text); err != nil {
-			return rs.ReturnError(c, err)
+			return nil, &blameFailure{err}
 		}
 	}
 	byRevision := make(map[string]*gitstore.Commit, len(commits))
@@ -108,5 +130,5 @@ func (rs *RestService) getDocumentBlame(c *echo.Context) error {
 		key = k
 		resp.Blocks = append(resp.Blocks, b)
 	}
-	return c.JSONPretty(http.StatusOK, resp, jsonIndent)
+	return resp, nil
 }

@@ -508,6 +508,23 @@ func (tm *TreeManager) CreateResource(parentSectionID string, resourceName strin
 	return tm.GetResource(tm.GenerateID(resourcePath)), nil
 }
 
+// ReplaceResource replaces the content of a resource. The file is replaced atomically, so
+// readers see the old or the new content.
+func (tm *TreeManager) ReplaceResource(id string, content []byte) (*Resource, error) {
+	tm.fsLock.Lock()
+	defer tm.fsLock.Unlock()
+
+	r := tm.GetResource(id)
+	if r == nil {
+		return nil, fmt.Errorf("%w: resource %s", ErrNotFound, id)
+	}
+	if err := WriteFile(r.Path, content); err != nil {
+		return nil, err
+	}
+	tm.CreateItemTree()
+	return tm.GetResource(id), nil
+}
+
 // ItemPath returns the path of the item with the given id and type, or "" if there is none
 func (tm *TreeManager) ItemPath(id string, itemType string) string {
 	switch itemType {

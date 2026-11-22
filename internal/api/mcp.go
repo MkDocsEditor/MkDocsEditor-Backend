@@ -27,7 +27,8 @@ const mcpInstructions = `A family wiki of markdown pages (MkDocs). Find pages wi
 read_document before changing a page, then change it with edit_document (preferred) or
 write_document. People may edit the same page at the same time: changes merge, so keep edits small.
 changes_since shows what people changed since you last read a page; read_history lists its commits.
-read_resource shows the images and other files pages link to; download_resource gets a file unchanged.`
+read_resource shows the images and other files pages link to; download_resource gets a file unchanged.
+list_tree with files lists them; upload_resource adds or replaces one. link_to gives the right relative link.`
 
 // mcpCaller is who calls a tool: the user and the app token of the HTTP request
 type mcpCaller struct {
@@ -91,7 +92,8 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 	mcp.AddTool(server, &mcp.Tool{Name: "search", Annotations: readOnly, Description: "Full text search over all pages. " +
 		"Every word must match (case-insensitive) in the text, title or path. Returns paths, titles and matching lines."}, tools.search)
 	mcp.AddTool(server, &mcp.Tool{Name: "list_tree", Annotations: readOnly, Description: "List the pages (path and title), " +
-		"optionally only those below a section path."}, tools.listTree)
+		"optionally only those below a section path. With files, also the sections and the files that are no pages " +
+		"(images, scripts, PDFs) with size and type."}, tools.listTree)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_document", Annotations: readOnly, Description: "Read a page: its markdown and its revision. " +
 		"Read before you change a page. Next time, changes_since shows what people changed since."}, tools.readDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
@@ -110,6 +112,7 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		mcp.AddTool(server, &mcp.Tool{Name: "read_revision", Annotations: readOnly, Description: "Read a page as it was at a commit " +
 			"from read_history."}, tools.readRevision)
 	}
+	tools.registerTreeTools(server, readOnly, caller.user.CanWrite())
 	if !caller.user.CanWrite() {
 		return server
 	}
@@ -150,6 +153,7 @@ type (
 
 	mcpListInput struct {
 		Section string `json:"section,omitempty" jsonschema:"only pages below this section path, like guide"`
+		Files   bool   `json:"files,omitempty" jsonschema:"also list the sections and the files that are no pages"`
 	}
 
 	mcpEditInput struct {
@@ -289,17 +293,36 @@ func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpLis
 		}
 		root = s
 	}
-	var lines []string
+	var lines, sections, files []string
 	for s := range root.Walk() {
+		if s != root || s.RelPath != "" {
+			sections = append(sections, s.RelPath+"/")
+		}
 		for _, d := range s.Documents {
 			lines = append(lines, d.RelPath+"\t"+d.Title)
 		}
+		for _, r := range s.Resources {
+			files = append(files, fmt.Sprintf("%s\t%s\t%s", r.RelPath, formatBytes(int(r.Filesize)), r.MimeType))
+		}
 	}
 	sort.Strings(lines)
-	if len(lines) == 0 {
-		return text("no pages"), nil, nil
+	out := "no pages"
+	if len(lines) > 0 {
+		out = "path\ttitle\n" + strings.Join(lines, "\n")
 	}
-	return text("path\ttitle\n" + strings.Join(lines, "\n")), nil, nil
+	if in.Files {
+		sort.Strings(sections)
+		sort.Strings(files)
+		out += "\n\nsections:\n" + strings.Join(sections, "\n")
+		if len(sections) == 0 {
+			out += "none"
+		}
+		out += "\n\nfiles (path, size, type):\n" + strings.Join(files, "\n")
+		if len(files) == 0 {
+			out += "none"
+		}
+	}
+	return text(out), nil, nil
 }
 
 func (t *mcpTools) readDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpDocumentRef) (*mcp.CallToolResult, any, error) {

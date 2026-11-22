@@ -83,7 +83,9 @@ func TestMCPTools(t *testing.T) {
 	token := e.appToken("bob", "claude", auth.ScopeWrite)
 	s := e.mcpSession(token)
 
-	want := []string{"changes_since", "create_document", "download_resource", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "read_resource", "search", "write_document"}
+	want := []string{"changes_since", "check_links", "create_document", "create_section", "delete_document", "delete_resource",
+		"delete_section", "download_resource", "edit_document", "get_backlinks", "link_to", "list_tree", "move_document",
+		"move_resource", "move_section", "read_document", "read_resource", "recent_changes", "search", "upload_resource", "write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
@@ -171,7 +173,8 @@ func TestMCPTools(t *testing.T) {
 func TestMCPReadScopeAndAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	s := e.mcpSession(e.appToken("bob", "reader", auth.ScopeRead))
-	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "download_resource", "get_backlinks", "list_tree", "read_document", "read_resource", "search"}) {
+	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "check_links", "download_resource", "get_backlinks", "link_to",
+		"list_tree", "read_document", "read_resource", "recent_changes", "search"}) {
 		t.Errorf("read scope tools = %v", names)
 	}
 	// readers get the read tools only, whatever the token scope
@@ -347,5 +350,127 @@ func TestMCPReadResource(t *testing.T) {
 		if out, failed = callTool(t, s, "read_resource", c.args); !failed || !strings.Contains(out, c.want) {
 			t.Errorf("%v = %q, %v", c.args, out, failed)
 		}
+	}
+}
+
+func TestMCPTreeTools(t *testing.T) {
+	e := newSyncEnv(t)
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeWrite))
+	ok := func(name string, args map[string]any) string {
+		t.Helper()
+		out, failed := callTool(t, s, name, args)
+		if failed {
+			t.Fatalf("%s %v: %s", name, args, out)
+		}
+		return out
+	}
+	fails := func(name string, args map[string]any, want string) {
+		t.Helper()
+		if out, failed := callTool(t, s, name, args); !failed || !strings.Contains(out, want) {
+			t.Errorf("%s %v = %q, %v; want an error with %q", name, args, out, failed, want)
+		}
+	}
+
+	// upload next to a page, relative to it, into a new section
+	out := ok("upload_resource", map[string]any{"path": "tools/p2pro_thermal.py", "document": "guide/setup.md", "text": "print(1)\n"})
+	if !strings.Contains(out, "uploaded guide/tools/p2pro_thermal.py") || !strings.Contains(out, "created sections: guide/tools") {
+		t.Fatalf("upload = %q", out)
+	}
+	if got := e.readFile("guide/tools/p2pro_thermal.py"); got != "print(1)\n" {
+		t.Fatalf("file = %q", got)
+	}
+	fails("upload_resource", map[string]any{"path": "guide/tools/p2pro_thermal.py", "text": "x"}, "pass replace")
+	ok("upload_resource", map[string]any{"path": "guide/tools/p2pro_thermal.py", "base64": "cHJpbnQoMikK", "replace": true})
+	if got := e.readFile("guide/tools/p2pro_thermal.py"); got != "print(2)\n" {
+		t.Fatalf("replaced file = %q", got)
+	}
+	fails("upload_resource", map[string]any{"path": "guide/new.md", "text": "# x"}, "create_document")
+	fails("upload_resource", map[string]any{"path": "../outside.txt", "document": "index.md", "text": "x"}, "invalid path")
+	fails("upload_resource", map[string]any{"path": "guide/.hidden", "text": "x"}, "invalid file name")
+
+	out = ok("list_tree", map[string]any{"files": true})
+	if !strings.Contains(out, "sections:\nguide/\nguide/tools/") || !strings.Contains(out, "guide/tools/p2pro_thermal.py\t9 B\t") {
+		t.Errorf("list_tree files = %q", out)
+	}
+
+	// link to it, use the link, move the file: the link follows
+	out = ok("link_to", map[string]any{"document": "guide/setup.md", "target": "guide/tools/p2pro_thermal.py"})
+	if !strings.Contains(out, `"destination":"tools/p2pro_thermal.py"`) {
+		t.Fatalf("link_to = %q", out)
+	}
+	id := e.docID("guide/setup.md")
+	_, revision := e.readContent(id, e.appToken("bob", "other", auth.ScopeWrite))
+	ok("write_document", map[string]any{"document": id, "baseRevision": revision, "content": setupText + "\n[script](tools/p2pro_thermal.py)\n[gone](nope.md)\n"})
+	eventually(t, "reference index", func() bool {
+		out, _ = callTool(t, s, "check_links", map[string]any{"section": "guide"})
+		return strings.Contains(out, "guide/setup.md:") && strings.Contains(out, "nope.md")
+	})
+	if strings.Contains(out, "p2pro_thermal.py") {
+		t.Errorf("check_links lists the linked file: %q", out)
+	}
+	out = ok("move_resource", map[string]any{"resource": "guide/tools/p2pro_thermal.py", "section": "/", "name": "thermal.py"})
+	if !strings.Contains(out, `"newPath":"thermal.py"`) || !strings.Contains(out, `"updatedDocuments":1`) {
+		t.Fatalf("move_resource = %q", out)
+	}
+	eventually(t, "updated link", func() bool { return strings.Contains(e.serverText("guide/setup.md"), "(../thermal.py)") })
+
+	// sections: create, move, delete
+	ok("create_section", map[string]any{"path": "archive/2026"})
+	fails("create_section", map[string]any{"path": "archive"}, "exists")
+	out = ok("move_section", map[string]any{"section": "guide/tools", "target": "archive"})
+	if !strings.Contains(out, `"newPath":"archive/tools"`) {
+		t.Errorf("move_section = %q", out)
+	}
+	fails("delete_section", map[string]any{"section": "archive"}, "pass recursive")
+	ok("delete_section", map[string]any{"section": "archive", "recursive": true})
+	fails("delete_section", map[string]any{"section": "/"}, "top level")
+
+	// deleting the linked file lists the broken link
+	out = ok("delete_resource", map[string]any{"resource": "thermal.py"})
+	if !strings.Contains(out, "deleted thermal.py") || !strings.Contains(out, "guide/setup.md:") {
+		t.Errorf("delete_resource = %q", out)
+	}
+	ok("create_document", map[string]any{"section": "", "name": "scratch"})
+	out = ok("delete_document", map[string]any{"document": "scratch"})
+	if out != "deleted scratch.md" {
+		t.Errorf("delete_document = %q", out)
+	}
+
+	out = ok("recent_changes", map[string]any{"limit": 50})
+	if !strings.Contains(out, "deleted document scratch.md by Bob") && !strings.Contains(out, "deleted document scratch.md by bob") {
+		t.Errorf("recent_changes = %q", out)
+	}
+
+	// readers get none of the write tools
+	r := e.mcpSession(e.appToken("carol", "claude", auth.ScopeWrite))
+	if names := toolNames(t, r); slices.Contains(names, "upload_resource") || slices.Contains(names, "delete_document") {
+		t.Errorf("reader tools = %v", names)
+	}
+}
+
+func TestMCPTreeToolsWithGit(t *testing.T) {
+	e := newGitEnv(t, gitstore.CommitterOptions{})
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeWrite))
+	if out, failed := callTool(t, s, "upload_resource", map[string]any{"path": "tools/a.py", "text": "a\n"}); failed {
+		t.Fatal(out)
+	}
+	if got := e.commits()[0]; got != "Upload tools/a.py" {
+		t.Errorf("upload commit %q", got)
+	}
+	if out, failed := callTool(t, s, "upload_resource", map[string]any{"path": "tools/a.py", "text": "b\n", "replace": true}); failed {
+		t.Fatal(out)
+	}
+	if got := e.commits()[0]; got != "Replace tools/a.py" {
+		t.Errorf("replace commit %q", got)
+	}
+	if out, failed := callTool(t, s, "delete_resource", map[string]any{"resource": "tools/a.py"}); failed {
+		t.Fatal(out)
+	}
+	if got := e.commits()[0]; got != "Delete tools/a.py" {
+		t.Errorf("delete commit %q", got)
+	}
+	out, failed := callTool(t, s, "blame", map[string]any{"document": "guide/setup.md"})
+	if failed || !strings.Contains(out, "path: guide/setup.md") || !strings.Contains(out, "by Test: Initial") {
+		t.Errorf("blame = %q", out)
 	}
 }
