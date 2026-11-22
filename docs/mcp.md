@@ -61,6 +61,7 @@ means the top level.
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |
 | `list_tree` | | Paths and titles of all pages, or of those below `section` |
 | `read_document` | | The markdown of a page with a header: `path`, `title`, `revision` |
+| `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
 | `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
 | `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
@@ -70,6 +71,19 @@ means the top level.
 | `create_document` | yes | Creates a page in `section` with the file name `name` (without `.md`), optionally with `content` |
 | `move_document` | yes | Moves and/or renames a page. Links in other pages are updated, like `POST /move/` |
 | `revert_change` | yes | Undoes a commit made with the caller's own app token, keeping later edits, like `POST /document/{id}/history/{revision}/revert/`. Only with git and an app token |
+
+`read_resource` takes the file's path relative to the wiki root, its id, or a link destination
+as written in a page together with that page as `document` (`img/photo%201.jpg` from
+`guide/setup.md` is `guide/img/photo 1.jpg`):
+- PNG, JPEG, GIF and WebP come back as image content, scaled so that the longer side is at most
+  `size` pixels (64 to 1024, default 1024, rounded up like the thumbnails of
+  [references.md](references.md) section 9) and with the EXIF orientation applied. They share the thumbnail
+  cache. A text content before it has `path`, `mimeType` and `size`.
+- Text files (and SVG) up to 256 KiB come back as text, after the same header and `---`.
+- Other files are a tool error.
+
+The tool exists because agents cannot use `GET /resource/{id}/content/`: OAuth access tokens
+only work for the MCP endpoint ([oauth.md](oauth.md)), and the agent does not see its token.
 
 `changes_since` keeps what each app token saw of each page, apart from the token's person
 (the `seen` marks of [sync-protocol.md](sync-protocol.md) section 11 under the key

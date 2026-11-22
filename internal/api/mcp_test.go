@@ -1,9 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -78,7 +83,7 @@ func TestMCPTools(t *testing.T) {
 	token := e.appToken("bob", "claude", auth.ScopeWrite)
 	s := e.mcpSession(token)
 
-	want := []string{"changes_since", "create_document", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "search", "write_document"}
+	want := []string{"changes_since", "create_document", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "read_resource", "search", "write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
@@ -166,7 +171,7 @@ func TestMCPTools(t *testing.T) {
 func TestMCPReadScopeAndAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	s := e.mcpSession(e.appToken("bob", "reader", auth.ScopeRead))
-	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "get_backlinks", "list_tree", "read_document", "search"}) {
+	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "get_backlinks", "list_tree", "read_document", "read_resource", "search"}) {
 		t.Errorf("read scope tools = %v", names)
 	}
 	// readers get the read tools only, whatever the token scope
@@ -255,5 +260,76 @@ func TestMCPHistory(t *testing.T) {
 	}
 	if out := call("revert_change", map[string]any{"document": rel, "revision": agentRev[:12]}, true); !strings.Contains(out, "not in the page anymore") {
 		t.Errorf("second revert = %q", out)
+	}
+}
+
+func TestMCPReadResource(t *testing.T) {
+	e := newSyncEnv(t)
+	img := image.NewNRGBA(image.Rect(0, 0, 2000, 1000))
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(e.project, "docs", "guide", "img"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.writeFile("guide/img/Heizung 1.jpg", buf.String())
+	e.writeFile("guide/notes.txt", "some notes\n")
+	e.writeFile("guide/data.bin", "\x00\x01")
+	e.restart()
+	s := e.mcpSession(e.appToken("carol", "claude", auth.ScopeRead))
+	if !slices.Contains(toolNames(t, s), "read_resource") {
+		t.Fatal("read_resource is missing for readers")
+	}
+
+	call := func(args map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "read_resource", Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	// a link destination of a page, percent-encoded and relative to it
+	res := call(map[string]any{"resource": "img/Heizung%201.jpg", "document": "guide/setup.md", "size": 300})
+	if res.IsError || len(res.Content) != 2 {
+		t.Fatalf("image = %+v", res.Content)
+	}
+	ic, ok := res.Content[1].(*mcp.ImageContent)
+	if !ok || ic.MIMEType != "image/jpeg" {
+		t.Fatalf("image content = %+v", res.Content[1])
+	}
+	config, err := jpeg.DecodeConfig(bytes.NewReader(ic.Data))
+	if err != nil || config.Width != 512 || config.Height != 256 {
+		t.Errorf("image = %+v, %v", config, err)
+	}
+	if tc := res.Content[0].(*mcp.TextContent); !strings.Contains(tc.Text, "path: guide/img/Heizung 1.jpg\n") {
+		t.Errorf("header = %q", tc.Text)
+	}
+	// the path from the wiki root, the default size
+	res = call(map[string]any{"resource": "/guide/img/Heizung 1.jpg"})
+	if ic, ok = res.Content[len(res.Content)-1].(*mcp.ImageContent); !ok {
+		t.Fatalf("by root path = %+v", res.Content)
+	}
+	if config, _ = jpeg.DecodeConfig(bytes.NewReader(ic.Data)); config.Width != 1024 {
+		t.Errorf("default size = %d", config.Width)
+	}
+
+	out, failed := callTool(t, s, "read_resource", map[string]any{"resource": "guide/notes.txt"})
+	if failed || !strings.HasSuffix(out, "---\nsome notes\n") {
+		t.Errorf("text = %q", out)
+	}
+	for _, c := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"resource": "guide/data.bin"}, "cannot show"},
+		{map[string]any{"resource": "img/Heizung 1.jpg"}, "no file"},
+		{map[string]any{"resource": "../../etc/passwd", "document": "guide/setup.md"}, "no file"},
+		{map[string]any{"resource": "guide/img/Heizung 1.jpg", "size": 5000}, "size must be"},
+	} {
+		if out, failed = callTool(t, s, "read_resource", c.args); !failed || !strings.Contains(out, c.want) {
+			t.Errorf("%v = %q, %v", c.args, out, failed)
+		}
 	}
 }
