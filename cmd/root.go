@@ -17,6 +17,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitremote"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/metrics"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/nativemem"
@@ -110,12 +111,15 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		syncServer.SetEventLog(os.Stdout)
 	}
 
-	gitCommitter, err := startGitCommitter(conf, authenticator, syncServer)
+	gitCommitter, gitRemote, err := startGitCommitter(conf, authenticator, syncServer)
 	if err != nil {
 		return err
 	}
 	if gitCommitter != nil {
 		restService.SetGitCommitter(gitCommitter)
+	}
+	if gitRemote != nil {
+		restService.SetGitRemote(gitRemote)
 	}
 	if metricsServer != nil {
 		metrics.Registry.MustRegister(api.NewMetricsCollector(syncServer, treeManager, gitCommitter))
@@ -131,6 +135,9 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	// shut down cleanly on SIGINT/SIGTERM: stop accepting requests, then flush all documents
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if gitRemote != nil {
+		go gitRemote.Run(ctx)
+	}
 	go func() {
 		<-ctx.Done()
 		log.Printf("Shutting down")
@@ -206,30 +213,75 @@ func startPush(conf configuration.Configuration, authenticator *auth.Service, sy
 	return push.NewNotifier(sender, syncServer.Activity(), authenticator), nil
 }
 
-// startGitCommitter starts committing changes if git is enabled. It returns nil if not.
-func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *collab.SyncServer) (*gitstore.Committer, error) {
+// startGitCommitter starts committing changes if git is enabled. It returns nil if not. The
+// manager of the OAuth2 connection to the git host is nil unless git.oauth is set.
+func startGitCommitter(conf configuration.Configuration, authenticator *auth.Service, syncServer *collab.SyncServer) (*gitstore.Committer, *gitremote.Manager, error) {
 	if !conf.Git.Enabled {
-		return nil, nil
+		return nil, nil, nil
 	}
 	repo, err := gitstore.Open(conf.MkDocs.DocsPath, gitstore.Signature{Name: conf.Git.CommitterName, Email: conf.Git.CommitterEmail})
 	if err != nil {
-		return nil, fmt.Errorf("git is enabled, but: %w", err)
+		return nil, nil, fmt.Errorf("git is enabled, but: %w", err)
 	}
-	gitCommitter, err := gitstore.NewCommitter(repo, authenticator, conf.MkDocs.StateDir, gitstore.CommitterOptions{
+	gitRemote, err := startGitRemote(conf.Git, repo, authenticator)
+	if err != nil {
+		return nil, nil, err
+	}
+	opts := gitstore.CommitterOptions{
 		AfterLeave:  time.Duration(conf.Git.CommitAfterLeave) * time.Minute,
 		AfterIdle:   time.Duration(conf.Git.CommitAfterIdle) * time.Minute,
 		MaxInterval: time.Duration(conf.Git.CommitMaxInterval) * time.Minute,
 		Push:        conf.Git.Push,
 		Remote:      conf.Git.Remote,
 		Branch:      conf.Git.Branch,
-	})
+	}
+	if gitRemote != nil {
+		opts.Credential = func(ctx context.Context) (*gitstore.Credential, error) {
+			username, password, err := gitRemote.Credential(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return &gitstore.Credential{URL: conf.Git.OAuth.URL, Username: username, Password: password}, nil
+		}
+	}
+	gitCommitter, err := gitstore.NewCommitter(repo, authenticator, conf.MkDocs.StateDir, opts)
 	if err != nil {
-		return nil, fmt.Errorf("unable to start the git committer: %w", err)
+		return nil, nil, fmt.Errorf("unable to start the git committer: %w", err)
 	}
 	syncServer.SetChangeRecorder(gitCommitter)
 	gitCommitter.Start(syncServer)
 	log.Printf("git commits enabled")
-	return gitCommitter, nil
+	return gitCommitter, gitRemote, nil
+}
+
+// startGitRemote creates the manager of the OAuth2 connection to the git host, nil without git.oauth
+func startGitRemote(conf configuration.GitConfiguration, repo *gitstore.Repo, authenticator *auth.Service) (*gitremote.Manager, error) {
+	if !conf.OAuth.Enabled() {
+		return nil, nil
+	}
+	secret, err := conf.OAuth.ClientSecret()
+	if err != nil {
+		return nil, err
+	}
+	repoName := conf.OAuth.Repo
+	if repoName == "" {
+		pushURL, err := repo.PushURL(conf.Remote)
+		if err != nil {
+			log.Printf("No push remote, git.oauth cannot be connected: %v", err)
+		} else if repoName = gitremote.RepoOf(conf.OAuth.URL, pushURL); repoName == "" {
+			log.Printf("The push remote %s is not an https URL on %s: git.oauth cannot be connected", gitremote.RedactURL(pushURL), conf.OAuth.URL)
+		}
+	}
+	m, err := gitremote.New(conf.OAuth, secret, repoName, authenticator)
+	if err != nil {
+		return nil, err
+	}
+	state := "not connected"
+	if g, _ := m.Stored(); g != nil {
+		state = "connected as " + g.Login
+	}
+	log.Printf("Pushing with %s OAuth2 (%s), %s", m.Provider().Name(), conf.OAuth.URL, state)
+	return m, nil
 }
 
 func setupUI() {

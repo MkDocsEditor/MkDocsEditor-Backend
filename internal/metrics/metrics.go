@@ -28,6 +28,8 @@ const (
 	ResultError = "error"
 	// ResultEmpty is a git commit that had nothing to commit
 	ResultEmpty = "empty"
+	// ResultExpired is a refresh of the git host connection whose grant is gone
+	ResultExpired = "expired"
 )
 
 // Values of the label "direction"
@@ -237,6 +239,24 @@ var (
 		Namespace: Namespace,
 		Name:      "git_pushes_total",
 		Help:      "Git pushes, by result.",
+	}, []string{"result"})
+
+	GitRemoteConnected = factory.NewGauge(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "git_remote_connected",
+		Help:      "1 while an OAuth2 connection to the git host is stored and not expired.",
+	})
+
+	GitRemoteRefreshExpiry = factory.NewGauge(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "git_remote_refresh_expiry_timestamp_seconds",
+		Help:      "When the refresh token of the git host connection runs out, 0 without a connection.",
+	})
+
+	GitRemoteRefreshes = factory.NewCounterVec(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "git_remote_refreshes_total",
+		Help:      "Token refreshes of the git host connection, by result (ok, error, expired).",
 	}, []string{"result"})
 )
 

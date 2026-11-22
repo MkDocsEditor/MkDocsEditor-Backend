@@ -79,13 +79,22 @@ git:
   push: true
   remote: "origin"
   branch: "main"
+  oauth:
+    provider: "forgejo"
+    url: "https://git.example.com/"
+    clientId: "abc"
+    clientSecretFile: "/secrets/forgejo"
+    user: "mkdocseditor"
+    allowAdmin: true
 `)
 	CurrentConfig = Configuration{}
 	if err := InitConfig(path); err != nil {
 		t.Fatal(err)
 	}
 	want := GitConfiguration{Enabled: true, CommitAfterLeave: 1, CommitAfterIdle: 2, CommitMaxInterval: 3,
-		CommitterName: "Wiki", CommitterEmail: "wiki@example.com", Push: true, Remote: "origin", Branch: "main"}
+		CommitterName: "Wiki", CommitterEmail: "wiki@example.com", Push: true, Remote: "origin", Branch: "main",
+		OAuth: GitOAuthConfiguration{Provider: "forgejo", URL: "https://git.example.com", ClientID: "abc", ClientSecretFile: "/secrets/forgejo",
+			User: "mkdocseditor", AllowAdmin: true, RefreshTokenLifetime: DefaultGitOAuthRefreshTokenLifetime}}
 	if CurrentConfig.Git != want {
 		t.Errorf("git = %+v", CurrentConfig.Git)
 	}

@@ -243,21 +243,49 @@ func writeCommitMessage(subject string, body string, coAuthors []Signature, trai
 	return file.Name(), nil
 }
 
-// Push pushes the current branch. With git-lfs, the LFS objects go first: a remote must not get
-// commits whose files it cannot serve.
-func (g *Repo) Push(remote string, branch string) error {
+// Credential is the username and password git and git-lfs send to URLs below URL
+type Credential struct {
+	URL      string
+	Username string
+	Password string
+}
+
+// credentialEnv names the variables the credential helper of a push reads
+const (
+	credentialUserEnv     = "MKDOCSEDITOR_GIT_USERNAME"
+	credentialPasswordEnv = "MKDOCSEDITOR_GIT_PASSWORD" //nolint:gosec // the name of a variable, not a secret
+)
+
+// credentialArgs are the git options and environment that make git answer with the credential.
+// The empty helper first drops the helpers of the git configuration. The secret is only in the
+// environment of this git process and its children (git-lfs gets the options through
+// GIT_CONFIG_PARAMETERS).
+func (c *Credential) credentialArgs() (args []string, env []string) {
+	if c == nil {
+		return nil, nil
+	}
+	key := "credential." + c.URL + ".helper"
+	helper := `!f() { test "$1" = get && printf 'username=%s\npassword=%s\n' "$` + credentialUserEnv + `" "$` + credentialPasswordEnv + `"; }; f`
+	return []string{"-c", key + "=", "-c", key + "=" + helper},
+		[]string{credentialUserEnv + "=" + c.Username, credentialPasswordEnv + "=" + c.Password}
+}
+
+// Push pushes the current branch, with the credential if it is not nil. With git-lfs, the LFS
+// objects go first: a remote must not get commits whose files it cannot serve.
+func (g *Repo) Push(remote string, branch string, cred *Credential) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	credArgs, env := cred.credentialArgs()
 	if g.lfs {
 		lfsRemote := remote
 		if lfsRemote == "" {
 			lfsRemote = g.pushRemote()
 		}
-		if _, err := g.run(nil, "lfs", "push", lfsRemote, "HEAD"); err != nil {
+		if _, err := g.run(env, append(slices.Clone(credArgs), "lfs", "push", lfsRemote, "HEAD")...); err != nil {
 			return fmt.Errorf("the LFS objects were not pushed, so the commits were not either: %w", err)
 		}
 	}
-	args := []string{"push", "--quiet"}
+	args := append(slices.Clone(credArgs), "push", "--quiet")
 	if remote != "" || branch != "" {
 		if remote == "" {
 			remote = "origin"
@@ -267,8 +295,42 @@ func (g *Repo) Push(remote string, branch string) error {
 			args = append(args, "HEAD:"+branch)
 		}
 	}
-	_, err := g.run(nil, args...)
+	_, err := g.run(env, args...)
 	return err
+}
+
+// PushURL returns the URL the current branch is pushed to, of remote or the push remote
+func (g *Repo) PushURL(remote string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if remote == "" {
+		remote = g.pushRemote()
+	}
+	out, err := g.run(nil, "remote", "get-url", "--push", remote)
+	return strings.TrimSpace(out), err
+}
+
+// PendingPush counts the commits of HEAD that the remote branch does not have: of remote and
+// branch when set, else of the push target of the current branch. ok is false if the remote
+// branch is unknown.
+func (g *Repo) PendingPush(remote string, branch string) (n int, ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	target := "@{push}"
+	if branch != "" {
+		if remote == "" {
+			remote = g.pushRemote()
+		}
+		target = "refs/remotes/" + remote + "/" + branch
+	}
+	out, err := g.run(nil, "rev-list", "--count", target+"..HEAD")
+	if err != nil {
+		return 0, false
+	}
+	if _, err = fmt.Sscan(out, &n); err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // pushRemote is the remote "git push" pushes the current branch to, "origin" if none is set

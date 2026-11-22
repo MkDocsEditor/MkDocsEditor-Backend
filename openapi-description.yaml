@@ -1663,6 +1663,121 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /admin/git-remote/:
+    get:
+      summary: "The push credential from the OAuth2 application of the git host"
+      description: |
+        The state of the connection to the git host (`git.oauth`, docs/sync-protocol.md
+        section 10) and of the last push. `canPush` is checked live with the stored token,
+        `null` when that failed or nothing is connected. The tokens never leave the server.
+      operationId: adminGitRemote
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "The connection"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitRemote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    delete:
+      summary: "Disconnect from the git host (step-up)"
+      description: |
+        Deletes the stored tokens. The grant stays at the git host until a user removes it at
+        `grantsUrl`: Forgejo has no revocation endpoint.
+      operationId: adminDisconnectGitRemote
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "The connection, now disconnected"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitRemote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`not-configured`: git.oauth is not set"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/git-remote/connect/:
+    post:
+      summary: "Start connecting to the git host (step-up)"
+      description: |
+        Returns the authorize URL of the git host with a state bound to this session and a PKCE
+        challenge, valid for 10 minutes. Send the browser there; the git host redirects back to
+        `/api/git-remote/callback/`, which redirects to `/admin/settings?git-remote=…`.
+      operationId: adminConnectGitRemote
+      tags: [ Admin ]
+      responses:
+        "200":
+          description: "Where to send the browser"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ authorizeUrl ]
+                properties:
+                  authorizeUrl:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "`not-configured`: git.oauth is not set"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "The push remote of the server is no https URL on the git host, and git.oauth.repo is not set"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /git-remote/callback/:
+    get:
+      summary: "The OAuth2 redirect URI for the git host"
+      description: |
+        Called by the browser of the admin who started the connection, in the same session.
+        Always answers with a redirect to `/admin/settings`: `?git-remote=connected`, or
+        `?git-remote=error&reason=<reason>` with `login` for the refusals of a user. Reasons:
+        `not-configured`, `state` (unknown or expired), `session` (another or no session),
+        `denied` (at the git host), `exchange` (the code was not accepted), `wrong-user`,
+        `admin-user`, `not-pushable` (the user may not push to the repository).
+      operationId: gitRemoteCallback
+      tags: [ Admin ]
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: "To /admin/settings with the result"
+
   /admin/audit/:
     get:
       summary: "The audit log"
@@ -5537,6 +5652,111 @@ components:
         details:
           type: object
           additionalProperties: true
+
+    GitRemote:
+      type: object
+      required: [ state, pushEnabled, provider, providerName, providerUrl, grantsUrl, scopedGrants, repo, expectedUser,
+                  allowAdmin, remoteUser, canPush, connectedAt, connectedBy, lastRefreshAt, refreshExpiresAt,
+                  lastRefreshError, lastPushAt, lastPushError, pendingCommits ]
+      properties:
+        state:
+          type: string
+          enum: [ not-configured, disconnected, connected, expired, error ]
+          description: |
+            `expired`: the git host refused the refresh token, connect again. `error`: the last
+            refresh failed for another reason and is retried.
+        pushEnabled:
+          type: boolean
+          description: "git.push"
+        provider:
+          type: string
+          nullable: true
+          example: "forgejo"
+        providerName:
+          type: string
+          nullable: true
+          example: "Forgejo"
+        providerUrl:
+          type: string
+          nullable: true
+        grantsUrl:
+          type: string
+          nullable: true
+          description: "Where the user of the git host removes the grant"
+        scopedGrants:
+          type: boolean
+          description: "false: a grant has all rights of its user (Forgejo)"
+        repo:
+          type: string
+          nullable: true
+          example: "markus/Wiki"
+        expectedUser:
+          type: string
+          nullable: true
+          description: "git.oauth.user, the only user accepted"
+        allowAdmin:
+          type: boolean
+        remoteUser:
+          type: object
+          nullable: true
+          required: [ login, avatarUrl, isAdmin ]
+          properties:
+            login:
+              type: string
+            avatarUrl:
+              type: string
+            isAdmin:
+              type: boolean
+        canPush:
+          type: boolean
+          nullable: true
+        connectedAt:
+          type: string
+          format: date-time
+          nullable: true
+        connectedBy:
+          type: string
+          nullable: true
+          description: "Username of the admin who connected"
+        lastRefreshAt:
+          type: string
+          format: date-time
+          nullable: true
+        refreshExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Connect again before this, if the backend was down all that time"
+        lastRefreshError:
+          type: object
+          nullable: true
+          required: [ at, message, permanent ]
+          properties:
+            at:
+              type: string
+              format: date-time
+            message:
+              type: string
+            permanent:
+              type: boolean
+        lastPushAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastPushError:
+          type: object
+          nullable: true
+          required: [ at, message ]
+          properties:
+            at:
+              type: string
+              format: date-time
+            message:
+              type: string
+        pendingCommits:
+          type: integer
+          nullable: true
+          description: "Commits not pushed yet, null if unknown"
 
     AuditPage:
       type: object

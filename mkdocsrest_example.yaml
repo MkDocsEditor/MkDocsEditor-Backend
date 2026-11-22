@@ -143,8 +143,25 @@ git:
   # the committer; the author is the user who made the most changes (default: MkDocsEditor)
   committerName: "MkDocsEditor"
   committerEmail: "mkdocseditor@mkdocseditor.invalid"
-  # run "git push" after each commit (default: false). Credentials come from the environment
-  # (GIT_SSH_COMMAND, a credential helper), never from this file.
+  # run "git push" after each commit (default: false). Credentials come from git.oauth below,
+  # or from the environment (GIT_SSH_COMMAND, a credential helper), never from this file.
   push: false
   #remote: "origin"
   #branch: "master"
+  # (optional) push with an OAuth2 application of the git host, connected by an admin in the
+  # web app (Settings). See docs/sync-protocol.md section 10.
+  #oauth:
+  #  # the kind of git host: forgejo (Forgejo and Gitea)
+  #  provider: "forgejo"
+  #  url: "https://git.example.com"
+  #  clientId: "..."
+  #  # the client secret; $MKDOCSREST_GIT_OAUTH_CLIENT_SECRET takes precedence
+  #  clientSecretFile: "/run/secrets/git-oauth-client-secret"
+  #  # the only user of the git host accepted; give it write access to the wiki repository only
+  #  user: "mkdocseditor"
+  #  # accept an admin of the git host as that user (default: false)
+  #  allowAdmin: false
+  #  # owner/name of the repository (default: from the URL of the push remote)
+  #  #repo: "markus/Wiki"
+  #  # lifetime of refresh tokens in hours, Forgejo's REFRESH_TOKEN_EXPIRATION_TIME (default: 730)
+  #  refreshTokenLifetime: 730

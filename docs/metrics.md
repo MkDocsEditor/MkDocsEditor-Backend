@@ -69,6 +69,9 @@ are exposed too.
 | `git_commits_total` | `result` (`ok`, `empty`, `error`) | Commit attempts |
 | `git_commit_duration_seconds` | | Time to create a commit |
 | `git_pushes_total` | `result` | Pushes |
+| `git_remote_connected` | | 1 while the push credential of `git.oauth` is connected and not expired |
+| `git_remote_refresh_expiry_timestamp_seconds` | | When the stored refresh token expires (Unix time) |
+| `git_remote_refreshes_total` | `result` (`ok`, `error`, `expired`) | Token refreshes; `expired`: the git host refused the refresh token |
 | `auth_events_total` | `type` | Audit log events, see [`auth.md`](auth.md) |
 | `http_requests_total` | `method`, `route`, `status` | Finished requests |
 | `http_request_duration_seconds` | `method`, `route` | Duration of requests, without websockets |
