@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -31,8 +33,20 @@ type Repo struct {
 	top       string
 	prefix    string
 	committer Signature
-	mu        sync.Mutex
-	blames    blameCache
+	// lfs is true when git-lfs is installed
+	lfs    bool
+	mu     sync.Mutex
+	blames blameCache
+}
+
+// lfsConfig are the settings of "git lfs install", given to every git command: the repository
+// works without a global git configuration (the container). required makes git fail for a file
+// LFS should store when git-lfs is missing, instead of committing the file itself.
+var lfsConfig = []string{
+	"-c", "filter.lfs.process=git-lfs filter-process",
+	"-c", "filter.lfs.clean=git-lfs clean -- %f",
+	"-c", "filter.lfs.smudge=git-lfs smudge -- %f",
+	"-c", "filter.lfs.required=true",
 }
 
 // Open checks that dir is inside a git work tree
@@ -56,7 +70,21 @@ func Open(dir string, committer Signature) (*Repo, error) {
 		return nil, err
 	}
 	g.prefix = strings.TrimRight(out, "\r\n")
+	_, err = g.run(nil, "lfs", "version")
+	g.lfs = err == nil
+	attributes, _ := os.ReadFile(filepath.Join(g.top, ".gitattributes"))
+	switch usesLFS := strings.Contains(string(attributes), "filter=lfs"); {
+	case usesLFS && !g.lfs:
+		log.Printf("The repository stores files with Git LFS, but git-lfs is not installed: their commits fail")
+	case usesLFS:
+		log.Printf("The repository stores files with Git LFS")
+	}
 	return g, nil
+}
+
+// LFS reports whether git-lfs is installed
+func (g *Repo) LFS() bool {
+	return g.lfs
 }
 
 // run runs git in the docs folder and returns its stdout
@@ -75,7 +103,8 @@ func (g *Repo) runInput(env []string, stdin string, args ...string) (string, err
 func (g *Repo) runIn(dir string, env []string, stdin string, args ...string) (string, error) {
 	// the repository may belong to another uid (an NFS volume), git would refuse it.
 	// Literal pathspecs: a file named ":(glob)*" is just a file.
-	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off", "--literal-pathspecs"}, args...)
+	full := append([]string{"-c", "safe.directory=*", "-c", "core.quotepath=off", "--literal-pathspecs"}, lfsConfig...)
+	full = append(full, args...)
 	cmd := exec.Command("git", full...) // #nosec G204 -- fixed git subcommands, no shell, no user values
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
@@ -214,10 +243,20 @@ func writeCommitMessage(subject string, body string, coAuthors []Signature, trai
 	return file.Name(), nil
 }
 
-// Push pushes the current branch
+// Push pushes the current branch. With git-lfs, the LFS objects go first: a remote must not get
+// commits whose files it cannot serve.
 func (g *Repo) Push(remote string, branch string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.lfs {
+		lfsRemote := remote
+		if lfsRemote == "" {
+			lfsRemote = g.pushRemote()
+		}
+		if _, err := g.run(nil, "lfs", "push", lfsRemote, "HEAD"); err != nil {
+			return fmt.Errorf("the LFS objects were not pushed, so the commits were not either: %w", err)
+		}
+	}
 	args := []string{"push", "--quiet"}
 	if remote != "" || branch != "" {
 		if remote == "" {
@@ -230,6 +269,18 @@ func (g *Repo) Push(remote string, branch string) error {
 	}
 	_, err := g.run(nil, args...)
 	return err
+}
+
+// pushRemote is the remote "git push" pushes the current branch to, "origin" if none is set
+func (g *Repo) pushRemote() string {
+	ref, err := g.run(nil, "symbolic-ref", "--quiet", "HEAD")
+	if err == nil {
+		out, err := g.run(nil, "for-each-ref", "--format=%(push:remotename)", strings.TrimSpace(ref))
+		if r := strings.TrimSpace(out); err == nil && r != "" {
+			return r
+		}
+	}
+	return "origin"
 }
 
 // ErrNoHead is returned by CommitText in a repository without commits
