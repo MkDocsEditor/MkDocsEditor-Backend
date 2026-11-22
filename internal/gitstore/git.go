@@ -252,7 +252,7 @@ type Credential struct {
 
 // credentialEnv names the variables the credential helper of a push reads
 const (
-	credentialUserEnv     = "MKDOCSEDITOR_GIT_USERNAME"
+	credentialUserEnv     = "MKDOCSEDITOR_GIT_USERNAME" //nolint:gosec // the name of a variable, not a secret
 	credentialPasswordEnv = "MKDOCSEDITOR_GIT_PASSWORD" //nolint:gosec // the name of a variable, not a secret
 )
 
