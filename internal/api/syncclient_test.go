@@ -16,6 +16,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitremote"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki/wikitest"
@@ -39,6 +40,8 @@ type syncEnv struct {
 	// gitOpts enables the git committer when set
 	gitOpts *gitstore.CommitterOptions
 	git     *gitstore.Committer
+	// gitRemote is set on the RestService at start
+	gitRemote *gitremote.Manager
 }
 
 var testPasswords = map[string]string{"alice": "alice-pw", "bob": "bob-pw", "carol": "carol-pw"}
@@ -89,6 +92,9 @@ func (e *syncEnv) start() {
 		ss.SetChangeRecorder(e.git)
 		e.git.Start(ss)
 		e.rs.SetGitCommitter(e.git)
+	}
+	if e.gitRemote != nil {
+		e.rs.SetGitRemote(e.gitRemote)
 	}
 	e.http = httptest.NewServer(e.rs.echoRest)
 }

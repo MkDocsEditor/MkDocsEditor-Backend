@@ -225,6 +225,27 @@ CREATE INDEX oauth_tokens_app_token ON oauth_tokens(app_token_id);
 ALTER TABLE app_tokens ADD COLUMN sliding_expiry INTEGER NOT NULL DEFAULT 0;
 UPDATE app_tokens SET sliding_expiry = 1 WHERE oauth_client_id != '';
 `,
+	// 12: the Forgejo connection for git push, one row. The tokens are sealed with a key of
+	// the server key, see docs/sync-protocol.md section 10.
+	`
+CREATE TABLE git_remote (
+	id                 INTEGER PRIMARY KEY CHECK (id = 1),
+	login              TEXT NOT NULL,
+	is_admin           INTEGER NOT NULL,
+	avatar_url         TEXT NOT NULL,
+	repo               TEXT NOT NULL,
+	access_token       BLOB NOT NULL,
+	refresh_token      BLOB NOT NULL,
+	access_expires_at  INTEGER NOT NULL,
+	refresh_expires_at INTEGER NOT NULL,
+	connected_at       INTEGER NOT NULL,
+	connected_by       TEXT NOT NULL,
+	last_refresh_at    INTEGER NOT NULL DEFAULT 0,
+	error_at           INTEGER NOT NULL DEFAULT 0,
+	error_message      TEXT NOT NULL DEFAULT '',
+	error_permanent    INTEGER NOT NULL DEFAULT 0
+);
+`,
 }
 
 // openDatabase opens (and creates) the account database and applies the migrations

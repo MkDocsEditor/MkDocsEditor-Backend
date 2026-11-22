@@ -21,6 +21,7 @@ import (
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/configuration"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitremote"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/push"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/references"
@@ -77,6 +78,8 @@ type RestService struct {
 	treeManager      *wiki.TreeManager
 	sync             *collab.SyncServer
 	git              *gitstore.Committer
+	gitRemote        *gitremote.Manager
+	gitRemoteFlows   gitRemoteFlows
 	push             *push.Notifier
 	refs             *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
@@ -305,6 +308,10 @@ func (rs *RestService) registerAdminRoutes(echoRest *echo.Echo) {
 	echoRest.GET("/admin/settings/", rs.adminSettings)
 	echoRest.PATCH("/admin/settings/", rs.adminUpdateSettings)
 	echoRest.GET("/admin/audit/", rs.adminAudit)
+	echoRest.GET("/admin/git-remote/", rs.getGitRemote)
+	echoRest.DELETE("/admin/git-remote/", rs.deleteGitRemote)
+	echoRest.POST("/admin/git-remote/connect/", rs.connectGitRemote)
+	echoRest.GET(EndpointPathGitRemoteCallback, rs.gitRemoteCallback)
 }
 
 // registerContentRoutes adds the endpoints of the wiki content

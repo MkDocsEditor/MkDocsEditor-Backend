@@ -69,7 +69,7 @@ func TestLFSCommitAndPush(t *testing.T) {
 	if blob := gitIn(t, work, "cat-file", "-p", "HEAD:docs/P2.jpg"); !strings.HasPrefix(blob, "version https://git-lfs.github.com/spec/v1") {
 		t.Fatalf("committed blob = %q", blob[:min(len(blob), 80)])
 	}
-	if err = repo.Push("", ""); err != nil {
+	if err = repo.Push("", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	// the remote has the commit and the object
@@ -126,7 +126,7 @@ func TestPushWithoutLFSFiles(t *testing.T) {
 	if _, err = repo.Commit([]string{"a.md", "../.gitattributes"}, Signature{Name: "bob", Email: "bob@example.com"}, nil, "Add a.md", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err = repo.Push("", ""); err != nil {
+	if err = repo.Push("", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitIn(t, remote, "log", "-1", "--format=%s"); got != "Add a.md\n" {

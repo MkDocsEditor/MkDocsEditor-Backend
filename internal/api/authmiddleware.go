@@ -135,7 +135,8 @@ func isReadOnlyMethod(method string) bool {
 // isPublicPath reports whether a path is reachable without authentication
 func isPublicPath(path string) bool {
 	switch path {
-	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/", "/server-info/", EndpointPathForward:
+	case EndpointPathAlive, "/auth/status/", "/.well-known/assetlinks.json/", "/server-info/", EndpointPathForward,
+		EndpointPathGitRemoteCallback:
 		return true
 	}
 	return strings.HasPrefix(path, "/auth/login/") || strings.HasPrefix(path, "/auth/passkey/login/") || strings.HasPrefix(path, "/auth/link/") ||

@@ -775,10 +775,61 @@ references it updated in the body, see [references.md](references.md#10-git-audi
 
 `git.push: false` by default. When enabled, the backend runs `git push` after each
 commit, to `git.remote` and `HEAD:git.branch` when they are set, otherwise to git's
-default upstream. Credentials come only from the environment or
+default upstream. Credentials come from `git.oauth` (below), or from the environment and
 mounted files (an SSH key with `GIT_SSH_COMMAND`, or a credential helper), never from
-the repository or the backend configuration. A failed push is logged and retried after
-the next commit.
+the repository. A failed push is logged once and retried after the next commit.
+
+### Push with an OAuth2 application of the git host
+
+With `git.oauth`, an admin connects the backend to the git host in the web app
+(*Settings*): the backend gets an OAuth2 token, refreshes it on its own and pushes with it.
+No password or personal token ends up in the deployment. Supported is `provider: forgejo`,
+which also covers Gitea; the rest is the same for every git host (`internal/gitremote`,
+interface `Provider`).
+
+Setup:
+
+1. Create a user on the git host for the backend (`git.oauth.user`), with write access to
+   the wiki repository only, and not an admin.
+2. Create an OAuth2 application, as that user or as an admin, a confidential client with the
+   redirect URI `https://<wiki host>/api/git-remote/callback/`. Put its client id into
+   `git.oauth.clientId` and its secret into `$MKDOCSREST_GIT_OAUTH_CLIENT_SECRET` or the file
+   `git.oauth.clientSecretFile`.
+3. The push remote must be an https URL on the git host (`git remote get-url --push`); the
+   repository is taken from it, or from `git.oauth.repo`.
+4. In the web app, an admin clicks *Connect* and approves at the git host as
+   `git.oauth.user`. The git host asks for approval as whoever is signed in there. If that
+   isn't `git.oauth.user`, sign out there first, or do this whole step in a private window.
+
+The flow is the authorization code grant with PKCE (S256). `POST /admin/git-remote/connect/`
+(step-up) returns the authorize URL; its `state` is kept in memory for 10 minutes and bound
+to the admin's session. The git host redirects the browser to `GET /api/git-remote/callback/`,
+which answers with a redirect to `/admin/settings?git-remote=connected`, or
+`?git-remote=error&reason=…`. The callback refuses, and audits as `git.connect-refused`:
+
+- another session than the one that started (`session`), or an unknown state (`state`);
+- a user other than `git.oauth.user` (`wrong-user`, case-insensitive);
+- an admin of the git host (`admin-user`), unless `git.oauth.allowAdmin`: a Forgejo grant has
+  all rights of its user, Forgejo has no scopes;
+- a user who may not push to the repository (`not-pushable`).
+
+The tokens are stored in `auth.db`, sealed with a key derived from `auth.key`, and never
+returned by the API. The backend refreshes the access token when it expires within 5 minutes
+of a push, and at least once a day, so the refresh token (Forgejo: 730 hours,
+`git.oauth.refreshTokenLifetime`) never runs out while the backend runs. Forgejo refresh tokens
+are single use: the new pair is stored before it is used. When the git host refuses the refresh
+token (the grant was removed), the state is `expired`, the event `git.refresh-failed` is
+audited once, and pushes stop until an admin connects again. Other errors are retried.
+
+git gets the token through a credential helper given with `-c` for the URL of the git host
+only, after resetting the helpers configured for that URL. `git lfs push` uses the same helper.
+Other hosts never see the token.
+
+`DELETE /admin/git-remote/` (step-up) deletes the tokens. Forgejo has no revocation endpoint:
+the grant stays at `grantsUrl` until the user removes it there. `GET /admin/git-remote/` shows
+the state, the user, whether it may push (checked live), the last refresh and push and the
+number of commits not pushed yet. After connecting, the backend pushes the waiting commits
+right away.
 
 ### Git LFS
 

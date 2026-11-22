@@ -187,7 +187,9 @@ Types: `login.succeeded`, `login.failed`, `login.second-factor-failed`, `logout`
 `account.updated`, `account.role-changed`, `account.disabled`, `account.enabled`,
 `account.deleted`, `settings.changed`, `rate-limit.triggered`, `item.moved`,
 `item.renamed` (moves and renames of wiki items, see
-[references.md](references.md#10-git-audit-log-and-permissions)).
+[references.md](references.md#10-git-audit-log-and-permissions)), `git.connected`,
+`git.disconnected`, `git.connect-refused`, `git.refresh-failed` (the push credential, see
+[sync-protocol.md](sync-protocol.md) section 10).
 
 `login.failed` events for unknown usernames are recorded with the attempted username in
 `details` (truncated to 64 characters) and no `targetId`. Events are kept for
@@ -983,6 +985,9 @@ a pending secret (never started or expired), confirm answers 409 `conflict`.
 | DELETE | `/admin/reset-links/{id}/` | | | 204 (revoke) |
 | GET | `/admin/settings/` | | | `{"require2FA": false, "accessRequestsEnabled": true}` |
 | PATCH | `/admin/settings/` | yes | `{"require2FA"?, "accessRequestsEnabled"?}` | the settings |
+| GET | `/admin/git-remote/` | | | the push credential, see [sync-protocol.md](sync-protocol.md) section 10 |
+| POST | `/admin/git-remote/connect/` | yes | | `{"authorizeUrl"}`; 404 `not-configured` without `git.oauth` |
+| DELETE | `/admin/git-remote/` | yes | | the push credential, disconnected |
 | GET | `/admin/audit/` | | `?limit=100&before=<id>&type=login.failed&account=<id>` (`limit` ≤ 500) | `{"events": [{id, time, type, actor: {id, username}?, target: {id, username}?, ip, userAgent, details}], "next": <id or null>}` |
 
 The access request object is `{id, name, message, status, createdAt, expiresAt,

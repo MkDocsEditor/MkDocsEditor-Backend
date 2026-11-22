@@ -59,6 +59,10 @@ const (
 	AuditRateLimitTriggered      = "rate-limit.triggered"
 	AuditItemMoved               = "item.moved"
 	AuditItemRenamed             = "item.renamed"
+	AuditGitConnected            = "git.connected"
+	AuditGitDisconnected         = "git.disconnected"
+	AuditGitRefreshFailed        = "git.refresh-failed"
+	AuditGitConnectRefused       = "git.connect-refused"
 )
 
 // AuditEvent is one entry of the audit log

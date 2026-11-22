@@ -1,6 +1,7 @@
 package gitstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -38,6 +39,18 @@ type CommitterOptions struct {
 	Push          bool
 	Remote        string
 	Branch        string
+	// Credential returns the credential of a push, nil to use the git configuration. An error
+	// skips the push; the commits wait for the next one.
+	Credential func(ctx context.Context) (*Credential, error)
+}
+
+// PushStatus is the result of the last push since the start
+type PushStatus struct {
+	// At is the time of the last successful push, Error the last failure (with ErrorAt) if it
+	// came after it
+	At      time.Time
+	ErrorAt time.Time
+	Error   string
 }
 
 // pendingEdits are the uncommitted user changes of one document
@@ -94,6 +107,9 @@ type Committer struct {
 	stop     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
+
+	pushMu     sync.Mutex
+	pushStatus PushStatus
 }
 
 // NewCommitter creates the committer and loads the uncommitted changes of the last run
@@ -494,15 +510,63 @@ func (c *Committer) committed(subject string, author Signature, hash string, err
 	metrics.GitCommits.WithLabelValues(metrics.ResultOK).Inc()
 	log.Printf("Committed %q by %s", subject, author)
 	if c.opts.Push {
-		if err = c.repo.Push(c.opts.Remote, c.opts.Branch); err != nil {
-			// the commit stays, the next push takes it along
-			log.Printf("Unable to push: %v", err)
-			metrics.GitPushes.WithLabelValues(metrics.ResultError).Inc()
-		} else {
-			metrics.GitPushes.WithLabelValues(metrics.ResultOK).Inc()
-		}
+		c.push()
 	}
 	return nil
+}
+
+// push pushes the commits. A failure is logged when it differs from the last one; the commits
+// stay, the next push takes them along.
+func (c *Committer) push() {
+	var cred *Credential
+	var err error
+	if c.opts.Credential != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		cred, err = c.opts.Credential(ctx)
+		cancel()
+	}
+	if err == nil {
+		err = c.repo.Push(c.opts.Remote, c.opts.Branch, cred)
+	}
+	c.pushMu.Lock()
+	defer c.pushMu.Unlock()
+	if err != nil {
+		if err.Error() != c.pushStatus.Error {
+			log.Printf("Unable to push: %v", err)
+		}
+		c.pushStatus.ErrorAt, c.pushStatus.Error = time.Now(), err.Error()
+		metrics.GitPushes.WithLabelValues(metrics.ResultError).Inc()
+		return
+	}
+	if c.pushStatus.Error != "" {
+		log.Printf("Pushed again")
+	}
+	c.pushStatus = PushStatus{At: time.Now()}
+	metrics.GitPushes.WithLabelValues(metrics.ResultOK).Inc()
+}
+
+// PushStatus returns the result of the last push
+func (c *Committer) PushStatus() PushStatus {
+	c.pushMu.Lock()
+	defer c.pushMu.Unlock()
+	return c.pushStatus
+}
+
+// PendingPush counts the commits the remote does not have, see Repo.PendingPush
+func (c *Committer) PendingPush() (int, bool) {
+	return c.repo.PendingPush(c.opts.Remote, c.opts.Branch)
+}
+
+// PushEnabled reports whether git.push is on
+func (c *Committer) PushEnabled() bool {
+	return c.opts.Push
+}
+
+// PushNow pushes the waiting commits, for example after the git host was connected
+func (c *Committer) PushNow() {
+	if c.opts.Push {
+		go c.push()
+	}
 }
 
 // rankUsers sorts users (subjects) by their number of changes, most first. Ties go by the

@@ -29,6 +29,8 @@ type serverKeys struct {
 	// accessRequestInvite is the AES-256-GCM key of the invite tokens of approved access
 	// requests. Unlike other tokens they must be returned later.
 	accessRequestInvite []byte
+	// gitRemote is the AES-256-GCM key of the Forgejo tokens for git push
+	gitRemote []byte
 }
 
 func deriveKey(master []byte, purpose string) []byte {
@@ -44,7 +46,8 @@ func loadServerKeys(stateDir, file string) (*serverKeys, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &serverKeys{totp: deriveKey(master, "totp-secret"), accessRequestInvite: deriveKey(master, "access-request-invite"), recoveryCodes: deriveKey(master, "recovery-codes")}, nil
+	return &serverKeys{totp: deriveKey(master, "totp-secret"), accessRequestInvite: deriveKey(master, "access-request-invite"), recoveryCodes: deriveKey(master, "recovery-codes"),
+		gitRemote: deriveKey(master, "git-remote-token")}, nil
 }
 
 func decodeServerKey(s, source string) ([]byte, error) {
