@@ -104,7 +104,9 @@ committer. Creating, renaming, deleting and uploading over the API is committed 
 away. The backend commits only the files it changed, so other uncommitted or staged work
 in the repository stays untouched, and changes made on disk (for example by `git pull`)
 are never committed by it. `git.push: true` pushes after each commit. The repository may
-belong to another user (an NFS volume), git's ownership check is skipped for it.
+belong to another user (an NFS volume), git's ownership check is skipped for it. Images and
+other large files can go into Git LFS through the repository's `.gitattributes`, see
+[`docs/sync-protocol.md`](docs/sync-protocol.md) section 10.
 
 ### Metrics
 

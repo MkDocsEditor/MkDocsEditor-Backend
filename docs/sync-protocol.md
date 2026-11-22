@@ -780,6 +780,26 @@ mounted files (an SSH key with `GIT_SSH_COMMAND`, or a credential helper), never
 the repository or the backend configuration. A failed push is logged and retried after
 the next commit.
 
+### Git LFS
+
+Images and other large files can be stored with [Git LFS](https://git-lfs.com): the
+`.gitattributes` of the repository decides which (for example
+`*.jpg filter=lfs diff=lfs merge=lfs -text`). The backend needs nothing else; the Docker image
+contains `git-lfs`.
+
+- Every git command of the backend gets the `filter.lfs.*` settings of `git lfs install`, so the
+  repository works without a global git configuration. `filter.lfs.required` is set: without
+  `git-lfs`, a commit of a file LFS should store fails instead of committing the file itself.
+  The backend logs at the start whether the repository uses LFS and `git-lfs` is missing.
+- With `git.push`, `git lfs push <remote> HEAD` runs before `git push`, to `git.remote` or the
+  push remote of the branch (`origin` if none is set). If it fails, the commits are not pushed
+  either: the remote never has commits whose files it cannot serve.
+- The work tree holds the files themselves, so resources, thumbnails and the MCP tools read
+  them as before. A clone made without `git-lfs` holds pointer files instead: the backend
+  must run on a clone with the files (`git lfs pull`).
+- Switching to LFS does not rewrite the history: files committed before stay ordinary git
+  objects, and the commit hashes the backend stores stay valid.
+
 ## 11. Revision history
 
 Based on the git history of each file. Requires `git.enabled`.
