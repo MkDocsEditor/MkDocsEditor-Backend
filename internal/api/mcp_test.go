@@ -83,7 +83,7 @@ func TestMCPTools(t *testing.T) {
 	token := e.appToken("bob", "claude", auth.ScopeWrite)
 	s := e.mcpSession(token)
 
-	want := []string{"changes_since", "create_document", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "read_resource", "search", "write_document"}
+	want := []string{"changes_since", "create_document", "download_resource", "edit_document", "get_backlinks", "list_tree", "move_document", "read_document", "read_resource", "search", "write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
@@ -171,7 +171,7 @@ func TestMCPTools(t *testing.T) {
 func TestMCPReadScopeAndAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	s := e.mcpSession(e.appToken("bob", "reader", auth.ScopeRead))
-	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "get_backlinks", "list_tree", "read_document", "read_resource", "search"}) {
+	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "download_resource", "get_backlinks", "list_tree", "read_document", "read_resource", "search"}) {
 		t.Errorf("read scope tools = %v", names)
 	}
 	// readers get the read tools only, whatever the token scope
@@ -275,6 +275,8 @@ func TestMCPReadResource(t *testing.T) {
 	}
 	e.writeFile("guide/img/Heizung 1.jpg", buf.String())
 	e.writeFile("guide/notes.txt", "some notes\n")
+	thermal := thermalJPEG(t, 256, 192)
+	e.writeFile("guide/img/P2_thermal.jpg", string(thermal))
 	e.writeFile("guide/data.bin", "\x00\x01")
 	e.restart()
 	s := e.mcpSession(e.appToken("carol", "claude", auth.ScopeRead))
@@ -315,7 +317,21 @@ func TestMCPReadResource(t *testing.T) {
 		t.Errorf("default size = %d", config.Width)
 	}
 
-	out, failed := callTool(t, s, "read_resource", map[string]any{"resource": "guide/notes.txt"})
+	// an image with data beyond the picture says so, and download_resource returns it unchanged
+	out, failed := callTool(t, s, "read_resource", map[string]any{"resource": "guide/img/P2_thermal.jpg"})
+	if failed || !strings.Contains(out, "camera: InfiRay P2 Pro") || !strings.Contains(out, "download_resource gets the original") {
+		t.Errorf("thermal header = %q", out)
+	}
+	res, err = s.CallTool(context.Background(), &mcp.CallToolParams{Name: "download_resource", Arguments: map[string]any{"resource": "guide/img/P2_thermal.jpg"}})
+	if err != nil || res.IsError || len(res.Content) != 2 {
+		t.Fatalf("download_resource = %+v, %v", res, err)
+	}
+	er, ok := res.Content[1].(*mcp.EmbeddedResource)
+	if !ok || !bytes.Equal(er.Resource.Blob, thermal) || er.Resource.MIMEType != "application/octet-stream" || er.Resource.URI != "wiki:///guide/img/P2_thermal.jpg" {
+		t.Fatalf("embedded = %+v", res.Content[1])
+	}
+
+	out, failed = callTool(t, s, "read_resource", map[string]any{"resource": "guide/notes.txt"})
 	if failed || !strings.HasSuffix(out, "---\nsome notes\n") {
 		t.Errorf("text = %q", out)
 	}

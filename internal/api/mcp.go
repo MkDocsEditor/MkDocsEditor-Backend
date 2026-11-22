@@ -27,7 +27,7 @@ const mcpInstructions = `A family wiki of markdown pages (MkDocs). Find pages wi
 read_document before changing a page, then change it with edit_document (preferred) or
 write_document. People may edit the same page at the same time: changes merge, so keep edits small.
 changes_since shows what people changed since you last read a page; read_history lists its commits.
-read_resource shows the images and other files pages link to.`
+read_resource shows the images and other files pages link to; download_resource gets a file unchanged.`
 
 // mcpCaller is who calls a tool: the user and the app token of the HTTP request
 type mcpCaller struct {
@@ -97,7 +97,11 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_resource", Annotations: readOnly, Description: "Read a file of the wiki that " +
 		"is no page, like an image a page links to: images come back as images, text files as text. Give its path " +
-		"relative to the wiki root, or the link destination with the page as document."}, tools.readResource)
+		"relative to the wiki root, or the link destination with the page as document. For images it also says " +
+		"what the original file holds beyond the scaled picture."}, tools.readResource)
+	mcp.AddTool(server, &mcp.Tool{Name: "download_resource", Annotations: readOnly, Description: "Get a file of the wiki " +
+		"unchanged, as an embedded resource your client saves to a file: for the full resolution of an image, data " +
+		"embedded in it (like the raw values of a thermal camera), or files read_resource cannot show."}, tools.downloadResource)
 	mcp.AddTool(server, &mcp.Tool{Name: "changes_since", Annotations: readOnly, Description: "What people changed on a page since you " +
 		"last read or wrote it (or since a revision), as a diff with who changed it."}, tools.changesSince)
 	if rs.git != nil {

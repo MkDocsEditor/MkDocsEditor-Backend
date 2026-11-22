@@ -62,6 +62,7 @@ means the top level.
 | `list_tree` | | Paths and titles of all pages, or of those below `section` |
 | `read_document` | | The markdown of a page with a header: `path`, `title`, `revision` |
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
+| `download_resource` | | A file unchanged, as an embedded resource. See below |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
 | `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
 | `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
@@ -78,11 +79,26 @@ as written in a page together with that page as `document` (`img/photo%201.jpg` 
 - PNG, JPEG, GIF and WebP come back as image content, scaled so that the longer side is at most
   `size` pixels (64 to 1024, default 1024, rounded up like the thumbnails of
   [references.md](references.md) section 9) and with the EXIF orientation applied. They share the thumbnail
-  cache. A text content before it has `path`, `mimeType` and `size`.
+  cache. A text content before it has `path`, `mimeType` and `size`, and what the original
+  holds beyond the picture:
+  - `original`: its dimensions (upright), and the size it was scaled to
+  - `camera`: Make and Model from Exif
+  - `metadata`: the JPEG APPn segments and PNG chunks with their identifier and size, consecutive
+    ones of a kind merged (`APP3 x40 (2.5 MiB)`)
+  - `after the end of the image`: bytes after JPEG EOI or PNG IEND
+  - `note`: when 64 KiB or more are neither the picture nor ordinary metadata (JFIF, Exif, ICC,
+    XMP, Photoshop, Adobe, small PNG text chunks), a hint to `download_resource`. Thermal cameras,
+    for example, store their raw values like this.
 - Text files (and SVG) up to 256 KiB come back as text, after the same header and `---`.
 - Other files are a tool error.
 
-The tool exists because agents cannot use `GET /resource/{id}/content/`: OAuth access tokens
+`download_resource` takes the same names and returns the file unchanged, up to 64 MiB, as an
+embedded resource (`blob`, URI `wiki:///<path>`) after a text content with `path`, `mimeType` and
+`size`. Claude Code (2.1.69 and later) saves such blobs to a file and gives the agent its path,
+but forwards image blobs as images: images are therefore sent as `application/octet-stream`, the
+text names their real type.
+
+The tools exist because agents cannot use `GET /resource/{id}/content/`: OAuth access tokens
 only work for the MCP endpoint ([oauth.md](oauth.md)), and the agent does not see its token.
 
 `changes_since` keeps what each app token saw of each page, apart from the token's person
@@ -126,3 +142,18 @@ An agent that changes a page shows up for the people who have it open:
 
 Changes over a session token (`mds_…`) are no agent changes: they appear as the account's
 own, without presence.
+
+## 5. Assistants that cannot use the wiki
+
+Two ways to reach the wiki from assistants beyond Claude Code were looked at in November 2026
+and dropped:
+
+- **Connectors of the Claude apps** (claude.ai, desktop, mobile): Anthropic's servers call the
+  MCP server, not the user's device, so `/api/mcp` and the OAuth endpoints would have to be
+  reachable from the internet. The wiki stays on the home network.
+- **Android AppFunctions** (`androidx.appfunctions`, Android 16+): the Android app would
+  expose search, read and edit as functions for Gemini and other system assistants, running
+  in the app with its own login, so the wiki could stay private. Dropped because Gemini only
+  calls the functions of apps distributed through the Play Store, and the app is not
+  published there. The Claude app could not call them either: only system assistants get
+  `EXECUTE_APP_FUNCTIONS`.
