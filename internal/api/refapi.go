@@ -214,6 +214,11 @@ func (rs *RestService) getLink(c *echo.Context) error {
 	if target == nil {
 		return rs.ReturnNotFound(c, toID)
 	}
+	return c.JSONPretty(http.StatusOK, linkTo(lookup, from, target, c.QueryParam("anchor")), jsonIndent)
+}
+
+// linkTo returns the link from a document to an item, as a destination and as markdown
+func linkTo(lookup *references.TreeLookup, from *wiki.Document, target *references.ItemRef, anchor string) *LinkResult {
 	lt := references.LinkTarget{Type: target.Type, Path: target.Path}
 	text := target.Name
 	if target.Type == wiki.TypeSection {
@@ -221,12 +226,12 @@ func (rs *RestService) getLink(c *echo.Context) error {
 			lt.Index = index.RelPath
 		}
 	}
-	dest := references.LinkPath(from.RelPath, lt, c.QueryParam("anchor"))
+	dest := references.LinkPath(from.RelPath, lt, anchor)
 	markdown := "[" + escapeLinkText(text) + "](" + dest + ")"
 	if r := lookup.Resources[target.Path]; r != nil && r.Kind == wiki.ResourceKindImage {
 		markdown = "![" + escapeLinkText(strings.TrimSuffix(r.Name, path.Ext(r.Name))) + "](" + dest + ")"
 	}
-	return c.JSONPretty(http.StatusOK, &LinkResult{Destination: dest, Markdown: markdown, Target: target}, jsonIndent)
+	return &LinkResult{Destination: dest, Markdown: markdown, Target: target}
 }
 
 // escapeLinkText escapes the characters that would end the text of a markdown link

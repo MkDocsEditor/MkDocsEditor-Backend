@@ -224,12 +224,21 @@ func (rs *RestService) getFeed(c *echo.Context) error {
 		}
 		limit = n
 	}
-	entries, next, err := rs.sync.Activity().Feed(c.QueryParam("before"), limit)
+	out, err := rs.feed(c.QueryParam("before"), limit)
 	if errors.Is(err, activity.ErrInvalidCursor) {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "invalid cursor", nil)
 	}
 	if err != nil {
 		return rs.ReturnError(c, err)
+	}
+	return c.JSONPretty(http.StatusOK, out, jsonIndent)
+}
+
+// feed returns the entries of the change feed before a cursor ("" for the newest)
+func (rs *RestService) feed(before string, limit int) (*FeedResponse, error) {
+	entries, next, err := rs.sync.Activity().Feed(before, limit)
+	if err != nil {
+		return nil, err
 	}
 	docs := rs.documentsByPath()
 	authors := map[string]Author{}
@@ -254,7 +263,7 @@ func (rs *RestService) getFeed(c *echo.Context) error {
 	if next != "" {
 		out.Next = &next
 	}
-	return c.JSONPretty(http.StatusOK, out, jsonIndent)
+	return out, nil
 }
 
 // relOf returns the path of an item relative to the docs folder, "" if it is outside
@@ -278,13 +287,13 @@ func (rs *RestService) itemCreatedBy(accountID string, itemType string, absPath 
 	}
 }
 
-// itemDeleted adds a deleted document or section to the feed and removes its pins
-func (rs *RestService) itemDeleted(c *echo.Context, itemType string, absPath string) {
+// itemDeletedBy adds a document or section an account deleted to the feed and removes its pins
+func (rs *RestService) itemDeletedBy(accountID string, itemType string, absPath string) {
 	rel := rs.relOf(absPath)
 	if rel == "" || itemType == wiki.TypeResource {
 		return
 	}
-	rs.sync.Activity().RecordItem(activity.KindDeleted, itemType, rel, "", UserFromContext(c).ID)
+	rs.sync.Activity().RecordItem(activity.KindDeleted, itemType, rel, "", accountID)
 	if err := rs.sync.Activity().DeleteSeen(rel); err != nil {
 		log.Printf("Unable to forget what was seen of %s: %v", rel, err)
 	}

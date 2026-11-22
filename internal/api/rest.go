@@ -552,29 +552,41 @@ func (rs *RestService) renameItem(itemType string) echo.HandlerFunc {
 func (rs *RestService) deleteItem(itemType string) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		id := c.Param(urlParamID)
-		path := rs.treeManager.ItemPath(id, itemType)
-		if path == "" {
-			return rs.ReturnNotFound(c, id)
-		}
-
-		var success bool
-		err := rs.sync.DeleteItem(path, c.QueryParam("force") == "true", func() (err error) {
-			success, err = rs.treeManager.DeleteItem(id, itemType)
-			return err
-		})
+		_, err := rs.deleteItemAs(UserFromContext(c), id, itemType, c.QueryParam("force") == "true")
 		if errors.Is(err, collab.ErrDocumentInUse) {
 			return apiError(c, http.StatusConflict, CodeConflict, err.Error()+" (use ?force=true to delete anyway)", nil)
+		}
+		if errors.Is(err, wiki.ErrNotFound) {
+			return rs.ReturnNotFound(c, id)
 		}
 		if err != nil {
 			return rs.ReturnError(c, err)
 		}
-		if !success {
-			return rs.ReturnNotFound(c, id)
-		}
-		rs.commitTree(c, "Delete %s", path)
-		rs.itemDeleted(c, itemType, path)
 		return c.NoContent(http.StatusOK)
 	}
+}
+
+// deleteItemAs deletes an item of a user, commits it and adds it to the feed. It returns the
+// path of the deleted item; wiki.ErrNotFound if there is no such item.
+func (rs *RestService) deleteItemAs(user *auth.User, id string, itemType string, force bool) (string, error) {
+	path := rs.treeManager.ItemPath(id, itemType)
+	if path == "" {
+		return "", wiki.ErrNotFound
+	}
+	var success bool
+	err := rs.sync.DeleteItem(path, force, func() (err error) {
+		success, err = rs.treeManager.DeleteItem(id, itemType)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	if !success {
+		return "", wiki.ErrNotFound
+	}
+	rs.commitTreeAs(user, "Delete %s", path)
+	rs.itemDeletedBy(user.ID, itemType, path)
+	return path, nil
 }
 
 // returns the content of a single resource with the given id (if found)
