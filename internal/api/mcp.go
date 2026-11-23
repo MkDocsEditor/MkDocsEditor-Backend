@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -95,7 +96,11 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		"Every word must match (case-insensitive) in the text, title or path. Returns paths, titles and matching lines."}, tools.search)
 	mcp.AddTool(server, &mcp.Tool{Name: "list_tree", Annotations: readOnly, Description: "List the pages (path and title), " +
 		"optionally only those below a section path. With files, also the sections and the files that are no pages " +
-		"(images, scripts, PDFs) with size and type."}, tools.listTree)
+		"(images, scripts, PDFs) with size and type. With meta, also the tags, status and description of each page; " +
+		"with tag, only the pages with that tag."}, tools.listTree)
+	mcp.AddTool(server, &mcp.Tool{Name: "read_wiki_config", Annotations: readOnly, Description: "Read the settings of " +
+		"mkdocs.yml that decide how pages render: site name, theme and its features, plugins and markdown extensions " +
+		"(like admonition or pymdownx.tabbed). Check it before you use syntax an extension provides."}, tools.readWikiConfig)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_document", Annotations: readOnly, Description: "Read a page: its markdown and its revision. " +
 		"Read before you change a page. Next time, changes_since shows what people changed since. The header lists who " +
 		"has the page open and where they are."}, tools.readDocument)
@@ -165,6 +170,8 @@ type (
 	mcpListInput struct {
 		Section string `json:"section,omitempty" jsonschema:"only pages below this section path, like guide"`
 		Files   bool   `json:"files,omitempty" jsonschema:"also list the sections and the files that are no pages"`
+		Meta    bool   `json:"meta,omitempty" jsonschema:"also the front matter of each page: tags, status and description"`
+		Tag     string `json:"tag,omitempty" jsonschema:"only pages with this tag of their front matter"`
 	}
 
 	mcpEditInput struct {
@@ -314,7 +321,14 @@ func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpLis
 			sections = append(sections, s.RelPath+"/")
 		}
 		for _, d := range s.Documents {
-			lines = append(lines, d.RelPath+"\t"+d.Title)
+			if in.Tag != "" && !slices.Contains(d.Meta.Tags, in.Tag) {
+				continue
+			}
+			line := d.RelPath + "\t" + d.Title
+			if in.Meta {
+				line += "\t" + formatPageMeta(d.Meta)
+			}
+			lines = append(lines, line)
 		}
 		for _, r := range s.Resources {
 			files = append(files, fmt.Sprintf("%s\t%s\t%s", r.RelPath, formatBytes(int(r.Filesize)), r.MimeType))
@@ -323,7 +337,11 @@ func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpLis
 	sort.Strings(lines)
 	out := "no pages"
 	if len(lines) > 0 {
-		out = "path\ttitle\n" + strings.Join(lines, "\n")
+		header := "path\ttitle"
+		if in.Meta {
+			header += "\tmeta"
+		}
+		out = header + "\n" + strings.Join(lines, "\n")
 	}
 	if in.Files {
 		sort.Strings(sections)

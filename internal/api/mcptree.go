@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"strings"
 
@@ -510,4 +512,43 @@ func (t *mcpTools) blame(_ context.Context, _ *mcp.CallToolRequest, in mcpDocume
 		fmt.Fprintf(&b, "\n%s: %s %s by %s: %s", lines, shortRevision(*bl.Revision), *bl.Time, who, *bl.Message)
 	}
 	return text(b.String()), nil, nil
+}
+
+// maxMetaDescription is the most code points of a description in list_tree
+const maxMetaDescription = 120
+
+// formatPageMeta is the meta column of list_tree: the front matter fields that are set
+func formatPageMeta(m wiki.PageMeta) string {
+	var parts []string
+	if len(m.Tags) > 0 {
+		parts = append(parts, "tags: "+strings.Join(m.Tags, ", "))
+	}
+	if m.Status != nil {
+		parts = append(parts, "status: "+*m.Status)
+	}
+	if m.Description != nil {
+		d := []rune(*m.Description)
+		if len(d) > maxMetaDescription {
+			d = append(d[:maxMetaDescription], '…')
+		}
+		parts = append(parts, "description: "+string(d))
+	}
+	if m.SearchExclude {
+		parts = append(parts, "excluded from search")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (t *mcpTools) readWikiConfig(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	// the filtered config of GET /wiki/config/, never the whole mkdocs.yml: it can hold secrets
+	config, err := wiki.ReadWikiConfig(t.rs.treeManager.ConfigFile())
+	if err != nil {
+		log.Printf("Unable to read the wiki config: %v", err)
+		return nil, nil, errors.New("mkdocs.yml cannot be read")
+	}
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	return text(string(data)), nil, nil
 }

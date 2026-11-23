@@ -122,3 +122,7 @@ The backend reads `mkdocs.yml` only, not `zensical.toml`. If it cannot be read, 
 500.
 
 The older `GET /mkdocs/config/` returns the whole `mkdocs.yml` without this filtering.
+
+Agents get the same: the MCP tool `read_wiki_config` answers this filtered config, never the
+whole file, and `list_tree` with `meta` lists the tags, status and description of the pages, or
+with `tag` only the pages with a tag ([mcp.md](mcp.md)).
