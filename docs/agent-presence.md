@@ -178,16 +178,26 @@ involved. It has two parts:
 Rules:
 
 - The app setting **"Animate edits of others"** turns the appearance animation on and off. It
-  is **on by default** in the web and Android clients (the default of the KodeEditor
-  configuration stays off). It is only for text that others write (an agent, or another person
+  is **on by default** in the web and Android apps (the default of the libraries, like the
+  KodeEditor configuration, stays off). It is only for text that others write (an agent, or another person
   in the document), never for text the local person types, pastes, undoes or redoes. With the
   setting off, a live agent change shows at once too, without a reveal.
-- Defaults, all settable by the client:
-  - fade-in 250 ms
+- The typing reveal, the same on both clients (the web client ships it in
+  `src/editor/appearance.ts`):
+  - speed: max(60 characters/s, length / 4 s), so no reveal takes longer than 4 s. The
+    length counts the UTF-16 units of all inserted ranges of one change together.
+  - a step every 30 ms; fractions of a character carry over to the next step
+  - no reveal, the text shows at once, when the change has more than 2048 characters, the
+    setting "Animate edits of others" is off, reduce motion is on, or the app or tab is
+    hidden
+  - the hiding takes precedence over other decorations of the same text
+- Defaults of the appearance animation, all settable by the client:
+  - fade-in: opacity 0 to 1 over 250 ms
   - an optional slide of the appearing characters, 0 by default. It is optional per client;
     the web client leaves it out for now.
   - only the newest 16 characters of one writer animate
   - at most 24 animated ranges at once; above that, the oldest finish at once
+  - local typing into a range that is fading in does not fade
 - Every animated range has a tag of its writer: the actor id of the change. The clients
   already know which account, and for agents which app token, an actor belongs to (the actor
   map, [sync-protocol.md](sync-protocol.md) section 2), so this needs no message. Several
