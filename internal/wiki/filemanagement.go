@@ -1,6 +1,8 @@
 package wiki
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -9,6 +11,11 @@ import (
 // The data is written to a temporary file in the same folder which is then renamed,
 // so readers never see a partially written file. The mode of an existing file is kept.
 func WriteFile(path string, data []byte) error {
+	return WriteFileFrom(path, bytes.NewReader(data))
+}
+
+// WriteFileFrom is WriteFile with the content from a reader, which is not held in memory.
+func WriteFileFrom(path string, data io.Reader) error {
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
@@ -21,7 +28,7 @@ func WriteFile(path string, data []byte) error {
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
 
-	if _, err = tmp.Write(data); err != nil {
+	if _, err = io.Copy(tmp, data); err != nil {
 		_ = tmp.Close()
 		return err
 	}

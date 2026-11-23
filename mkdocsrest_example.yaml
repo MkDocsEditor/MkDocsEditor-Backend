@@ -18,6 +18,9 @@ server:
   # X-Forwarded-Proto headers are trusted. Default: none, the TCP peer is the client.
   #trustedProxies:
   #  - "10.42.0.0/16"
+  # (optional) The largest file in bytes an agent can upload with the MCP tool request_upload
+  # (docs/mcp.md). Default: 67108864 (64 MiB). A reverse proxy needs a matching body limit.
+  #maxUploadBytes: 1073741824
   # (optional) Prometheus metrics and the sync event log, see docs/metrics.md
   #metrics:
   #  # Serve /metrics on a port of its own. It has no authentication and tells usernames, so do

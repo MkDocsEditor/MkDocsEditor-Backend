@@ -86,6 +86,8 @@ type RestService struct {
 	knownRoutes map[string]struct{}
 	// thumbnailSlots limits concurrent image decoding
 	thumbnailSlots chan struct{}
+	// uploads are the open one-time upload URLs of agents
+	uploads uploadTickets
 }
 
 func NewRestService(
@@ -345,6 +347,7 @@ func (rs *RestService) registerContentRoutes(echoRest *echo.Echo) {
 	echoRest.GET(EndpointPathMCP, mcpHandler)
 	echoRest.POST(EndpointPathMCP, mcpHandler)
 	echoRest.DELETE(EndpointPathMCP, mcpHandler)
+	echoRest.PUT(EndpointPathUpload+":"+urlParamToken+"/", rs.putUpload)
 
 	groupMkDocs := echoRest.Group("/mkdocs")
 	groupSections := echoRest.Group("/section")

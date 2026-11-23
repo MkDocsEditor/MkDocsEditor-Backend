@@ -202,6 +202,10 @@ func (rs *RestService) authMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			// these authenticate the client (PKCE, refresh token), not a user
 			return next(c)
 		}
+		if strings.HasPrefix(path, EndpointPathUpload) {
+			// the secret in the URL is the credential, see mcpupload.go
+			return next(c)
+		}
 		authorization := req.Header.Get(echo.HeaderAuthorization)
 		if isForeignBasicAuth(req) {
 			// the Basic auth of another app on the same host, such as a protected MkDocs site

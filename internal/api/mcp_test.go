@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -85,7 +86,8 @@ func TestMCPTools(t *testing.T) {
 
 	want := []string{"changes_since", "check_links", "create_document", "create_section", "delete_document", "delete_resource",
 		"delete_section", "download_resource", "edit_document", "get_backlinks", "link_to", "list_tree", "move_document",
-		"move_resource", "move_section", "read_document", "read_resource", "recent_changes", "search", "upload_resource", "write_document"}
+		"move_resource", "move_section", "read_document", "read_resource", "recent_changes", "request_upload", "search", "upload_resource",
+		"write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
@@ -472,5 +474,109 @@ func TestMCPTreeToolsWithGit(t *testing.T) {
 	out, failed := callTool(t, s, "blame", map[string]any{"document": "guide/setup.md"})
 	if failed || !strings.Contains(out, "path: guide/setup.md") || !strings.Contains(out, "by Test: Initial") {
 		t.Errorf("blame = %q", out)
+	}
+}
+
+func TestMCPRequestUpload(t *testing.T) {
+	e := newSyncEnv(t)
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeWrite))
+	urlOf := func(out string) string {
+		i := strings.Index(out, "'")
+		j := strings.LastIndex(out, "'")
+		if i < 0 || j <= i {
+			t.Fatalf("no URL in %q", out)
+		}
+		return out[i+1 : j]
+	}
+	put := func(url string, body []byte) (int, string) {
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+
+	// a file above the limit of a tool call, no login on the PUT
+	out, failed := callTool(t, s, "request_upload", map[string]any{"path": "img/big.bin"})
+	if failed || !strings.Contains(out, "curl -sS -T <file> '"+e.http.URL+APIPrefix+EndpointPathUpload) {
+		t.Fatalf("request_upload = %q, %v", out, failed)
+	}
+	big := bytes.Repeat([]byte{0xAB, 0x00, 0x7F}, 2<<20)
+	url := urlOf(out)
+	if code, body := put(url, big); code != http.StatusOK || !strings.Contains(body, "uploaded img/big.bin") {
+		t.Fatalf("PUT = %d %q", code, body)
+	}
+	if got := e.readFile("img/big.bin"); got != string(big) {
+		t.Errorf("stored %d bytes, want %d", len(got), len(big))
+	}
+	// the URL works once
+	if code, _ := put(url, big); code != http.StatusNotFound {
+		t.Errorf("second PUT = %d", code)
+	}
+	if code, _ := put(e.http.URL+APIPrefix+EndpointPathUpload+"nope/", big); code != http.StatusNotFound {
+		t.Errorf("unknown URL = %d", code)
+	}
+
+	// an existing file needs replace, at request and at upload
+	if out, failed = callTool(t, s, "request_upload", map[string]any{"path": "img/big.bin"}); !failed || !strings.Contains(out, "pass replace") {
+		t.Errorf("existing = %q, %v", out, failed)
+	}
+	out, _ = callTool(t, s, "request_upload", map[string]any{"path": "img/big.bin", "replace": true})
+	if code, body := put(urlOf(out), []byte("small")); code != http.StatusOK || !strings.Contains(body, "replaced img/big.bin") {
+		t.Fatalf("replace = %d %q", code, body)
+	}
+	if got := e.readFile("img/big.bin"); got != "small" {
+		t.Errorf("replaced = %q", got)
+	}
+
+	// the file appeared after the URL was issued
+	out, _ = callTool(t, s, "request_upload", map[string]any{"path": "late.txt"})
+	callTool(t, s, "upload_resource", map[string]any{"path": "late.txt", "text": "x"})
+	if code, body := put(urlOf(out), []byte("y")); code != http.StatusConflict || !strings.Contains(body, "pass replace") {
+		t.Errorf("late = %d %q", code, body)
+	}
+
+	// pages, empty bodies, expired URLs
+	if out, failed = callTool(t, s, "request_upload", map[string]any{"path": "x.md"}); !failed || !strings.Contains(out, "create_document") {
+		t.Errorf("page = %q, %v", out, failed)
+	}
+	out, _ = callTool(t, s, "request_upload", map[string]any{"path": "empty.txt"})
+	if code, _ := put(urlOf(out), nil); code != http.StatusBadRequest {
+		t.Errorf("empty = %d", code)
+	}
+	out, _ = callTool(t, s, "request_upload", map[string]any{"path": "old.txt"})
+	e.rs.uploads.mu.Lock()
+	for _, tk := range e.rs.uploads.tickets {
+		tk.expires = time.Now().Add(-time.Second)
+	}
+	e.rs.uploads.mu.Unlock()
+	if code, _ := put(urlOf(out), []byte("z")); code != http.StatusNotFound {
+		t.Errorf("expired = %d", code)
+	}
+
+	// server.maxUploadBytes, and no temporary file is left behind
+	e.rs.server.MaxUploadBytes = 1000
+	out, _ = callTool(t, s, "request_upload", map[string]any{"path": "limited.bin"})
+	if !strings.Contains(out, "1000 B") {
+		t.Errorf("limit not named: %q", out)
+	}
+	if code, _ := put(urlOf(out), make([]byte, 1001)); code != http.StatusRequestEntityTooLarge {
+		t.Errorf("too large = %d", code)
+	}
+	e.rs.server.MaxUploadBytes = 0
+	if left, _ := filepath.Glob(filepath.Join(e.project, "docs", ".upload-*")); len(left) > 0 {
+		t.Errorf("left over: %v", left)
+	}
+
+	// readers get no tool
+	r := e.mcpSession(e.appToken("carol", "claude", auth.ScopeWrite))
+	if names := toolNames(t, r); slices.Contains(names, "request_upload") {
+		t.Errorf("reader tools = %v", names)
 	}
 }

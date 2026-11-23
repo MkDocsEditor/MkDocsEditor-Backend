@@ -510,7 +510,7 @@ func (tm *TreeManager) CreateResource(parentSectionID string, resourceName strin
 
 // ReplaceResource replaces the content of a resource. The file is replaced atomically, so
 // readers see the old or the new content.
-func (tm *TreeManager) ReplaceResource(id string, content []byte) (*Resource, error) {
+func (tm *TreeManager) ReplaceResource(id string, content io.Reader) (*Resource, error) {
 	tm.fsLock.Lock()
 	defer tm.fsLock.Unlock()
 
@@ -518,7 +518,7 @@ func (tm *TreeManager) ReplaceResource(id string, content []byte) (*Resource, er
 	if r == nil {
 		return nil, fmt.Errorf("%w: resource %s", ErrNotFound, id)
 	}
-	if err := WriteFile(r.Path, content); err != nil {
+	if err := WriteFileFrom(r.Path, content); err != nil {
 		return nil, err
 	}
 	tm.CreateItemTree()

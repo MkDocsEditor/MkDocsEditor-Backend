@@ -35,6 +35,8 @@ type mcpCaller struct {
 	user  *auth.User
 	token *auth.AppToken
 	info  auth.RequestInfo
+	// baseURL is the backend URL, for the upload URLs
+	baseURL string
 }
 
 type mcpCallerKey struct{}
@@ -75,7 +77,7 @@ func (rs *RestService) newMCPHandler() echo.HandlerFunc {
 		MaxRequestBodyBytes:        maxContentRequestBytes,
 	})
 	return func(c *echo.Context) error {
-		caller := &mcpCaller{user: UserFromContext(c), token: AppTokenFromContext(c), info: requestInfo(c)}
+		caller := &mcpCaller{user: UserFromContext(c), token: AppTokenFromContext(c), info: requestInfo(c), baseURL: rs.backendURL(c)}
 		req := c.Request()
 		handler.ServeHTTP(c.Response(), req.WithContext(context.WithValue(req.Context(), mcpCallerKey{}, caller)))
 		return nil
