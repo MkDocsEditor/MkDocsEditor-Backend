@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // agentPresence returns the presence of the agent a client sees, nil for none. Caller holds c.mu.
@@ -316,4 +318,118 @@ func TestMCPLiveListed(t *testing.T) {
 			t.Errorf("%s: %d write tools listed", name, listed)
 		}
 	}
+}
+
+// presenceAt sends a presence with indexes at the client's current revision
+func (c *testClient) presenceAt(docID string, anchor, head int, viewport map[string]int) {
+	c.mu.Lock()
+	revision := collab.FormatRevision(c.doc.Heads())
+	c.mu.Unlock()
+	at := map[string]any{"revision": revision, "selections": []map[string]int{{"anchor": anchor, "head": head}}}
+	if viewport != nil {
+		at["viewport"] = viewport
+	}
+	// the cursors are opaque to the server, any string will do
+	c.send(map[string]any{"type": collab.MsgPresence, "documentId": docID,
+		"selections": []map[string]string{{"anchor": "x", "head": "y"}}, "at": at})
+}
+
+func TestMCPReadPresence(t *testing.T) {
+	e := newSyncEnv(t)
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeRead))
+	presence := func() mcpPresence {
+		t.Helper()
+		res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "read_presence", Arguments: map[string]any{"document": rel}})
+		if err != nil || res.IsError {
+			t.Fatalf("read_presence = %v, %v", res, err)
+		}
+		var out mcpPresence
+		raw, _ := json.Marshal(res.StructuredContent)
+		if err = json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// nobody has the page open: no viewers, and the page is not loaded for it
+	if p := presence(); len(p.Viewers) != 0 || p.Revision != "" {
+		t.Fatalf("nobody open = %+v", p)
+	}
+
+	// alice selects "Some" in "# Setup\n\nSome text.\n", carol's client sends no indexes
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	c := newTestClient(t, e, "carol")
+	c.connect(id)
+	a.presenceAt(id, 9, 13, map[string]int{"top": 0, "bottom": len(setupText) - 1})
+	c.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}})
+	viewer := func(p mcpPresence, name string) *mcpViewer {
+		for i := range p.Viewers {
+			if p.Viewers[i].Name == name {
+				return &p.Viewers[i]
+			}
+		}
+		return nil
+	}
+	eventually(t, "alice's position", func() bool { v := viewer(presence(), "alice"); return v != nil && v.Cursor != nil })
+	p := presence()
+	alice, carol := viewer(p, "alice"), viewer(p, "carol")
+	if alice.Cursor.Line != 3 || alice.Cursor.Column != 5 || alice.Cursor.Index != 13 || alice.Heading != "# Setup" || alice.Approximate ||
+		alice.Selection == nil || alice.Selection.Text != "Some" || alice.Selection.Length != 4 || alice.Selection.From.Column != 1 ||
+		alice.Viewport == nil || alice.Viewport.Top != 1 || alice.Viewport.Bottom != 3 || !slices.Equal(alice.Viewport.Headings, []string{"# Setup"}) {
+		t.Errorf("alice = %+v %+v %+v", alice, alice.Cursor, alice.Selection)
+	}
+	if carol == nil || carol.Position != "unknown" || carol.Cursor != nil {
+		t.Errorf("carol = %+v", carol)
+	}
+
+	// the indexes are not relayed to other clients
+	c.mu.Lock()
+	for _, m := range c.messages {
+		if m["type"] == collab.MsgPresence && m["at"] != nil {
+			t.Error("at relayed")
+		}
+	}
+	c.mu.Unlock()
+
+	// alice inserts a line at the start without a new presence (carol is a reader): her indexes
+	// of the older revision are mapped to the current text
+	a.insertText(0, "Hello\n")
+	eventually(t, "server", func() bool { return e.serverText(rel) == "Hello\n"+setupText })
+	alice = viewer(presence(), "alice")
+	if alice.Cursor.Line != 4 || alice.Cursor.Index != 19 || alice.Selection.Text != "Some" || alice.Approximate {
+		t.Errorf("mapped = %+v %+v", alice.Cursor, alice.Selection)
+	}
+
+	// read_document has a line per viewer, of the same revision as the text
+	out, failed := callTool(t, s, "read_document", map[string]any{"document": rel})
+	if failed || !strings.Contains(out, `- alice (test): line 4 col 5 in "# Setup", selected "Some" (4 chars), viewing lines 2-4 (# Setup), `) ||
+		!strings.Contains(out, "- carol (test): position unknown, ") || !strings.Contains(out, "\nviewers: alice, carol\n") {
+		t.Errorf("read_document = %q", out)
+	}
+
+	// a revision the server does not have: applied to the current text, approximate
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []map[string]string{{"anchor": "x", "head": "x"}},
+		"at": map[string]any{"revision": strings.Repeat("b", 64), "selections": []map[string]int{{"anchor": 500, "head": 500}}}})
+	eventually(t, "approximate", func() bool { v := viewer(presence(), "alice"); return v != nil && v.Approximate })
+	if alice = viewer(presence(), "alice"); alice.Cursor.Index != len("Hello\n"+setupText) {
+		t.Errorf("clamped = %+v", alice.Cursor)
+	}
+
+	// a presence without indexes clears them, and at null is the same as no at
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}})
+	eventually(t, "cleared", func() bool { v := viewer(presence(), "alice"); return v != nil && v.Position == "unknown" })
+	a.presenceAt(id, 1, 1, nil)
+	eventually(t, "set again", func() bool { v := viewer(presence(), "alice"); return v != nil && v.Cursor != nil })
+	a.send(map[string]any{"type": collab.MsgPresence, "documentId": id, "selections": []any{}, "at": nil})
+	eventually(t, "cleared by null", func() bool { v := viewer(presence(), "alice"); return v != nil && v.Position == "unknown" })
+	a.mu.Lock()
+	for _, m := range a.messages {
+		if m["type"] == collab.MsgError {
+			t.Errorf("error for a presence: %v", m)
+		}
+	}
+	a.mu.Unlock()
 }

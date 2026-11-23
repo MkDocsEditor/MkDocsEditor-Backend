@@ -97,7 +97,9 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		"optionally only those below a section path. With files, also the sections and the files that are no pages " +
 		"(images, scripts, PDFs) with size and type."}, tools.listTree)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_document", Annotations: readOnly, Description: "Read a page: its markdown and its revision. " +
-		"Read before you change a page. Next time, changes_since shows what people changed since."}, tools.readDocument)
+		"Read before you change a page. Next time, changes_since shows what people changed since. The header lists who " +
+		"has the page open and where they are."}, tools.readDocument)
+	mcp.AddTool(server, &mcp.Tool{Name: "read_presence", Annotations: readOnly, Description: readPresenceDescription}, tools.readPresence)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_resource", Annotations: readOnly, Description: "Read a file of the wiki that " +
 		"is no page, like an image a page links to: images come back as images, text files as text. Give its path " +
@@ -341,13 +343,23 @@ func (t *mcpTools) readDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 	if err != nil {
 		return nil, nil, err
 	}
-	content, revision, err := t.rs.sync.ReadContent(d)
+	// with viewers, the text their positions refer to, so that both are of one revision
+	content, revision, positions, open, err := t.viewerPositions(d)
 	if err != nil {
 		return nil, nil, err
 	}
+	if !open {
+		if content, revision, err = t.rs.sync.ReadContent(d); err != nil {
+			return nil, nil, err
+		}
+	}
 	t.markSeen(d, revision, &content)
-	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\nviewers: %s\n---\n%s", d.RelPath, d.Title, revision,
-		formatViewers(t.viewers(d)), content)), nil, nil
+	var block strings.Builder
+	for _, v := range positions {
+		block.WriteString(formatViewerLine(v) + "\n")
+	}
+	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\nviewers: %s\n%s---\n%s", d.RelPath, d.Title, revision,
+		formatViewers(t.viewers(d)), block.String(), content)), nil, nil
 }
 
 func (t *mcpTools) getBacklinks(_ context.Context, _ *mcp.CallToolRequest, in mcpDocumentRef) (*mcp.CallToolResult, *mcpBacklinks, error) {
