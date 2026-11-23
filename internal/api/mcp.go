@@ -100,6 +100,7 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		"Read before you change a page. Next time, changes_since shows what people changed since. The header lists who " +
 		"has the page open and where they are."}, tools.readDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_presence", Annotations: readOnly, Description: readPresenceDescription}, tools.readPresence)
+	mcp.AddTool(server, &mcp.Tool{Name: "wait_for_change", Annotations: readOnly, Description: waitForChangeDescription}, tools.waitForChange)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_backlinks", Annotations: readOnly, Description: "List the pages that link to a page."}, tools.getBacklinks)
 	mcp.AddTool(server, &mcp.Tool{Name: "read_resource", Annotations: readOnly, Description: "Read a file of the wiki that " +
 		"is no page, like an image a page links to: images come back as images, text files as text. Give its path " +
