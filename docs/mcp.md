@@ -60,7 +60,8 @@ means the top level.
 |---|---|---|
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |
 | `list_tree` | | Paths and titles of all pages, or of those below `section`. With `files`, also the sections and the files that are no pages, with size and type |
-| `read_document` | | The markdown of a page with a header: `path`, `title`, `revision`, `viewers` |
+| `read_document` | | The markdown of a page with a header: `path`, `title`, `revision`, `viewers`, and where the viewers are |
+| `read_presence` | | Where the people who have a page open are: cursor, selection and visible lines, mapped to the current revision. See section 4 |
 | `point_at` | | Moves the agent's cursor, selection and view in a page people have open, changes no text. See section 4 |
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `download_resource` | | A file unchanged, as an embedded resource. See below |
@@ -201,6 +202,38 @@ token used by two agent sessions at once shares one presence and one focus.
 line) and the answers of `edit_document`, `write_document` and `point_at` list who has the page
 open: the display names of the accounts with a connection to it, sorted, the caller's own
 account marked `(you)`. Agents and ghosts are not in it.
+
+**Where people are**: `read_presence` and a block of `read_document` tell the agent where the
+people who have the page open are, from the indexes their clients send with their presence
+(`at` in [sync-protocol.md](sync-protocol.md#indexes)), mapped to the current revision:
+
+- One entry per connection of a person, at most 10, the most recently active first. Agents are
+  not included. The caller's own account is, marked `(you)`: the person who asks "where am
+  I?" has the page open with it. Ghosts are not included: only people who have the
+  page open now.
+- Per entry: the display name, the device name if there is one, and `updated`, the seconds
+  since the last presence of the connection (`lastActiveAt`).
+- The cursor: line and column (1-based, columns in code points) and the code point index, at
+  the revision of the answer. The heading the cursor is under (the nearest ATX heading before
+  it, like the sections of `point_at`), if any.
+- A selection (the primary one; `selections` says how many there are): from and to like the
+  cursor, its length in code points, and its text, cut to 200 code points with `…`.
+- The viewport: the first and the last visible line, and the headings that start in it, at most
+  10.
+- `approximate: true` if the server did not have the revision of the indexes yet and applied
+  them to the current text. A connection whose client sends no indexes (an older client) has
+  only name, device and `updated`, and `position: "unknown"`.
+
+`read_presence` takes `document` and answers JSON with `path`, `revision` and `viewers`, the
+list above. `read_document` adds one line per entry after the header, for example:
+
+```
+- alice (Pixel): line 12 col 4 in "## Setup", selected "Some text" (10 chars), viewing lines 1-40 (## Intro, ## Setup), 12 s ago
+```
+
+Both are read tools, also for app tokens with the scope `read` and for session tokens.
+`read_presence` does not load a page nobody has open (its answer then has no viewers and no
+`revision`), and it does not mark the page as seen for `changes_since`. The write answers and `point_at` keep the names only (`viewers`).
 
 **`point_at`** takes `document` and exactly one of:
 
