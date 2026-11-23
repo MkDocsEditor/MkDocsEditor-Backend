@@ -310,6 +310,31 @@ type splice struct {
 	insert string
 }
 
+// commonEnds returns the lengths in bytes of the common prefix and the common suffix of a and b,
+// at code point boundaries and without overlap: the middles a[prefix:len(a)-suffix] and
+// b[prefix:len(b)-suffix] are what differs
+func commonEnds(a, b string) (int, int) {
+	prefix := 0
+	for prefix < len(a) && prefix < len(b) {
+		ra, na := utf8.DecodeRuneInString(a[prefix:])
+		rb, nb := utf8.DecodeRuneInString(b[prefix:])
+		if ra != rb || na != nb {
+			break
+		}
+		prefix += na
+	}
+	suffix := 0
+	for suffix < len(a)-prefix && suffix < len(b)-prefix {
+		ra, na := utf8.DecodeLastRuneInString(a[:len(a)-suffix])
+		rb, nb := utf8.DecodeLastRuneInString(b[:len(b)-suffix])
+		if ra != rb || na != nb || len(a)-suffix-na < prefix || len(b)-suffix-nb < prefix {
+			break
+		}
+		suffix += na
+	}
+	return prefix, suffix
+}
+
 // placeEdits turns edits into splices. It works on a copy of the text, so it fails before
 // anything changes.
 func placeEdits(text string, edits []TextEdit) ([]splice, error) {
@@ -335,7 +360,11 @@ func placeEdits(text string, edits []TextEdit) ([]splice, error) {
 			return nil, &EditError{Code: EditAmbiguous, Index: i}
 		}
 		if e.Old != e.New {
-			out = append(out, splice{pos: utf8.RuneCountInString(text[:at]), del: utf8.RuneCountInString(e.Old), insert: e.New})
+			// only the changed middle: the context an agent gives to make old unique stays, with
+			// its authorship, and clients do not type it out again
+			prefix, suffix := commonEnds(e.Old, e.New)
+			out = append(out, splice{pos: utf8.RuneCountInString(text[:at+prefix]),
+				del: utf8.RuneCountInString(e.Old[prefix : len(e.Old)-suffix]), insert: e.New[prefix : len(e.New)-suffix]})
 		}
 		text = text[:at] + e.New + text[at+len(e.Old):]
 	}

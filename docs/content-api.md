@@ -48,6 +48,10 @@ they are, without an `ETag`.
 - The edits apply in order. Each `old` must occur **exactly once** in the text that the
   edits before it left. Overlapping occurrences count: `aa` occurs twice in `aaa`.
 - Either all edits apply or none.
+- Only what differs is replaced: the start and the end that `old` and `new` have in common
+  (in code points) stay as they are. The context that makes `old` unique keeps its authorship,
+  people's cursors in it stay, and a live edit types out only the new text. An edit whose
+  `old` equals `new` changes nothing.
 - `baseRevision` is optional:
   - Without it, the edits match against the current text.
   - With it, they match against the text of that revision, and the result is merged with
