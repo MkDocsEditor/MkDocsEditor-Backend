@@ -340,3 +340,23 @@ func keepLines(text string) []string {
 	}
 	return lines
 }
+
+// Heading is an ATX heading of a text: its 0-based line, its level and its text
+type Heading struct {
+	Line  int
+	Level int
+	Text  string
+}
+
+// Headings returns the ATX headings of a text in order, outside fenced code and front matter
+func Headings(text string) []Heading {
+	titles := headingTexts(text)
+	lines := splitLines(text)
+	out := make([]Heading, 0, len(titles))
+	for i, l := range lines {
+		if title, ok := titles[i]; ok {
+			out = append(out, Heading{Line: i, Level: headingLevel(l), Text: title})
+		}
+	}
+	return out
+}

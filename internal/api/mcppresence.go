@@ -54,17 +54,7 @@ type (
 func (t *mcpTools) viewers(d *wiki.Document) []string {
 	out := []string{}
 	for _, id := range t.rs.sync.Viewers(d) {
-		name := id
-		if u := t.rs.authenticator.UserByID(id); u != nil {
-			name = u.DisplayName
-			if name == "" {
-				name = u.Username
-			}
-		}
-		if id == t.caller.user.ID {
-			name += " (you)"
-		}
-		out = append(out, name)
+		out = append(out, t.displayName(id))
 	}
 	slices.Sort(out)
 	return out

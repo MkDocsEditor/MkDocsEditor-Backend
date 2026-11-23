@@ -71,6 +71,9 @@ const (
 	FeatureInstancePresence = "instance-presence"
 	// FeatureAgentFocus means agent presence can have a focus, see docs/sync-protocol.md section 6
 	FeatureAgentFocus = "agent-focus"
+	// FeaturePresenceIndexes means clients send their position as indexes too (at), see
+	// docs/sync-protocol.md section 6
+	FeaturePresenceIndexes = "presence-indexes"
 )
 
 func (rs *RestService) accessRequestsDisabled(c *echo.Context) error {

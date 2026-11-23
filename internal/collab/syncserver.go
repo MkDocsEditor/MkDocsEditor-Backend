@@ -740,7 +740,10 @@ type wsConn struct {
 	shadow     *automerge.Doc
 	selections json.RawMessage
 	viewport   json.RawMessage
-	warnedRO   bool
+	// at is the position as indexes from the last presence, nil without; never relayed, see
+	// viewerpositions.go
+	at       *PresenceIndexes
+	warnedRO bool
 	// instanceID identifies the client instance, see resolveInstanceLocked. deviceName is what
 	// others see as its device, instanceColor is a color that client chose for this instance.
 	instanceID    string
@@ -1044,7 +1047,7 @@ func (c *wsConn) handleMessage(data []byte) bool {
 			c.sendError(ErrCodeBadRequest, "invalid presence")
 			return true
 		}
-		c.handlePresence(m.Selections, view, color)
+		c.handlePresence(m.Selections, view, color, parsePresenceIndexes(data))
 	}
 	// heartbeats only keep the connection alive, unknown types are ignored for forward compatibility
 	return true
@@ -1274,12 +1277,13 @@ func sameHeads(a, b []automerge.ChangeHash) bool {
 	return true
 }
 
-func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage, color *string) {
+func (c *wsConn) handlePresence(selections json.RawMessage, view json.RawMessage, color *string, at *PresenceIndexes) {
 	metrics.PresenceMessages.Inc()
 	session := c.session
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	c.selections = selections
+	c.at = at
 	c.lastActive = time.Now()
 	switch {
 	case bytes.Equal(view, jsonNull):
