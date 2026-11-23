@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -34,8 +35,8 @@ type (
 	}
 )
 
-// viewers returns the display names of the accounts that have a page open, the caller's own
-// marked "(you)"
+// viewers returns the display names of the accounts that have a page open, sorted, the caller's
+// own marked "(you)"
 func (t *mcpTools) viewers(d *wiki.Document) []string {
 	out := []string{}
 	for _, id := range t.rs.sync.Viewers(d) {
@@ -51,6 +52,7 @@ func (t *mcpTools) viewers(d *wiki.Document) []string {
 		}
 		out = append(out, name)
 	}
+	slices.Sort(out)
 	return out
 }
 

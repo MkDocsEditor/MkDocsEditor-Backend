@@ -1,7 +1,9 @@
 # Followable agents: agent focus, live edits and guiding
 
-Status: draft, nothing of this is implemented. When it is, the protocol parts move to
-[sync-protocol.md](sync-protocol.md) section 6 (Agents) and the tools to [mcp.md](mcp.md).
+Status: the agent focus, its lifetime, `point_at`, `viewers` and the feature flag
+`agent-focus` are implemented and documented in [sync-protocol.md](sync-protocol.md) section 6
+(Agents) and [mcp.md](mcp.md) section 4, which are authoritative for them. Live edits
+(`agent-change`, `live`) and the focus that a change sets are not implemented yet.
 Revised after a review of the first draft.
 
 ## 1. Goal
@@ -312,7 +314,8 @@ Moves the agent's cursor, selection and viewport and changes no text.
 
 - Exactly one of `select`, `heading` and `clear`. Both texts are at most 4 KiB.
 - Errors as in `edit_document`: "select occurs more than once, add context", "no such heading".
-- A heading is an ATX (`## Text`) or setext heading outside fenced code. The comparison
+- A heading is an ATX heading (`## Text`) outside fenced code and front matter, as for the
+  section restore; setext headings are not supported. The comparison
   ignores the leading `#` characters and surrounding spaces and is case sensitive. A text that
   occurs as the text of more than one heading is an error.
 - If nobody has the page open, the answer is "nobody has this page open" and nothing

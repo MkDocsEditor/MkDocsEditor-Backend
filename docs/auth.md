@@ -526,7 +526,8 @@ order, see [sync-protocol.md](sync-protocol.md#6-presence):
 1. The instance named by `instance`, if it is in the presence list or in `ghosts` of
    `presence-snapshot`. The client follows it.
 2. Otherwise the most recently active instance of the account, by `lastActiveAt` in the presence
-   list and then in `ghosts`. The client follows it.
+   list and then in `ghosts`. The client follows it. Agent presences (with `agent`, see
+   [sync-protocol.md](sync-protocol.md#agents)) carry the account's id but are never picked.
 3. In `lastPositions` of `presence-snapshot`, where the sender last was, without following. A
    sender who switched to a messenger a while ago has no ghost any more.
 4. Otherwise it opens the document at the start.
@@ -871,7 +872,8 @@ provider (from the AAGUID) and absent for unknown authenticators.
   know. `moved-lookup`: `GET /moved/?id=…&id=…`, see
   [references.md](references.md#7-ids-after-a-move-redirects). `instance-presence`: presence and ghosts are per client instance, see
   [sync-protocol.md](sync-protocol.md#client-instances). `join-presence`: presence
-  has `lastActiveAt`, see [sync-protocol.md](sync-protocol.md#6-presence).
+  has `lastActiveAt`, see [sync-protocol.md](sync-protocol.md#6-presence). `agent-focus`:
+  agent presence can have a focus, see [sync-protocol.md](sync-protocol.md#agents).
   `access-requests`: the server accepts access requests right now, see
   [Access request](#access-request-and-join-link). `changes`: what changed since an
   account last saw a page, `history`: git is enabled and the revision history has
@@ -1402,6 +1404,7 @@ compromised client device while unlocked, a malicious admin.
 | Timing attacks on secrets | lookups by hash, `subtle.ConstantTimeCompare` for remaining comparisons |
 | Brute force of link or session tokens | 256-bit tokens; per-IP limit on link endpoints |
 | Join link forwarded | it holds no secret and grants nothing; opening the document still needs a login with access to it |
+| Agents see who is on a page | `read_document`, `point_at` and the write tools of the MCP server answer the display names of the accounts that have the page open (`viewers`), also for app tokens with the scope `read` and OAuth grants. The account can see the same in the clients, so this is no privilege change, but the names go to the MCP client and its model provider |
 | Last positions reveal activity | everyone who can open a document sees where and when each account last had a cursor or a viewport in it, for 30 days. This goes beyond live presence on purpose, for join links, and never leaves the document's own websocket; deleted accounts are left out |
 | Access request by an impostor | a request only carries a claimed name, and `documentId` and `invitedBy` are claims too. The admin must confirm the person out of band before approving, and the clients say so. "Registration by invite links only" stays true: approval creates a normal invite, which is single use, expires and is revocable |
 | Access requests as spam or to probe the wiki | stricter per-IP limits, at most 50 pending, audit log with IP, setting to turn them off. An attacker with many addresses can fill the 50 places for 7 days, which blocks further requests but nothing else. The response is the same for known and unknown ids; only admins see the resolved document and inviter |

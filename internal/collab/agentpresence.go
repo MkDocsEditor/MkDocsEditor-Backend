@@ -188,8 +188,8 @@ func (s *SyncServer) ClearAgentFocus(d *wiki.Document, agent Agent) error {
 	})
 }
 
-// Viewers returns the ids of the accounts with a connection to a document, in the order they
-// connected, without duplicates. Agents and ghosts have no connection.
+// Viewers returns the ids of the accounts with a connection to a document, in no particular
+// order and without duplicates. Agents and ghosts have no connection.
 func (s *SyncServer) Viewers(d *wiki.Document) []string {
 	var out []string
 	_ = s.withOpenSession(d, func(ds *docSession) error {
