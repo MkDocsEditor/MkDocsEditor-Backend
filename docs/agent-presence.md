@@ -2,7 +2,7 @@
 
 Status: the backend part is implemented. The protocol is documented in
 [sync-protocol.md](sync-protocol.md) section 6 (Agents) and the tools in [mcp.md](mcp.md)
-section 4, which are authoritative. This document stays the reference for the client
+section 4 (with Indexes, where people are), which are authoritative. This document stays the reference for the client
 behaviour ("Client animation" in section 3) and the reasons behind the design.
 Revised after a review of the first draft.
 
@@ -314,6 +314,22 @@ grants. The account can see the same in the web client, so this is no privilege 
 is a new place: add a row to the threat table of auth.md, like "last positions reveal
 activity".
 
+### Where people are
+
+The other direction: an agent asked "can you see where I am?" needs the positions of the
+people, not only their names. `read_presence` and a block of `read_document` give, per person,
+the cursor as line, column and heading, the selected text (cut to 200 characters), the visible
+lines and how long ago they moved ([mcp.md](mcp.md) section 4).
+
+- The server cannot resolve the Automerge cursors of presence: core 0.5.0, which the backend
+  stays on, has no cursor API. So clients also send their position as code point indexes at a
+  revision (`at`, [sync-protocol.md](sync-protocol.md#indexes)), the same rule as the focus of
+  an agent in the opposite direction, and the server maps them to the current text with a diff.
+- The cursors stay the format between clients; `at` is for the server only and is not relayed.
+- A client without `at` (older, or before the feature) shows up as "position unknown".
+- Web and Android: send `at` with every presence once the server lists `presence-indexes`.
+  JS converts UTF-16 offsets to code points.
+
 ### `point_at`
 
 Moves the agent's cursor, selection and viewport and changes no text.
@@ -369,6 +385,8 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 | Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
 | Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with the setting "Animate edits of others", on by default; no slide for now |
 | Android client | the same; the animation with the KodeEditor release that has range styles |
+| Web and Android, where people are | send `at` (code point indexes at a revision) with every presence when the server lists `presence-indexes`, see "Where people are" (section 4) |
+| Backend, where people are | keep `at` per connection, `read_presence` and the block of `read_document`, the feature flag |
 | KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, released in KodeEditor 9.2.0 |
 
 Order: the backend part first. Following an agent works with `focus` alone, before any client

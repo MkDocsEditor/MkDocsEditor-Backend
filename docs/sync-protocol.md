@@ -599,6 +599,40 @@ Presence can have an optional `viewport`, the text the user is looking at:
 - A follower centers the middle of `top` and `bottom`, on any screen size. Without a viewport
   it scrolls to the cursor.
 
+### Indexes
+
+Presence can also carry the position as **indexes**, for the server: it cannot resolve
+Automerge cursors (automerge-go has no cursor API), and the MCP server tells agents where
+people are ([mcp.md](mcp.md) section 4). Servers that use them list `presence-indexes` in
+`features` of `GET /server-info/`.
+
+```json
+{ "type": "presence", "documentId": "…", "selections": [ … ], "viewport": { … },
+  "at": { "revision": "<heads>", "selections": [ { "anchor": 120, "head": 168 } ],
+          "viewport": { "top": 100, "bottom": 899 } } }
+```
+
+- The indexes follow the rule of `agent.focus` ([Agents](#agents)): Unicode code points of
+  `content` at `revision`, the heads of the client's document when it made them. JS counts
+  UTF-16 units and converts.
+- `at.selections` are the same selections as `selections`, in the same order: `anchor` and
+  `head` as indexes, `anchor == head` a cursor, an index at the end of the text is the length.
+  An empty list means no cursor.
+- `at.viewport` is the current viewport, if there is one: `top` and `bottom` inclusive, 0 and 0
+  for an empty text. Unlike `viewport`, it is never missing to mean "unchanged": `at` always
+  describes the whole position at that moment.
+- A client with the feature sends `at` in every `presence`. A presence without `at` clears the
+  indexes of the connection, so a stale position is never reported. An `at` over 4 KiB, or one
+  that does not have this format, is dropped as if it were missing.
+- The server keeps the last `at` per connection and does not relay it: presence to other
+  clients, `presence-snapshot`, `lastPositions` and ghosts never contain `at`. Clients resolve
+  the cursors as before.
+- To use the indexes, the server takes the text at `revision` and maps the indexes through the
+  diff to the current text. An index inside deleted text maps to the place of the deletion. If
+  the server does not have every head of `revision` yet, which can happen for a moment because
+  a client's sync and presence travel separately, it applies the indexes to the current text,
+  clamped, and marks the position as approximate.
+
 ### Ghosts
 
 When a client instance leaves, its cursor stays as a ghost for 60 seconds, so following survives
