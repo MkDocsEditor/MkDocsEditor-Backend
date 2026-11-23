@@ -151,22 +151,55 @@ the `sync` message that can carry it:
 - The same change also sets the `focus` of the agent: the end of the last inserted range in
   the order of the edits (not the highest position), at revision `[H]`. It is sent in the
   presence message of the agent, which goes out before the `agent-change` message.
-- While a client animates a change, it draws the agent's cursor at the head of the animation,
-  and a follower follows that head. It switches to `focus` when the animation ends or is
-  skipped. Otherwise a follower would jump to the end while the text is still being typed.
-- A second change (of the same or another agent) that is ready while an animation runs: the
-  client finishes the running animation at once, then starts the new one.
+- While a client reveals a change, it draws the agent's cursor at the head of the reveal,
+  and a follower follows that head. It switches to `focus` when the reveal ends or is
+  finished early. Otherwise a follower would jump to the end while the text is still being
+  typed.
 - A client may show a live change at once when it is large (suggested threshold: 2 KB
   inserted), when the document is not visible, or when the person turned the animation off.
   The backend does not know and does not care.
 - Without an `agent-change` message the client shows an agent change at once, and the focus
   goes to the end of the last inserted range as well (the same rule, section 3 "Lifetime").
-- The animation is a decoration that hides the text not yet typed on top of the real
-  document. The change is applied to the editor model at once, so that remote edits and the
-  cursor of the person land at the right positions. Any input of the person (typing, a click,
-  a scroll away, touching the hidden range) ends the animation first. A remote edit of
-  someone else inside a hidden range ends the animation of that range. The animation is
-  presentation only: what is drawn changes, nothing else.
+- How the clients draw it, the same on both, is in "Client animation" below.
+
+### Client animation
+
+Both clients behave the same. This is client behaviour, not protocol: the backend is not
+involved. It has two parts:
+
+- The **typing reveal** shows the inserted text of a live agent change (an `agent-change`
+  event) bit by bit, as if it were typed.
+- The **appearance animation** fades in text that others write as it appears: what the
+  typing reveal uncovers, and the text of other people in the document as it arrives.
+
+Rules:
+
+- The appearance animation is a client setting, **off by default**. It is only for text that
+  others write (an agent, or another person in the document), never for text the local person
+  types, pastes, undoes or redoes.
+- Defaults, all settable by the client:
+  - fade-in 250 ms
+  - an optional slide of the appearing characters, 0 by default
+  - only the newest 16 characters of one writer animate
+  - at most 24 animated ranges at once; above that, the oldest finish at once
+- Every animated range has a tag of its writer: the agent's app token, or the other person
+  (from the actor of the change, see the actor map in [sync-protocol.md](sync-protocol.md)
+  section 2). Several writers can appear at the same time. A new change of the same agent
+  finishes that agent's running reveal at once, then starts its own.
+- A local edit does not end running animations by itself; the client decides what to finish.
+  The rule both clients use: when the person types, the agent's reveal and fade finish at once
+  (the rest of its text shows at once), and the animations of other people go on. An edit of
+  the person, or a remote edit, inside or at the edge of a hidden range finishes the animation
+  of that range, so nobody types into invisible text.
+- Collapsed or folded parts of the text appear in one chunk when the reveal reaches them. They
+  are never typed out, and never shown before the reveal reaches them.
+- With the system setting that removes animations (reduce motion), there is no fade and no
+  slide, only the reveal.
+- The cost per frame depends on the visible rows and the number of animated ranges, never on
+  the length of the document.
+- The animation is presentation only. The change is applied to the editor model at once, so
+  that remote edits and the cursor of the person land at the right positions; only what is
+  drawn changes.
 - The hidden text keeps its space on both clients: it is drawn with a transparent text colour,
   so the following text stays where it is and does not slide along as the agent types
   (decided by Markus). Nothing moves under the eyes of a person who reads, and both clients
@@ -180,14 +213,16 @@ the `sync` message that can carry it:
     collapse the text.
   - Android: `EditorTextController.onRemoteChange` calls `applyRemote` synchronously on the
     main thread; the hidden ranges are set in the same call and moved per splice like the
-    author runs. They are cleared synchronously in `onLocalEdit` and `onStateChanged`. The
-    text is hidden with a new KodeEditor API for styles of app-supplied ranges
-    (`SpanStyle(color = Transparent)`), merged over the highlighting and moved by splices.
-    KodeEditor 9.x has no such API, so **the Android animation waits for a KodeEditor
-    release** with it. Overlay masks in the background colour are not used: they would also
-    cover the selection, remote cursors and line backgrounds, and could be drawn one frame
-    late with the old layout. Until then Android follows the focus without an animation.
-    Nothing else in this spec depends on that API.
+    author runs. Local edits are reported synchronously in `onLocalEdit` and
+    `onStateChanged`, where the client finishes what the rules above say. The text is
+    hidden and animated with the KodeEditor API for styles of app-supplied ranges
+    (`SpanStyle(color = Transparent)`), merged over the highlighting and moved by splices
+    (KodeEditor PR #167). KodeEditor offsets are UTF-16, so the client converts the code
+    point indexes of this spec. Overlay masks in the background colour are not used: they
+    would also cover the selection, remote cursors and line backgrounds, and could be drawn
+    one frame late with the old layout. The Android animation needs a KodeEditor release
+    with that API; before it, Android follows the focus without an animation. Nothing else
+    in this spec depends on that API.
 - Search, copy, undo and the rendered view see the whole text at once, because it is real.
   Animations stay short for that reason.
 - The rendered view (alone, or beside the editor) shows a live change at once and is never
@@ -307,9 +342,9 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 | Side | Work |
 |---|---|
 | Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
-| Web client | follow an agent with `focus` (like a person), the diff based animation, a setting to turn it off |
-| Android client | the same; the animation only after a KodeEditor release with range styles |
-| KodeEditor | an API for styles of app-supplied ranges, moved by splices (for the transparent text colour) |
+| Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with its setting, off by default |
+| Android client | the same; the animation with the KodeEditor release that has range styles |
+| KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, merged and released; version to be added |
 
 Order: the backend part first. Following an agent works with `focus` alone, before any client
 has the animation, and each client can add the animation later. The Android animation depends
@@ -336,6 +371,6 @@ Still open:
   stay pinned.
 - Whether the Automerge sync can hold back a change after the `agent-change` message (the
   queue by `change` is written for it).
-- The animation in the editors is known by reading the code only, without a prototype. Web:
-  feasible with a CodeMirror 6 mark decoration and the one-transaction rule. Android: needs
-  the KodeEditor range-style API first.
+- The animation in the web editor is known by reading the code only, without a prototype:
+  feasible with a CodeMirror 6 mark decoration and the one-transaction rule. The KodeEditor
+  demo of the reveal and the appearance animation was tested by Markus.
