@@ -79,6 +79,12 @@ func (a Agent) key() string {
 	return "account:" + a.AccountID
 }
 
+// EditOptions are options of a content change of an agent
+type EditOptions struct {
+	// Live announces the change with an agent-change message, so clients animate what it inserted
+	Live bool
+}
+
 // apiActor is the actor of an agent in a loaded document, and its last change
 type apiActor struct {
 	id   string
@@ -119,7 +125,7 @@ func (s *SyncServer) ReadContent(d *wiki.Document) (text string, revision string
 // edits before it. Without baseRevision the edits apply to the current text, else to the text
 // of that revision, merged with everything that changed since. Either all edits apply or none.
 // It returns the new revision.
-func (s *SyncServer) ApplyEdits(d *wiki.Document, edits []TextEdit, baseRevision string, agent Agent) (string, error) {
+func (s *SyncServer) ApplyEdits(d *wiki.Document, edits []TextEdit, baseRevision string, agent Agent, opts EditOptions) (string, error) {
 	var revision string
 	err := s.withSession(d, func(ds *docSession) error {
 		heads, err := ds.baseHeadsLocked(baseRevision)
@@ -130,6 +136,7 @@ func (s *SyncServer) ApplyEdits(d *wiki.Document, edits []TextEdit, baseRevision
 		if err != nil {
 			return err
 		}
+		forkBase := FormatRevision(fork.Heads())
 		text := fork.Path(ContentKey).Text()
 		current, err := text.Get()
 		if err != nil {
@@ -144,7 +151,7 @@ func (s *SyncServer) ApplyEdits(d *wiki.Document, edits []TextEdit, baseRevision
 				return err
 			}
 		}
-		if err = ds.commitAgentForkLocked(fork, agent, fmt.Sprintf("%d edits", len(edits))); err != nil {
+		if err = ds.commitAgentForkLocked(fork, forkBase, agent, fmt.Sprintf("%d edits", len(edits)), splices, opts); err != nil {
 			return err
 		}
 		revision = FormatRevision(ds.doc.Heads())
@@ -156,7 +163,7 @@ func (s *SyncServer) ApplyEdits(d *wiki.Document, edits []TextEdit, baseRevision
 // WriteContent replaces the text of the revision baseRevision by content and merges that into the
 // document: the difference between the two is applied as splices on a fork at baseRevision, so
 // what others changed since stays. It returns the new revision.
-func (s *SyncServer) WriteContent(d *wiki.Document, content string, baseRevision string, agent Agent) (string, error) {
+func (s *SyncServer) WriteContent(d *wiki.Document, content string, baseRevision string, agent Agent, opts EditOptions) (string, error) {
 	if !utf8.ValidString(content) {
 		return "", ErrNotUTF8
 	}
@@ -170,14 +177,16 @@ func (s *SyncServer) WriteContent(d *wiki.Document, content string, baseRevision
 		if err != nil {
 			return err
 		}
+		forkBase := FormatRevision(fork.Heads())
 		base, err := ContentText(fork)
 		if err != nil {
 			return err
 		}
-		if err = SpliceDiff(fork.Path(ContentKey).Text(), base, content); err != nil {
+		splices, err := spliceDiff(fork.Path(ContentKey).Text(), base, content)
+		if err != nil {
 			return err
 		}
-		if err = ds.commitAgentForkLocked(fork, agent, "write"); err != nil {
+		if err = ds.commitAgentForkLocked(fork, forkBase, agent, "write", splices, opts); err != nil {
 			return err
 		}
 		revision = FormatRevision(ds.doc.Heads())
@@ -236,8 +245,12 @@ func (ds *docSession) agentForkLocked(agent Agent, heads []automerge.ChangeHash)
 }
 
 // commitAgentForkLocked commits the changes of an agent on a fork and merges them into the
-// document. A fork without changes is dropped.
-func (ds *docSession) commitAgentForkLocked(fork *automerge.Doc, agent Agent, message string) error {
+// document. A fork without changes is dropped. base is the revision of the fork before the
+// changes (automerge-go commits pending changes when asked for the heads, so the caller takes
+// it before it changes anything). splices are the changes made on the fork, for
+// the focus of the agent. The presence goes out first, then agent-change for a live change, then
+// the sync messages, all through the same queue of each connection.
+func (ds *docSession) commitAgentForkLocked(fork *automerge.Doc, base string, agent Agent, message string, splices []splice, opts EditOptions) error {
 	before, err := ContentText(ds.doc)
 	if err != nil {
 		return err
@@ -256,7 +269,15 @@ func (ds *docSession) commitAgentForkLocked(fork *automerge.Doc, agent Agent, me
 	actor := ds.apiActors[agent.key()]
 	actor.last = hash
 	ds.apiActors[agent.key()] = actor
-	ds.touchAgentPresenceLocked(agent, actor.id, nil)
+	// the indexes of the splices are right at the heads of the change itself, not of the merge
+	var focus *AgentFocus
+	if at, ok := focusOfSplices(splices); ok {
+		focus = &AgentFocus{Revision: FormatRevision([]automerge.ChangeHash{hash}), From: at, To: at}
+	}
+	ds.touchAgentPresenceLocked(agent, actor.id, focus)
+	if opts.Live {
+		ds.announceAgentChangeLocked(agent, base, hash)
+	}
 
 	// the document changed even if the text is the same again (edits that undo each other)
 	ds.broadcastSyncLocked()

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 )
 
 // agentPresence returns the presence of the agent a client sees, nil for none. Caller holds c.mu.
@@ -171,5 +173,99 @@ func TestAgentFocusLifetime(t *testing.T) {
 	// the focus keeps the agent longer than an agent without one
 	if d := time.Since(start); d < 500*time.Millisecond {
 		t.Errorf("the agent with a focus left after %v", d)
+	}
+}
+
+// messageIndex is the index of the first message from index from on that matches, -1 for none.
+// Caller holds c.mu.
+func messageIndex(c *testClient, from int, match func(m map[string]any) bool) int {
+	for i := from; i < len(c.messages); i++ {
+		if match(c.messages[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestMCPLiveEdit(t *testing.T) {
+	e := newSyncEnv(t)
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	token := e.appToken("bob", "claude", auth.ScopeWrite)
+	s := e.mcpSession(token)
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	_, base := e.readContent(id, token)
+
+	// a person types at the start meanwhile, the agent edits the older revision
+	a.insertText(0, "Hello\n")
+	eventually(t, "server", func() bool { return e.serverText(rel) == "Hello\n"+setupText })
+	a.mu.Lock()
+	start := len(a.messages)
+	a.mu.Unlock()
+	out, failed := callTool(t, s, "edit_document", map[string]any{"document": rel, "baseRevision": base, "live": true,
+		"edits": []map[string]string{{"old": "Some text.", "new": "Agent text."}}})
+	if failed {
+		t.Fatalf("edit_document = %q", out)
+	}
+	a.waitFor("the edit", func() bool { return strings.Contains(a.textLocked(), "Agent text.") })
+	a.waitFor("agent-change", func() bool {
+		return messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange }) >= 0
+	})
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	change := a.messages[messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange })]
+	hash := change["change"].(string)
+	if change["base"] != base || len(hash) != 64 || change["agent"].(map[string]any)["name"] != "claude" ||
+		!strings.HasPrefix(change["clientId"].(string), "agent-") {
+		t.Errorf("agent-change = %v, base %s", change, base)
+	}
+	// the focus is at the end of the inserted text, at the revision of the change itself, not of
+	// the merged document
+	if strings.Contains(out, `"revision":"`+hash+`"`) {
+		t.Errorf("the merged revision is the change alone: %s", out)
+	}
+	presence := messageIndex(a, start, func(m map[string]any) bool {
+		agent, _ := m["agent"].(map[string]any)
+		focus, _ := agent["focus"].(map[string]any)
+		return m["type"] == collab.MsgPresence && focus != nil && focus["revision"] == hash &&
+			focus["from"] == float64(20) && focus["to"] == float64(20)
+	})
+	announced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange })
+	synced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgSyncRequest })
+	if presence < 0 || presence >= announced || announced >= synced {
+		t.Errorf("order: presence %d, agent-change %d, sync %d", presence, announced, synced)
+	}
+}
+
+func TestInstantEditSetsTheFocus(t *testing.T) {
+	e := newSyncEnv(t)
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	token := e.appToken("bob", "claude", auth.ScopeWrite)
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+
+	// over REST with an app token: a focus, no agent-change
+	text, revision := e.readContent(id, token)
+	r := e.doToken(http.MethodPut, "/document/"+id+"/content/", token, map[string]any{"content": text + "More.\n", "baseRevision": revision})
+	if r.Code != http.StatusOK {
+		t.Fatalf("PUT content = %d %s", r.Code, r.Body.String())
+	}
+	a.waitFor("the focus at the end", func() bool {
+		f := agentFocus(a)
+		return f != nil && f["from"] == float64(len(setupText)+len("More.\n"))
+	})
+	a.mu.Lock()
+	if messageIndex(a, 0, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange }) >= 0 {
+		t.Error("agent-change for an instant edit")
+	}
+	a.mu.Unlock()
+
+	// live needs an app token
+	s := e.mcpSession(strings.TrimPrefix(authHeader(t, e.authn, "bob", "bob-pw"), "Bearer "))
+	if out, failed := callTool(t, s, "edit_document", map[string]any{"document": rel, "live": true,
+		"edits": []map[string]string{{"old": "More.", "new": "Less."}}}); !failed || !strings.Contains(out, "needs an app token") {
+		t.Errorf("live with a session token = %q, %v", out, failed)
 	}
 }

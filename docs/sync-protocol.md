@@ -468,8 +468,9 @@ appears as a peer: a `presence` message with `"agent": {"tokenId", "name"}`, the
 `deviceName` and no selections, also in the `peers` of `presence-snapshot`. See
 [mcp.md](mcp.md) section 4 and [agent-presence.md](agent-presence.md).
 
-**Focus.** The `agent` object can have `focus`, where the agent is (set with the MCP tool
-`point_at`). Servers that send it list `agent-focus` in `features` of `GET /server-info/`.
+**Focus.** The `agent` object can have `focus`, where the agent is: set by every change of the
+agent and by the MCP tool `point_at`. Servers that send it list `agent-focus` in `features` of
+`GET /server-info/`.
 
 ```json
 { "type": "presence", "documentId": "…", "clientId": "agent-3f9a1c0b7d2e",
@@ -511,9 +512,40 @@ appears as a peer: a `presence` message with `"agent": {"tokenId", "name"}`, the
 
 **Lifetime.** An agent presence without a focus ends 60 seconds after its last change, one with
 a focus 5 minutes after its last change or `point_at`: a turn of the model often takes longer
-than a minute, and followers must not be dropped in the middle of a tour. A change keeps the
-focus, and `point_at` with `clear` ends the presence at once. It always ends with
-`presence-leave` without a ghost, and with the document when it unloads.
+than a minute, and followers must not be dropped in the middle of a tour. `point_at` with
+`clear` ends the presence at once. It always ends with `presence-leave` without a ghost, and
+with the document when it unloads.
+
+**Focus of a change.** A change of an agent (MCP, or the content API with an app token) sets
+its focus to the end of the last inserted range, in the order of the edits, or to the place of
+the change if it only deleted. The revision is the hash `H` of the change itself, not the heads
+of the merged document: an edit with an old `baseRevision` is made on a fork of that revision,
+so its indexes are only right at `[H]`.
+
+**Live edits.** A change made with `live` (MCP `edit_document` and `write_document`) is
+announced with `agent-change`, after the presence with its focus and before the `sync` message
+that can carry it, through the same queue of the connection:
+
+```json
+{ "type": "agent-change", "documentId": "…", "clientId": "agent-3f9a1c0b7d2e",
+  "instanceId": "…", "agent": { "tokenId": "…", "name": "claude" },
+  "base": "<heads before the change>", "change": "<hash H>" }
+```
+
+- `base` is the revision of the fork before the change (the dependencies of `H`), `change` is
+  `H`. A client that has `H` always has `base`.
+- It is an event, never replayed in `presence-snapshot`. The client keeps it in a queue by
+  `change` until its document has `H` (the sync can hold a change back for a round trip) and
+  drops it after 30 seconds, on a new epoch, or with the connection; `document-renamed` keeps it.
+- With `H`, the client computes the diff from `base` to `[H]` (JS `Automerge.diff`, Java
+  `Document.diff`): the inserting splices are what the agent typed, everything else shows at
+  once. The patches are sequential (each index refers to the text after the ones before) and
+  unsorted, so the client maps them to positions at `[H]`, makes cursors there and resolves
+  them in the current document. It never takes the ranges from its own editor transaction,
+  which can hold changes of people too.
+- How the clients animate it (typing reveal, fade-in, settings, reduce motion) is client
+  behaviour, the same in both clients: [agent-presence.md](agent-presence.md) section 3,
+  "Client animation". Without `agent-change` a client shows the change at once.
 
 ### Client instances
 

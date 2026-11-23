@@ -18,6 +18,7 @@ const (
 	MsgPresenceSnapshot = "presence-snapshot"
 	MsgPresenceLeave    = "presence-leave"
 	MsgActor            = "actor"
+	MsgAgentChange      = "agent-change"
 	MsgHeartbeat        = "heartbeat"
 	MsgDocumentRenamed  = "document-renamed"
 	MsgDocumentDeleted  = "document-deleted"
@@ -161,6 +162,19 @@ type (
 		// Agent is set for the presence of an agent that changes the document over the API
 		// with an app token, see docs/content-api.md
 		Agent *AgentInfo `json:"agent,omitempty"`
+	}
+
+	// AgentChangeMessage announces a live change of an agent, before the sync message that can
+	// carry it: the client animates what the change inserted, see docs/sync-protocol.md section 6
+	AgentChangeMessage struct {
+		Type       string     `json:"type"`
+		DocumentID string     `json:"documentId"`
+		ClientID   string     `json:"clientId"`
+		InstanceID string     `json:"instanceId"`
+		Agent      *AgentInfo `json:"agent"`
+		// Base is the revision before the change (its dependencies), Change its hash
+		Base   string `json:"base"`
+		Change string `json:"change"`
 	}
 
 	PresenceSnapshotMessage struct {

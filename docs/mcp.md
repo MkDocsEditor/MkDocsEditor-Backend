@@ -180,15 +180,20 @@ An agent that changes a page shows up for the people who have it open:
 
   The agent is also part of the `peers` of `presence-snapshot` for clients that connect
   later. A `presence-leave` follows 60 seconds after its last change, 5 minutes with a focus.
-- **Focus**: `point_at` moves the agent's cursor, selection and viewport, the `focus` of
-  [sync-protocol.md](sync-protocol.md#agents), and people who follow the agent are taken
-  there. A change keeps the focus.
+- **Focus**: every change puts the agent's cursor at the end of what it inserted, and
+  `point_at` moves its cursor, selection and viewport: the `focus` of
+  [sync-protocol.md](sync-protocol.md#agents). People who follow the agent are taken there.
+- **Live edits**: `edit_document` and `write_document` take `live` (default false). The change
+  is the same (atomic, the new `revision` in the answer, the same rate limit), and the clients
+  show the inserted text as typed (`agent-change` in sync-protocol.md). The tool descriptions
+  advise: without viewers change instantly; with viewers and a small or medium change, consider
+  `live`. `live` needs an app token. The REST endpoints and `create_document` have no `live`.
 - **Authorship and history**: the agent's actor has `agent` in the actor map. Commits carry
   a `Via-App-Token` trailer, and history entries list the tokens in `appTokens`. See
   [content-api.md](content-api.md) section 5.
 
 Changes over a session token (`mds_…`) are no agent changes: they appear as the account's
-own, without presence. `point_at` needs an app token (OAuth grants are app tokens). One app
+own, without presence. `point_at` and `live` need an app token (OAuth grants are app tokens). One app
 token used by two agent sessions at once shares one presence and one focus.
 
 **`viewers`**: so that the agent can choose how to show a change, `read_document` (a header

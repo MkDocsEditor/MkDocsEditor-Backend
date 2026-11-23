@@ -1,9 +1,9 @@
 # Followable agents: agent focus, live edits and guiding
 
-Status: the agent focus, its lifetime, `point_at`, `viewers` and the feature flag
-`agent-focus` are implemented and documented in [sync-protocol.md](sync-protocol.md) section 6
-(Agents) and [mcp.md](mcp.md) section 4, which are authoritative for them. Live edits
-(`agent-change`, `live`) and the focus that a change sets are not implemented yet.
+Status: the backend part is implemented. The protocol is documented in
+[sync-protocol.md](sync-protocol.md) section 6 (Agents) and the tools in [mcp.md](mcp.md)
+section 4, which are authoritative. This document stays the reference for the client
+behaviour ("Client animation" in section 3) and the reasons behind the design.
 Revised after a review of the first draft.
 
 ## 1. Goal

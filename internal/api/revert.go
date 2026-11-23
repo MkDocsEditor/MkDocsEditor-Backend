@@ -147,7 +147,7 @@ func (rs *RestService) revert(d *wiki.Document, rel string, commit *gitstore.Com
 	tokenName := agent.TokenName
 	// a commit with the revert subject: the edit is committed below, not as an agent snapshot
 	agent.TokenName = ""
-	if _, err = rs.sync.WriteContent(d, merged, liveRevision, agent); err != nil {
+	if _, err = rs.sync.WriteContent(d, merged, liveRevision, agent, collab.EditOptions{}); err != nil {
 		return nil, err
 	}
 	if tokenName != "" {
