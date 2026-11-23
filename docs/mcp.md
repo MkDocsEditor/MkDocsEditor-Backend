@@ -231,9 +231,9 @@ list above. `read_document` adds one line per entry after the header, for exampl
 - alice (Pixel): line 12 col 4 in "## Setup", selected "Some text" (10 chars), viewing lines 1-40 (## Intro, ## Setup), 12 s ago
 ```
 
-Both are read tools, also for app tokens with the scope `read` and for session tokens. They do
-not load a page nobody has open, and `read_presence` does not mark the page as seen for
-`changes_since`. The write answers and `point_at` keep the names only (`viewers`).
+Both are read tools, also for app tokens with the scope `read` and for session tokens.
+`read_presence` does not load a page nobody has open (its answer then has no viewers and no
+`revision`), and it does not mark the page as seen for `changes_since`. The write answers and `point_at` keep the names only (`viewers`).
 
 **`point_at`** takes `document` and exactly one of:
 
