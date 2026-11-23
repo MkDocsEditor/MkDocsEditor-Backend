@@ -66,6 +66,7 @@ means the top level.
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `download_resource` | | A file unchanged, as an embedded resource. See below |
 | `wait_for_change` | | Waits until someone changes a page people have open, at most 30 seconds, then answers like `changes_since`. See below |
+| `list_pins` | | The family pins and the caller's personal pins of the dashboard, in their order, like `GET /pins/` |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
 | `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
 | `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
@@ -86,6 +87,8 @@ means the top level.
 | `create_section` | yes | Creates a section and missing parent sections |
 | `move_section` | yes | Moves and/or renames a section with its content; links are updated |
 | `delete_section` | yes | Deletes a section: `recursive` if it is not empty, `force` when people have one of its pages open. Lists the links that broke |
+| `set_pin` | yes | Pins (`pinned`) or unpins a page in `list` `family` or `personal`, like `PUT`/`DELETE /pins/{list}/{documentId}/` |
+| `order_pins` | yes | Orders `list`: the listed pages first, like `PUT /pins/{list}/order/` |
 | `revert_change` | yes | Undoes a commit made with the caller's own app token, keeping later edits, like `POST /document/{id}/history/{revision}/revert/`. Only with git and an app token |
 
 `read_resource` takes the file's path relative to the wiki root, its id, or a link destination
@@ -138,7 +141,7 @@ The delete tools answer the links from outside the deleted item that broke, as
 `path:line destination`, for the agent to fix them. Deleting is committed like
 `DELETE /document/{id}/` and the other delete endpoints: the files stay in the git history.
 
-Not offered as tools: accounts, administration, pins, push subscriptions and QR codes (personal
+Not offered as tools: accounts, administration, push subscriptions and QR codes (personal
 or admin matters), the restore of a page revision (`revert_change` undoes the agent's own
 commits; `read_revision` and `write_document` restore anything else), and the history of files
 that are no pages, which the backend only has for pages.
@@ -172,6 +175,13 @@ otherwise.
   the request ends (the client disconnects). Per app token or account: at most 2 waits at once,
   and a rate limit of a burst of 5, then one every 2 seconds. App tokens with the scope `read`
   may use it.
+
+The pins are those of [dashboard.md](dashboard.md): `family` is the same for everyone,
+`personal` is the list of the account the token belongs to. `set_pin` and `order_pins` are
+write tools, so like the REST endpoints they need the role editor or admin and, for app tokens,
+the scope `write`, also for personal pins; they share the rate limit of content changes. The
+clients see the change at once (`pins-changed` on the events websocket). `pinnedBy` is the
+account, not the agent. The descriptions tell agents to change pins only when someone asks.
 
 `revert_change` refuses commits with other authors than the caller's account and app token
 (by name): an agent can undo its own mistake, not the work of people or other agents. Since

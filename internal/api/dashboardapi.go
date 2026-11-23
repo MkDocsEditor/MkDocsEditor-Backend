@@ -147,6 +147,42 @@ func (rs *RestService) getPins(c *echo.Context) error {
 	return c.JSONPretty(http.StatusOK, pins, jsonIndent)
 }
 
+// pinOwner is the owner of a pin list: the account, or the family
+func pinOwner(user *auth.User, family bool) string {
+	if family {
+		return activity.Family
+	}
+	return user.ID
+}
+
+// setPin pins (add) or unpins a document in the personal pins of an account or the family
+// pins, and tells the clients. The caller checks who may.
+func (rs *RestService) setPin(user *auth.User, d *wiki.Document, family bool, add bool) error {
+	var (
+		changed bool
+		err     error
+	)
+	if add {
+		changed, err = rs.sync.Activity().AddPin(pinOwner(user, family), d.RelPath, user.ID)
+	} else {
+		changed, err = rs.sync.Activity().RemovePin(pinOwner(user, family), d.RelPath)
+	}
+	if err == nil && changed {
+		rs.sync.PinsChanged(family, user.ID)
+	}
+	return err
+}
+
+// orderPins orders the personal pins of an account or the family pins by paths, and tells the
+// clients. The caller checks who may.
+func (rs *RestService) orderPins(user *auth.User, family bool, paths []string) error {
+	changed, err := rs.sync.Activity().ReorderPins(pinOwner(user, family), paths)
+	if err == nil && changed {
+		rs.sync.PinsChanged(family, user.ID)
+	}
+	return err
+}
+
 // changePin answers PUT and DELETE of /pins/family/{documentId}/ and /pins/personal/{documentId}/
 func (rs *RestService) changePin(family bool, add bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -159,24 +195,8 @@ func (rs *RestService) changePin(family bool, add bool) echo.HandlerFunc {
 		if d == nil {
 			return rs.ReturnNotFound(c, id)
 		}
-		owner := user.ID
-		if family {
-			owner = activity.Family
-		}
-		var (
-			changed bool
-			err     error
-		)
-		if add {
-			changed, err = rs.sync.Activity().AddPin(owner, d.RelPath, user.ID)
-		} else {
-			changed, err = rs.sync.Activity().RemovePin(owner, d.RelPath)
-		}
-		if err != nil {
+		if err := rs.setPin(user, d, family, add); err != nil {
 			return rs.ReturnError(c, err)
-		}
-		if changed {
-			rs.sync.PinsChanged(family, user.ID)
 		}
 		return rs.getPins(c)
 	}
@@ -199,16 +219,8 @@ func (rs *RestService) changePinOrder(family bool) echo.HandlerFunc {
 				paths = append(paths, d.RelPath)
 			}
 		}
-		owner := user.ID
-		if family {
-			owner = activity.Family
-		}
-		changed, err := rs.sync.Activity().ReorderPins(owner, paths)
-		if err != nil {
+		if err := rs.orderPins(user, family, paths); err != nil {
 			return rs.ReturnError(c, err)
-		}
-		if changed {
-			rs.sync.PinsChanged(family, user.ID)
 		}
 		return rs.getPins(c)
 	}
