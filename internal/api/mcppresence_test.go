@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -267,5 +270,50 @@ func TestInstantEditSetsTheFocus(t *testing.T) {
 	if out, failed := callTool(t, s, "edit_document", map[string]any{"document": rel, "live": true,
 		"edits": []map[string]string{{"old": "More.", "new": "Less."}}}); !failed || !strings.Contains(out, "needs an app token") {
 		t.Errorf("live with a session token = %q, %v", out, failed)
+	}
+}
+
+// TestMCPLiveListed checks that every kind of caller sees live and its hint in tools/list: a
+// session token, an app token and an OAuth grant. A session token sees live too and gets an error
+// when it uses it.
+func TestMCPLiveListed(t *testing.T) {
+	e := newSyncEnv(t)
+	f := &oauthFlow{e: e, clientID: e.registerClient("http://127.0.0.1/callback"), redirectURI: "http://127.0.0.1:43123/callback",
+		verifier: strings.Repeat("v", 50)}
+	grant := tokensOf(t, f.exchange(f.approve("bob", f.authorize(url.Values{"resource": {e.http.URL + "/api/mcp"}}), nil), f.verifier))
+	for name, token := range map[string]string{
+		"session": strings.TrimPrefix(authHeader(t, e.authn, "bob", "bob-pw"), "Bearer "),
+		"app":     e.appToken("bob", "claude", auth.ScopeWrite),
+		"oauth":   grant.AccessToken,
+	} {
+		res, err := e.mcpSession(token).ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := 0
+		for _, tool := range res.Tools {
+			if tool.Name != "edit_document" && tool.Name != "write_document" {
+				continue
+			}
+			listed++
+			schema, _ := json.Marshal(tool.InputSchema)
+			var s struct {
+				Properties map[string]struct {
+					Type any `json:"type"`
+				} `json:"properties"`
+			}
+			if err = json.Unmarshal(schema, &s); err != nil {
+				t.Fatal(err)
+			}
+			if s.Properties["live"].Type != "boolean" {
+				t.Errorf("%s: %s has no live: %s", name, tool.Name, schema)
+			}
+			if !strings.Contains(tool.Description, mcpLiveHint) {
+				t.Errorf("%s: %s has no hint: %q", name, tool.Name, tool.Description)
+			}
+		}
+		if listed != 2 {
+			t.Errorf("%s: %d write tools listed", name, listed)
+		}
 	}
 }

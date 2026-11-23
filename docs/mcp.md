@@ -187,7 +187,8 @@ An agent that changes a page shows up for the people who have it open:
   is the same (atomic, the new `revision` in the answer, the same rate limit), and the clients
   show the inserted text as typed (`agent-change` in sync-protocol.md). The tool descriptions
   advise: without viewers change instantly; with viewers and a small or medium change, consider
-  `live`. `live` needs an app token. The REST endpoints and `create_document` have no `live`.
+  `live`. Every caller sees `live`; with a session token the call fails with "live needs an
+  app token" and changes nothing. The REST endpoints and `create_document` have no `live`.
 - **Authorship and history**: the agent's actor has `agent` in the actor map. Commits carry
   a `Via-App-Token` trailer, and history entries list the tokens in `appTokens`. See
   [content-api.md](content-api.md) section 5.

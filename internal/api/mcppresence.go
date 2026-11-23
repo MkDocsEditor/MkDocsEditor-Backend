@@ -25,10 +25,12 @@ const maxPointAtText = 4096
 const mcpLiveHint = "Answers and read_document list the viewers who have the page open. Without viewers, change " +
 	"instantly; with viewers and a small or medium change, consider live: they see the text typed and can follow you."
 
-// checkLive refuses live without an app token: only app tokens have an agent presence
+// checkLive refuses live without an app token: only app tokens and OAuth grants have an agent
+// presence. live stays in the schema for every caller, so the error tells what to do instead.
 func (t *mcpTools) checkLive(live bool) error {
 	if live && t.caller.token == nil {
-		return errors.New("live needs an app token")
+		return errors.New("live needs an app token: this login has no agent cursor to type with, so " +
+			"nothing was changed; repeat without live, or connect with an app token or OAuth")
 	}
 	return nil
 }
