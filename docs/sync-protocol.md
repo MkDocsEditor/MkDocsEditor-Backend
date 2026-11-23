@@ -470,7 +470,8 @@ appears as a peer: a `presence` message with `"agent": {"tokenId", "name"}`, the
 
 **Focus.** The `agent` object can have `focus`, where the agent is: set by every change of the
 agent and by the MCP tool `point_at`. Servers that send it list `agent-focus` in `features` of
-`GET /server-info/`.
+`GET /server-info/`. A client offers following only for an agent with a focus, or checks the
+feature.
 
 ```json
 { "type": "presence", "documentId": "…", "clientId": "agent-3f9a1c0b7d2e",
@@ -489,9 +490,11 @@ agent and by the MCP tool `point_at`. Servers that send it list `agent-focus` in
 - `selections` stays `[]`, so clients that do not know `focus` see an agent without a cursor.
 - A client makes a cursor of its own for each index at `revision` and resolves it in the current
   document, so the position stays right when people edit afterwards:
-  - It first checks that it has every head of `revision` (JS: `Automerge.hasHeads`). JS
-    `Automerge.view` at heads it does not have does not fail: `content` is undefined and
-    `getCursor` on it silently returns the end of the text. Without the heads it waits for the
+  - It first checks that it has every head of `revision` (JS: `Automerge.hasHeads`; Java:
+    no such call, `fork(heads)` throws "invalid hash" for missing heads). Otherwise neither
+    library fails at heads it does not have: JS `Automerge.view` has an undefined `content` and
+    `getCursor` on it silently returns the end of the text; Java `text` at them is silently
+    empty and `makeCursor` reports "index 0 is out of bounds". Without the heads it waits for the
     sync, at most 30 seconds, then applies `from` and `to` to the current text, clamped to its
     length.
   - An index at the end of the text at `revision`: the client makes the cursor for `index - 1`
