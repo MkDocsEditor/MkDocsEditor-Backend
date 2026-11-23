@@ -621,8 +621,9 @@ people are ([mcp.md](mcp.md) section 4). Servers that use them list `presence-in
 - `at.viewport` is the current viewport, if there is one: `top` and `bottom` inclusive, 0 and 0
   for an empty text. Unlike `viewport`, it is never missing to mean "unchanged": `at` always
   describes the whole position at that moment.
-- A client with the feature sends `at` in every `presence`. A presence without `at` clears the
-  indexes of the connection, so a stale position is never reported. An `at` over 4 KiB, or one
+- A client with the feature sends `at` in every `presence`. A presence without `at`, or with
+  `"at": null`, clears the indexes of the connection, so a stale position is never reported;
+  neither is an error. The heads of `revision` can come in any order. An `at` over 4 KiB, or one
   that does not have this format, is dropped as if it were missing.
 - The server keeps the last `at` per connection and does not relay it: presence to other
   clients, `presence-snapshot`, `lastPositions` and ghosts never contain `at`. Clients resolve
