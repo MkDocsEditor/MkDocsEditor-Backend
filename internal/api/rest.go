@@ -69,19 +69,21 @@ type (
 type RestService struct {
 	// historySummaries caches the summaries of commits, see history.go
 	historySummaries summaryCache
-	echoRest         *echo.Echo
-	httpServer       *http.Server
-	server           configuration.ServerConfiguration
-	allowedOrigins   []string
-	trustedProxies   []*net.IPNet
-	authenticator    *auth.Service
-	treeManager      *wiki.TreeManager
-	sync             *collab.SyncServer
-	git              *gitstore.Committer
-	gitRemote        *gitremote.Manager
-	gitRemoteFlows   gitRemoteFlows
-	push             *push.Notifier
-	refs             *references.ReferenceIndex
+	// mcpWaits counts the running wait_for_change calls per caller, see mcpwait.go
+	mcpWaits       waitCounter
+	echoRest       *echo.Echo
+	httpServer     *http.Server
+	server         configuration.ServerConfiguration
+	allowedOrigins []string
+	trustedProxies []*net.IPNet
+	authenticator  *auth.Service
+	treeManager    *wiki.TreeManager
+	sync           *collab.SyncServer
+	git            *gitstore.Committer
+	gitRemote      *gitremote.Manager
+	gitRemoteFlows gitRemoteFlows
+	push           *push.Notifier
+	refs           *references.ReferenceIndex
 	// knownRoutes are the route patterns, the only values of the metrics label "route"
 	knownRoutes map[string]struct{}
 	// thumbnailSlots limits concurrent image decoding

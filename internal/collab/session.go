@@ -41,6 +41,11 @@ var ErrNotUTF8 = errors.New("the file is not valid UTF-8")
 type docSession struct {
 	server *SyncServer
 
+	// changed is closed when the heads of the document change, for WaitForChange; nil while
+	// nobody waits. changedRevision is the revision it was made for. Guarded by mu.
+	changed         chan struct{}
+	changedRevision string
+
 	mu   sync.Mutex
 	meta *DocumentMeta
 	// positionsDirty means meta.LastPositions has changes that are not on disk yet
@@ -577,10 +582,16 @@ func (ds *docSession) flushAfterDelay() {
 	}
 }
 
-// broadcastSyncLocked sends pending sync messages to every connection
+// broadcastSyncLocked sends pending sync messages to every connection, and wakes WaitForChange
+// if the heads changed. Every change reaches ds.doc by a merge or a sync message, so Heads, which
+// commits pending operations, finds none here.
 func (ds *docSession) broadcastSyncLocked() {
 	for c := range ds.conns {
 		c.syncLocked()
+	}
+	if ds.changed != nil && FormatRevision(ds.doc.Heads()) != ds.changedRevision {
+		close(ds.changed)
+		ds.changed = nil
 	}
 }
 

@@ -212,3 +212,15 @@ func truncate(s string, n int) string {
 	}
 	return s
 }
+
+// Limits of wait_for_change per app token or account: a burst of 5, then one every 2 seconds
+const (
+	waitForChangeBurst  = 5
+	waitForChangeRefill = 2 * time.Second
+)
+
+// AllowWaitForChange takes a token from the bucket of the waits (wait_for_change) of an app
+// token or, for sessions, of an account
+func (s *Service) AllowWaitForChange(key string, ip string) error {
+	return s.allowBucket("wait-for-change:", key, ip, waitForChangeBurst, waitForChangeRefill)
+}

@@ -65,6 +65,7 @@ means the top level.
 | `point_at` | | Moves the agent's cursor, selection and view in a page people have open, changes no text. See section 4 |
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `download_resource` | | A file unchanged, as an embedded resource. See below |
+| `wait_for_change` | | Waits until someone changes a page people have open, at most 30 seconds, then answers like `changes_since`. See below |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
 | `changes_since` | | What changed on a page since the caller last read it (or since `since`, a revision), as a diff with who changed it. See below |
 | `read_history` | | The commits of a page, newest first (`limit`, default 20, at most 100): revision, time, authors, agents, lines added and removed, headings. Only with git |
@@ -155,6 +156,22 @@ only work for the MCP endpoint ([oauth.md](oauth.md)), and the agent does not se
   edits of others it never read, together with its own.
 - The output lists `changed by` (accounts, with their agents) and the hunks like a unified
   diff with the heading of each hunk.
+
+`wait_for_change` is for an agent that waits for a person, for example after it asked someone
+to fill in a section. It blocks, so the description tells agents to prefer `changes_since`
+otherwise.
+- It takes `document`, `since` (a revision; default the page as the caller last saw it, else
+  its revision now) and `timeout` (1 to 30 seconds, default 20). 30 seconds stays below the
+  read timeouts of common reverse proxies (60 seconds) and of MCP clients.
+- It answers like `changes_since` from `since` as soon as the revision differs, at once if it
+  already does, and marks the change as seen. After `timeout` without a change it answers
+  `no changes within N seconds`.
+- Only for pages people have open: otherwise, and when the last person leaves while it waits,
+  it fails with "nobody has this page open" at once. It never loads a page.
+- A wait holds no lock and no page: it waits for a signal of the document, and ends as soon as
+  the request ends (the client disconnects). Per app token or account: at most 2 waits at once,
+  and a rate limit of a burst of 5, then one every 2 seconds. App tokens with the scope `read`
+  may use it.
 
 `revert_change` refuses commits with other authors than the caller's account and app token
 (by name): an agent can undo its own mistake, not the work of people or other agents. Since
