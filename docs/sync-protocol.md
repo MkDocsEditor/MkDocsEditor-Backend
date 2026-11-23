@@ -68,8 +68,9 @@ backend binary is the same with and without the bitcode. See
 [third_party/automerge-go/README.md](../third_party/automerge-go/README.md).
 
 Text indices differ between libraries: automerge-go counts Unicode code points, JS counts
-UTF-16 code units. Indices never go over the wire. Positions that are shared (cursors)
-are Automerge cursors, see [Presence](#6-presence).
+UTF-16 code units. automerge-java counts code points too. Positions that people share
+(cursors) are Automerge cursors, see [Presence](#6-presence). The only indices on the wire are
+the focus of an agent, in code points and tied to a revision, see [Agents](#agents).
 
 ## 2. Users, roles and actors
 
@@ -464,9 +465,55 @@ Presence is ephemeral. The server relays it and never stores it.
 
 An agent that changes the document over the content API or the MCP server with an app token
 appears as a peer: a `presence` message with `"agent": {"tokenId", "name"}`, the token name as
-`deviceName` and no selections, also in the `peers` of `presence-snapshot`. A
-`presence-leave` without a ghost follows 60 seconds after its last change. See
-[mcp.md](mcp.md) section 4.
+`deviceName` and no selections, also in the `peers` of `presence-snapshot`. See
+[mcp.md](mcp.md) section 4 and [agent-presence.md](agent-presence.md).
+
+**Focus.** The `agent` object can have `focus`, where the agent is (set with the MCP tool
+`point_at`). Servers that send it list `agent-focus` in `features` of `GET /server-info/`.
+
+```json
+{ "type": "presence", "documentId": "…", "clientId": "agent-3f9a1c0b7d2e",
+  "agent": { "tokenId": "…", "name": "claude",
+             "focus": { "revision": "<heads>", "from": 120, "to": 168,
+                        "viewport": { "top": 100, "bottom": 899 } } },
+  "selections": [] }
+```
+
+- `revision` is the revision (the heads, as in [content-api.md](content-api.md)) the indexes
+  refer to. Indexes count **Unicode code points** of `content`, starting at 0.
+- `from` and `to` are the selection, `from == to` a cursor; `to` is exclusive and can be the
+  length of the text. `viewport` is optional: `top` and `bottom` are the indexes of the first and
+  the last visible character, both inclusive, 0 and 0 for an empty text. A follower centers
+  their middle, and without a viewport it scrolls to the cursor.
+- `selections` stays `[]`, so clients that do not know `focus` see an agent without a cursor.
+- A client makes a cursor of its own for each index at `revision` and resolves it in the current
+  document, so the position stays right when people edit afterwards:
+  - It first checks that it has every head of `revision` (JS: `Automerge.hasHeads`). JS
+    `Automerge.view` at heads it does not have does not fail: `content` is undefined and
+    `getCursor` on it silently returns the end of the text. Without the heads it waits for the
+    sync, at most 30 seconds, then applies `from` and `to` to the current text, clamped to its
+    length.
+  - An index at the end of the text at `revision`: the client makes the cursor for `index - 1`
+    and adds 1 after resolving, in both clients. automerge-java throws for `makeCursor(length)`,
+    also with heads, and JS `getCursor(view, length)` returns `"e"`, which resolves to the end of
+    the *current* text. An empty text at `revision` is `"start"`.
+  - A cursor whose character was deleted since resolves to the next surviving character (JS
+    with the default `move: "after"`, Java 0.0.9 `lookupCursorIndex`). Should a cursor not
+    resolve, the client applies the indexes to the current text, clamped, and never moves to the
+    start of the text.
+- The focus is part of the presence, so `presence-snapshot` has it for clients that join later.
+  It never goes into `lastPositions` or ghosts, which are per account and would overwrite the
+  last position of the person whose account the agent uses.
+- A new epoch only starts when a session loads, so the server has no focus to clear then. A
+  client that sees a new epoch drops every agent focus it has.
+- Join links never pick an agent presence, although it carries the account's `accountId`, see
+  [auth.md](auth.md#access-request-and-join-link).
+
+**Lifetime.** An agent presence without a focus ends 60 seconds after its last change, one with
+a focus 5 minutes after its last change or `point_at`: a turn of the model often takes longer
+than a minute, and followers must not be dropped in the middle of a tour. A change keeps the
+focus, and `point_at` with `clear` ends the presence at once. It always ends with
+`presence-leave` without a ghost, and with the document when it unloads.
 
 ### Client instances
 

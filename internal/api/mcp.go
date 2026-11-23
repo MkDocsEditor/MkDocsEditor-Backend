@@ -115,10 +115,14 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 			"from read_history."}, tools.readRevision)
 	}
 	tools.registerTreeTools(server, readOnly, caller.user.CanWrite())
+	notDestructive := false
+	mcp.AddTool(server, &mcp.Tool{Name: "point_at", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
+		Description: "Show the people who have a page open where you are: moves your cursor and selection (select, a " +
+			"text that occurs once) or your cursor and view (heading, the text of a heading), or removes them (clear). " +
+			"Changes no text. People who follow you are taken there. Only works while someone has the page open."}, tools.pointAt)
 	if !caller.user.CanWrite() {
 		return server
 	}
-	notDestructive := false
 	mcp.AddTool(server, &mcp.Tool{Name: "edit_document", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
 		Description: "Change a page by replacing text. Each old must match the page exactly once, including whitespace; " +
 			"add surrounding lines to make it unique. Edits apply in order, all or none. Pass the revision from read_document " +
@@ -185,6 +189,8 @@ type (
 	mcpRevision struct {
 		Path     string `json:"path"`
 		Revision string `json:"revision"`
+		// Viewers are the people who have the page open, see docs/mcp.md section 4
+		Viewers []string `json:"viewers"`
 	}
 
 	mcpCreated struct {
@@ -337,7 +343,8 @@ func (t *mcpTools) readDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 		return nil, nil, err
 	}
 	t.markSeen(d, revision, &content)
-	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\n---\n%s", d.RelPath, d.Title, revision, content)), nil, nil
+	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\nviewers: %s\n---\n%s", d.RelPath, d.Title, revision,
+		formatViewers(t.viewers(d)), content)), nil, nil
 }
 
 func (t *mcpTools) getBacklinks(_ context.Context, _ *mcp.CallToolRequest, in mcpDocumentRef) (*mcp.CallToolResult, *mcpBacklinks, error) {
@@ -369,7 +376,7 @@ func (t *mcpTools) editDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 		return nil, nil, contentToolError(err)
 	}
 	t.advanceSeen(d, before, revision)
-	return nil, &mcpRevision{Path: d.RelPath, Revision: revision}, nil
+	return nil, &mcpRevision{Path: d.RelPath, Revision: revision, Viewers: t.viewers(d)}, nil
 }
 
 func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpWriteInput) (*mcp.CallToolResult, *mcpRevision, error) {
@@ -389,7 +396,7 @@ func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in m
 		return nil, nil, contentToolError(err)
 	}
 	t.advanceSeen(d, before, revision)
-	return nil, &mcpRevision{Path: d.RelPath, Revision: revision}, nil
+	return nil, &mcpRevision{Path: d.RelPath, Revision: revision, Viewers: t.viewers(d)}, nil
 }
 
 func (t *mcpTools) createDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpCreateInput) (*mcp.CallToolResult, *mcpCreated, error) {

@@ -74,6 +74,17 @@ func (s *Service) AllowContentWrite(key string, ip string) error {
 	return s.allowBucket("content-write:", key, ip, contentWriteBurst, contentWriteRefill)
 }
 
+// Limits of point_at per app token: 2 per second with a small burst
+const (
+	agentFocusBurst  = 10
+	agentFocusRefill = 500 * time.Millisecond
+)
+
+// AllowAgentFocus takes a token from the bucket of the focus moves (point_at) of an app token
+func (s *Service) AllowAgentFocus(key string, ip string) error {
+	return s.allowBucket("agent-focus:", key, ip, agentFocusBurst, agentFocusRefill)
+}
+
 // AllowOAuth takes a token for a request to the public OAuth endpoints of a client address
 func (s *Service) AllowOAuth(ip string) error {
 	return s.allowBucket("oauth:", ip, ip, oauthBurst, oauthRefill)

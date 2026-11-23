@@ -60,7 +60,8 @@ means the top level.
 |---|---|---|
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |
 | `list_tree` | | Paths and titles of all pages, or of those below `section`. With `files`, also the sections and the files that are no pages, with size and type |
-| `read_document` | | The markdown of a page with a header: `path`, `title`, `revision` |
+| `read_document` | | The markdown of a page with a header: `path`, `title`, `revision`, `viewers` |
+| `point_at` | | Moves the agent's cursor, selection and view in a page people have open, changes no text. See section 4 |
 | `read_resource` | | A file that is no page, like an image a page links to. See below |
 | `download_resource` | | A file unchanged, as an embedded resource. See below |
 | `get_backlinks` | | Pages that link to a page, with line and link text |
@@ -174,16 +175,48 @@ An agent that changes a page shows up for the people who have it open:
   - `"agent": {"tokenId": "…", "name": "<token name>"}`
   - `deviceName` set to the token name
   - `selections: []`: automerge-go cannot create Automerge cursors, so an agent has no cursor
+    of its own; `agent.focus` says where it is (below)
   - `clientId` `agent-<12 hex>` and a stable `instanceId` derived from the token
 
   The agent is also part of the `peers` of `presence-snapshot` for clients that connect
-  later. A `presence-leave` follows 60 seconds after its last change.
+  later. A `presence-leave` follows 60 seconds after its last change, 5 minutes with a focus.
+- **Focus**: `point_at` moves the agent's cursor, selection and viewport, the `focus` of
+  [sync-protocol.md](sync-protocol.md#agents), and people who follow the agent are taken
+  there. A change keeps the focus.
 - **Authorship and history**: the agent's actor has `agent` in the actor map. Commits carry
   a `Via-App-Token` trailer, and history entries list the tokens in `appTokens`. See
   [content-api.md](content-api.md) section 5.
 
 Changes over a session token (`mds_…`) are no agent changes: they appear as the account's
-own, without presence.
+own, without presence. `point_at` needs an app token (OAuth grants are app tokens). One app
+token used by two agent sessions at once shares one presence and one focus.
+
+**`viewers`**: so that the agent can choose how to show a change, `read_document` (a header
+line) and the answers of `edit_document`, `write_document` and `point_at` list who has the page
+open: the display names of the accounts with a connection to it, sorted, the caller's own
+account marked `(you)`. Agents and ghosts are not in it.
+
+**`point_at`** takes `document` and exactly one of:
+
+| Parameter | |
+|---|---|
+| `select` | a text of the page that occurs exactly once (like `old` of `edit_document`): the selection |
+| `heading` | the text of a heading: the cursor goes to its start and the viewport over its section |
+| `clear` | true: remove the focus; the agent's presence ends at once |
+
+- `select` and `heading` are at most 4 KiB.
+- A heading is an ATX heading (`## Text`) outside fenced code and front matter, like the
+  sections of [sync-protocol.md](sync-protocol.md) section 11. Leading `#` and surrounding
+  spaces are ignored, the comparison is case sensitive, and a text that is the text of more
+  than one heading is an error. The section ends before the next heading of the same or a
+  higher level.
+- If nobody has the page open, the answer is "nobody has this page open" and nothing happens;
+  the page is not loaded for it.
+- It does not mark the page as seen for `changes_since`, and app tokens with the scope `read`
+  may use it: a reader can already send cursors over the websocket, and the focus names only
+  text the token can read.
+- Its own rate limit: a burst of 10, then 2 per second, per app token. It does not count
+  against the limit of content changes.
 
 ## 5. Assistants that cannot use the wiki
 
