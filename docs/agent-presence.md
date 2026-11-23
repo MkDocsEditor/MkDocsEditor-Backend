@@ -194,11 +194,13 @@ Rules:
     hidden
   - the hiding takes precedence over other decorations of the same text
 - Defaults of the appearance animation, all settable by the client:
-  - fade-in: opacity 0 to 1 over 250 ms
+  - fade-in: every character fades from opacity 0 to 1 over 500 ms from the moment it
+    appears, so a run of text fades as a gradient. A piece at progress p (0 to 1) has the
+    alpha 1 - (1 - p)^2.
   - an optional slide of the appearing characters, 0 by default. It is optional per client;
     the web client leaves it out for now.
-  - only the newest 16 characters of one writer animate
-  - at most 24 animated ranges at once; above that, the oldest finish at once
+  - at most 256 animated ranges at once; above that, the neighbouring ranges with the closest
+    alphas merge into one
   - local typing into a range that is fading in does not fade
 - Every animated range has a tag of its writer: the actor id of the change. The clients
   already know which account, and for agents which app token, an actor belongs to (the actor
