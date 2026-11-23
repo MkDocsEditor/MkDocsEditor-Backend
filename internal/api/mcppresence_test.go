@@ -225,8 +225,8 @@ func TestMCPLiveEdit(t *testing.T) {
 		!strings.HasPrefix(change["clientId"].(string), "agent-") {
 		t.Errorf("agent-change = %v, base %s", change, base)
 	}
-	// the focus is at the end of the inserted text, at the revision of the change itself, not of
-	// the merged document
+	// the focus is at the end of the inserted text ("Agent", the context " text." stays), at the
+	// revision of the change itself, not of the merged document
 	if strings.Contains(out, `"revision":"`+hash+`"`) {
 		t.Errorf("the merged revision is the change alone: %s", out)
 	}
@@ -234,7 +234,7 @@ func TestMCPLiveEdit(t *testing.T) {
 		agent, _ := m["agent"].(map[string]any)
 		focus, _ := agent["focus"].(map[string]any)
 		return m["type"] == collab.MsgPresence && focus != nil && focus["revision"] == hash &&
-			focus["from"] == float64(20) && focus["to"] == float64(20)
+			focus["from"] == float64(14) && focus["to"] == float64(14)
 	})
 	announced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange })
 	synced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgSyncRequest })
@@ -432,4 +432,57 @@ func TestMCPReadPresence(t *testing.T) {
 		}
 	}
 	a.mu.Unlock()
+}
+
+func TestMCPLiveEditKeepsTheContext(t *testing.T) {
+	e := newSyncEnv(t)
+	rel := "guide/setup.md"
+	id := e.docID(rel)
+	s := e.mcpSession(e.appToken("bob", "claude", auth.ScopeWrite))
+	a := newTestClient(t, e, "alice")
+	a.connect(id)
+	a.appendText("Alice wrote this line.\n")
+	eventually(t, "server", func() bool { return strings.Contains(e.serverText(rel), "Alice wrote") })
+
+	// the context around the change stays: the focus is at the end of the inserted word
+	out, failed := callTool(t, s, "edit_document", map[string]any{"document": rel, "live": true,
+		"edits": []map[string]string{{"old": "Alice wrote this line.", "new": "Alice wrote this short line."}}})
+	if failed {
+		t.Fatalf("edit_document = %q", out)
+	}
+	want := setupText + "Alice wrote this short line.\n"
+	a.waitFor("the edit", func() bool { return a.textLocked() == want })
+	end := len([]rune(setupText + "Alice wrote this short "))
+	a.waitFor("the focus after the word", func() bool {
+		f := agentFocus(a)
+		return f != nil && f["from"] == float64(end) && f["to"] == float64(end)
+	})
+
+	// alice's context is still hers, only the inserted word is the agent's
+	authorship, err := e.rs.sync.Authorship(e.tm.GetDocument(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := len([]rune(setupText))
+	for _, r := range authorship.Runs {
+		if r.End <= start || r.Start >= len([]rune(want)) {
+			continue
+		}
+		inserted := r.Start >= end-len("short ") && r.End <= end
+		if inserted != (r.Username != "alice") {
+			t.Errorf("run %+v of %q", r, string([]rune(want)[r.Start:r.End]))
+		}
+	}
+
+	// write_document with live diffs the whole text: the same holds
+	_, revision := e.readContent(id, e.appToken("bob", "other", auth.ScopeWrite))
+	if out, failed = callTool(t, s, "write_document", map[string]any{"document": rel, "live": true, "baseRevision": revision,
+		"content": setupText + "Alice wrote this very short line.\n"}); failed {
+		t.Fatalf("write_document = %q", out)
+	}
+	end = len([]rune(setupText + "Alice wrote this very "))
+	a.waitFor("the focus after the second word", func() bool {
+		f := agentFocus(a)
+		return f != nil && f["from"] == float64(end)
+	})
 }
