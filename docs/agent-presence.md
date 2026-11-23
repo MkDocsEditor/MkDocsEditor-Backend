@@ -182,9 +182,10 @@ Rules:
   - an optional slide of the appearing characters, 0 by default
   - only the newest 16 characters of one writer animate
   - at most 24 animated ranges at once; above that, the oldest finish at once
-- Every animated range has a tag of its writer: the agent's app token, or the other person
-  (from the actor of the change, see the actor map in [sync-protocol.md](sync-protocol.md)
-  section 2). Several writers can appear at the same time. A new change of the same agent
+- Every animated range has a tag of its writer: the actor id of the change. The clients
+  already know which account, and for agents which app token, an actor belongs to (the actor
+  map, [sync-protocol.md](sync-protocol.md) section 2), so this needs no message. Several
+  writers can appear at the same time. A new change of the same agent
   finishes that agent's running reveal at once, then starts its own.
 - A local edit does not end running animations by itself; the client decides what to finish.
   The rule both clients use: when the person types, the agent's reveal and fade finish at once
@@ -192,7 +193,8 @@ Rules:
   the person, or a remote edit, inside or at the edge of a hidden range finishes the animation
   of that range, so nobody types into invisible text.
 - Collapsed or folded parts of the text appear in one chunk when the reveal reaches them. They
-  are never typed out, and never shown before the reveal reaches them.
+  are never typed out, and never shown before the reveal reaches them. (The web editor has no
+  folding today.)
 - With the system setting that removes animations (reduce motion), there is no fade and no
   slide, only the reveal.
 - The cost per frame depends on the visible rows and the number of animated ranges, never on
