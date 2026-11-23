@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
+	automerge "github.com/automerge/automerge-go"
 )
 
 // defaultAgentPresenceLifetime is how long an agent without a focus stays present in a
@@ -84,6 +85,20 @@ func (ds *docSession) touchAgentPresenceLocked(agent Agent, actorID string, focu
 	}
 	p.timer = time.AfterFunc(p.lifetime(ds.server), func() { ds.agentPresenceExpired(key, p) })
 	ds.broadcastLocked(ds.agentPresenceMessageLocked(p), nil)
+}
+
+// announceAgentChangeLocked sends agent-change for a live change of an agent, after its presence
+// and before the sync messages that carry the change
+func (ds *docSession) announceAgentChangeLocked(agent Agent, base string, change automerge.ChangeHash) {
+	p := ds.agentPresences[agent.key()]
+	if p == nil {
+		return
+	}
+	ds.broadcastLocked(&AgentChangeMessage{
+		Type: MsgAgentChange, DocumentID: ds.docID, ClientID: p.clientID, InstanceID: p.instanceID,
+		Agent: &AgentInfo{TokenID: agent.TokenID, Name: agent.TokenName},
+		Base:  base, Change: change.String(),
+	}, nil)
 }
 
 // agentPresenceExpired ends the presence of an agent that has not changed the document since

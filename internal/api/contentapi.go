@@ -150,7 +150,7 @@ func (rs *RestService) postDocumentEdits(c *echo.Context) error {
 	if len(r.Edits) == 0 || len(r.Edits) > maxEditsPerRequest {
 		return apiError(c, http.StatusBadRequest, CodeBadRequest, "edits must have 1 to 100 entries", map[string]any{"maxEdits": maxEditsPerRequest})
 	}
-	revision, err := rs.sync.ApplyEdits(d, r.Edits, r.BaseRevision, agentOf(c))
+	revision, err := rs.sync.ApplyEdits(d, r.Edits, r.BaseRevision, agentOf(c), collab.EditOptions{})
 	if err != nil {
 		return rs.contentError(c, err)
 	}
@@ -179,7 +179,7 @@ func (rs *RestService) putDocumentContent(c *echo.Context) error {
 		return apiError(c, http.StatusPreconditionRequired, CodeBaseRevisionRequired,
 			"baseRevision is required: read the document first (GET /document/{id}/content/, header ETag)", nil)
 	}
-	revision, err := rs.sync.WriteContent(d, *r.Content, r.BaseRevision, agentOf(c))
+	revision, err := rs.sync.WriteContent(d, *r.Content, r.BaseRevision, agentOf(c), collab.EditOptions{})
 	if err != nil {
 		return rs.contentError(c, err)
 	}

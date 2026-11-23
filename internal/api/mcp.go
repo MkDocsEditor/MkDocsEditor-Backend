@@ -126,9 +126,10 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 	mcp.AddTool(server, &mcp.Tool{Name: "edit_document", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
 		Description: "Change a page by replacing text. Each old must match the page exactly once, including whitespace; " +
 			"add surrounding lines to make it unique. Edits apply in order, all or none. Pass the revision from read_document " +
-			"as baseRevision. Prefer this over write_document."}, tools.editDocument)
+			"as baseRevision. Prefer this over write_document. " + mcpLiveHint}, tools.editDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "write_document", Description: "Replace the whole markdown of a page. baseRevision " +
-		"(from read_document) is required; changes others made since are kept. Use edit_document for partial changes."}, tools.writeDocument)
+		"(from read_document) is required; changes others made since are kept. Use edit_document for partial changes. " +
+		mcpLiveHint}, tools.writeDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "create_document", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
 		Description: "Create a page in a section (a folder path, empty for the top level), optionally with content."}, tools.createDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "move_document", Description: "Move or rename a page. Links to it in other pages are " +
@@ -166,12 +167,14 @@ type (
 		Document     string            `json:"document" jsonschema:"page path relative to the wiki root, like guide/setup.md, or the page id"`
 		Edits        []collab.TextEdit `json:"edits" jsonschema:"replacements: old must occur exactly once, new replaces it"`
 		BaseRevision string            `json:"baseRevision,omitempty" jsonschema:"revision from read_document the edits refer to"`
+		Live         bool              `json:"live,omitempty" jsonschema:"show the inserted text as typed to the people who have the page open (see viewers)"`
 	}
 
 	mcpWriteInput struct {
 		Document     string `json:"document" jsonschema:"page path relative to the wiki root, like guide/setup.md, or the page id"`
 		Content      string `json:"content" jsonschema:"the complete new markdown"`
 		BaseRevision string `json:"baseRevision" jsonschema:"revision from read_document the content is based on"`
+		Live         bool   `json:"live,omitempty" jsonschema:"show the inserted text as typed to the people who have the page open (see viewers)"`
 	}
 
 	mcpCreateInput struct {
@@ -367,11 +370,14 @@ func (t *mcpTools) editDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 	if len(in.Edits) == 0 || len(in.Edits) > maxEditsPerRequest {
 		return nil, nil, errors.New("edits must have 1 to 100 entries")
 	}
+	if err = t.checkLive(in.Live); err != nil {
+		return nil, nil, err
+	}
 	if err = t.allowWrite(); err != nil {
 		return nil, nil, err
 	}
 	_, before, _ := t.rs.sync.ReadContent(d)
-	revision, err := t.rs.sync.ApplyEdits(d, in.Edits, in.BaseRevision, t.caller.agent())
+	revision, err := t.rs.sync.ApplyEdits(d, in.Edits, in.BaseRevision, t.caller.agent(), collab.EditOptions{Live: in.Live})
 	if err != nil {
 		return nil, nil, contentToolError(err)
 	}
@@ -387,11 +393,14 @@ func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in m
 	if in.BaseRevision == "" {
 		return nil, nil, errors.New("baseRevision is required: read_document first")
 	}
+	if err = t.checkLive(in.Live); err != nil {
+		return nil, nil, err
+	}
 	if err = t.allowWrite(); err != nil {
 		return nil, nil, err
 	}
 	_, before, _ := t.rs.sync.ReadContent(d)
-	revision, err := t.rs.sync.WriteContent(d, in.Content, in.BaseRevision, t.caller.agent())
+	revision, err := t.rs.sync.WriteContent(d, in.Content, in.BaseRevision, t.caller.agent(), collab.EditOptions{Live: in.Live})
 	if err != nil {
 		return nil, nil, contentToolError(err)
 	}
@@ -416,7 +425,7 @@ func (t *mcpTools) createDocument(_ context.Context, _ *mcp.CallToolRequest, in 
 		return nil, nil, err
 	}
 	if in.Content != "" {
-		if revision, err = t.rs.sync.WriteContent(d, in.Content, revision, t.caller.agent()); err != nil {
+		if revision, err = t.rs.sync.WriteContent(d, in.Content, revision, t.caller.agent(), collab.EditOptions{}); err != nil {
 			return nil, nil, fmt.Errorf("the page %s was created, but writing its content failed: %w", d.RelPath, err)
 		}
 	}

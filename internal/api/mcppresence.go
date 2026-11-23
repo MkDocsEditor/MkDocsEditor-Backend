@@ -21,6 +21,18 @@ import (
 // maxPointAtText is the longest select or heading of point_at
 const maxPointAtText = 4096
 
+// mcpLiveHint is the advice on live in the descriptions of the write tools
+const mcpLiveHint = "Answers and read_document list the viewers who have the page open. Without viewers, change " +
+	"instantly; with viewers and a small or medium change, consider live: they see the text typed and can follow you."
+
+// checkLive refuses live without an app token: only app tokens have an agent presence
+func (t *mcpTools) checkLive(live bool) error {
+	if live && t.caller.token == nil {
+		return errors.New("live needs an app token")
+	}
+	return nil
+}
+
 type (
 	mcpPointAtInput struct {
 		Document string `json:"document" jsonschema:"page path relative to the wiki root, like guide/setup.md, or the page id"`

@@ -13,6 +13,7 @@ import (
 
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/activity"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/auth"
+	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/collab"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/gitstore"
 	"github.com/MkDocsEditor/MkDocsEditor-Backend/internal/wiki"
 	"github.com/labstack/echo/v5"
@@ -412,7 +413,7 @@ func (rs *RestService) restoreSection(c *echo.Context, d *wiki.Document, rel, re
 		agent := agentOf(c)
 		tokenName := agent.TokenName
 		agent.TokenName = ""
-		if _, err = rs.sync.WriteContent(d, restored, liveRevision, agent); err != nil {
+		if _, err = rs.sync.WriteContent(d, restored, liveRevision, agent, collab.EditOptions{}); err != nil {
 			return rs.contentError(c, err)
 		}
 		if tokenName != "" {
