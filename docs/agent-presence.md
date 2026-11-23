@@ -156,7 +156,8 @@ the `sync` message that can carry it:
   finished early. Otherwise a follower would jump to the end while the text is still being
   typed.
 - A client may show a live change at once when it is large (suggested threshold: 2 KB
-  inserted), when the document is not visible, or when the person turned the animation off.
+  inserted), when the document is not visible, when the setting "Animate edits of others" is
+  off, or with reduce motion (see "Client animation").
   The backend does not know and does not care.
 - Without an `agent-change` message the client shows an agent change at once, and the focus
   goes to the end of the last inserted range as well (the same rule, section 3 "Lifetime").
@@ -174,29 +175,35 @@ involved. It has two parts:
 
 Rules:
 
-- The appearance animation is a client setting, **off by default**. It is only for text that
-  others write (an agent, or another person in the document), never for text the local person
-  types, pastes, undoes or redoes.
+- The app setting **"Animate edits of others"** turns the appearance animation on and off. It
+  is **on by default** in the web and Android clients (the default of the KodeEditor
+  configuration stays off). It is only for text that others write (an agent, or another person
+  in the document), never for text the local person types, pastes, undoes or redoes. With the
+  setting off, a live agent change shows at once too, without a reveal.
 - Defaults, all settable by the client:
   - fade-in 250 ms
-  - an optional slide of the appearing characters, 0 by default
+  - an optional slide of the appearing characters, 0 by default. It is optional per client;
+    the web client leaves it out for now.
   - only the newest 16 characters of one writer animate
   - at most 24 animated ranges at once; above that, the oldest finish at once
 - Every animated range has a tag of its writer: the actor id of the change. The clients
   already know which account, and for agents which app token, an actor belongs to (the actor
   map, [sync-protocol.md](sync-protocol.md) section 2), so this needs no message. Several
-  writers can appear at the same time. A new change of the same agent
-  finishes that agent's running reveal at once, then starts its own.
-- A local edit does not end running animations by itself; the client decides what to finish.
-  The rule both clients use: when the person types, the agent's reveal and fade finish at once
-  (the rest of its text shows at once), and the animations of other people go on. An edit of
-  the person, or a remote edit, inside or at the edge of a hidden range finishes the animation
-  of that range, so nobody types into invisible text.
+  writers can appear at the same time. A new change of the same agent finishes that agent's
+  running reveal at once, then starts its own.
+- Input of the person never ends a fade, neither of an agent's text nor of other people's.
+  Only the agent's reveal can be skipped, in two ways:
+  - A tap or click on the area where text is being revealed right now skips the reveal: the
+    rest of the agent's text shows at once. Typing elsewhere, moving the cursor elsewhere and
+    scrolling do not.
+  - An edit of the person, or a remote edit, inside or at the edge of a hidden range finishes
+    the reveal of that range, so nobody types into invisible text.
 - Collapsed or folded parts of the text appear in one chunk when the reveal reaches them. They
   are never typed out, and never shown before the reveal reaches them. (The web editor has no
   folding today.)
-- With the system setting that removes animations (reduce motion), there is no fade and no
-  slide, only the reveal.
+- With the system setting that removes animations (reduce motion; web:
+  `prefers-reduced-motion: reduce`), a live agent change shows at once: no reveal, no fade, no
+  slide. A follower still follows the agent's focus.
 - The cost per frame depends on the visible rows and the number of animated ranges, never on
   the length of the document.
 - The animation is presentation only. The change is applied to the editor model at once, so
@@ -344,7 +351,7 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 | Side | Work |
 |---|---|
 | Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
-| Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with its setting, off by default |
+| Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with the setting "Animate edits of others", on by default; no slide for now |
 | Android client | the same; the animation with the KodeEditor release that has range styles |
 | KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, merged and released; version to be added |
 
