@@ -353,7 +353,7 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 | Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
 | Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with the setting "Animate edits of others", on by default; no slide for now |
 | Android client | the same; the animation with the KodeEditor release that has range styles |
-| KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, merged and released; version to be added |
+| KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, released in KodeEditor 9.2.0 |
 
 Order: the backend part first. Following an agent works with `focus` alone, before any client
 has the animation, and each client can add the animation later. The Android animation depends

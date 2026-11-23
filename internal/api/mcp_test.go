@@ -86,7 +86,7 @@ func TestMCPTools(t *testing.T) {
 
 	want := []string{"changes_since", "check_links", "create_document", "create_section", "delete_document", "delete_resource",
 		"delete_section", "download_resource", "edit_document", "get_backlinks", "link_to", "list_tree", "move_document",
-		"move_resource", "move_section", "read_document", "read_resource", "recent_changes", "request_upload", "search", "upload_resource",
+		"move_resource", "move_section", "point_at", "read_document", "read_resource", "recent_changes", "request_upload", "search", "upload_resource",
 		"write_document"}
 	if names := toolNames(t, s); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
@@ -176,7 +176,7 @@ func TestMCPReadScopeAndAuth(t *testing.T) {
 	e := newSyncEnv(t)
 	s := e.mcpSession(e.appToken("bob", "reader", auth.ScopeRead))
 	if names := toolNames(t, s); !slices.Equal(names, []string{"changes_since", "check_links", "download_resource", "get_backlinks", "link_to",
-		"list_tree", "read_document", "read_resource", "recent_changes", "search"}) {
+		"list_tree", "point_at", "read_document", "read_resource", "recent_changes", "search"}) {
 		t.Errorf("read scope tools = %v", names)
 	}
 	// readers get the read tools only, whatever the token scope

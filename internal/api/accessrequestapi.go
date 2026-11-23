@@ -69,6 +69,8 @@ const (
 	FeatureAccessRequests = "access-requests"
 	// FeatureInstancePresence means presence and ghosts are per client instance
 	FeatureInstancePresence = "instance-presence"
+	// FeatureAgentFocus means agent presence can have a focus, see docs/sync-protocol.md section 6
+	FeatureAgentFocus = "agent-focus"
 )
 
 func (rs *RestService) accessRequestsDisabled(c *echo.Context) error {

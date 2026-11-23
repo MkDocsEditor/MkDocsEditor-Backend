@@ -55,9 +55,12 @@ type SyncServer struct {
 	HeartbeatTimeout time.Duration
 	// GhostLifetime is how long the cursor of a user stays after they left
 	GhostLifetime time.Duration
-	// AgentPresenceLifetime is how long an agent stays present after its last change
+	// AgentPresenceLifetime is how long an agent without a focus stays present after its last change
 	AgentPresenceLifetime time.Duration
-	HelloTimeout          time.Duration
+	// AgentFocusLifetime is how long an agent with a focus stays present after its last change
+	// or focus
+	AgentFocusLifetime time.Duration
+	HelloTimeout       time.Duration
 
 	// OnFileWritten is called (with the session lock held) after the server wrote a document file
 	OnFileWritten func(relPath string)
@@ -145,6 +148,7 @@ func NewSyncServer(treeManager *wiki.TreeManager, authenticator *auth.Service, s
 		HeartbeatTimeout:      15 * time.Second,
 		GhostLifetime:         defaultGhostLifetime,
 		AgentPresenceLifetime: defaultAgentPresenceLifetime,
+		AgentFocusLifetime:    defaultAgentFocusLifetime,
 		HelloTimeout:          10 * time.Second,
 		sessions:              map[string]*docSession{},
 		treeChanges:           make(chan struct{}, 1),

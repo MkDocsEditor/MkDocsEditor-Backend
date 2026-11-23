@@ -98,6 +98,25 @@ type (
 	AgentInfo struct {
 		TokenID string `json:"tokenId"`
 		Name    string `json:"name"`
+		// Focus is where the agent is in the document, only in presence, see
+		// docs/sync-protocol.md section 6
+		Focus *AgentFocus `json:"focus,omitempty"`
+	}
+
+	// AgentFocus is the cursor, selection and viewport of an agent: indexes in Unicode code
+	// points of the content at Revision
+	AgentFocus struct {
+		Revision string         `json:"revision"`
+		From     int            `json:"from"`
+		To       int            `json:"to"`
+		Viewport *FocusViewport `json:"viewport,omitempty"`
+	}
+
+	// FocusViewport is the text an agent shows: the indexes of the first and the last visible
+	// character, both inclusive
+	FocusViewport struct {
+		Top    int `json:"top"`
+		Bottom int `json:"bottom"`
 	}
 
 	InitialContentMessage struct {

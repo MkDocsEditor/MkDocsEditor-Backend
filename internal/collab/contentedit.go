@@ -256,7 +256,7 @@ func (ds *docSession) commitAgentForkLocked(fork *automerge.Doc, agent Agent, me
 	actor := ds.apiActors[agent.key()]
 	actor.last = hash
 	ds.apiActors[agent.key()] = actor
-	ds.touchAgentPresenceLocked(agent, actor.id)
+	ds.touchAgentPresenceLocked(agent, actor.id, nil)
 
 	// the document changed even if the text is the same again (edits that undo each other)
 	ds.broadcastSyncLocked()
