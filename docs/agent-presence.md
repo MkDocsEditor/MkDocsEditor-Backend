@@ -94,9 +94,11 @@ The `agent` object of presence (and of the `peers` in `presence-snapshot`) can h
 - To use a focus, a client creates a cursor for each index in its own document at `revision`
   (JS: `Automerge.getCursor` on `Automerge.view(doc, heads)`; Java: `makeCursor` with heads) and
   resolves it in the current document.
-  - First it checks that its document has every head of `revision` (JS: `Automerge.hasHeads`).
-    JS `Automerge.view` at heads the document does not have does not fail: its `content` is
-    undefined and `getCursor` on it silently returns the end of the text.
+  - First it checks that its document has every head of `revision` (JS: `Automerge.hasHeads`;
+    Java: no such call, `fork(heads)` throws "invalid hash" for missing heads). Neither library
+    fails otherwise at heads the document does not have: JS `Automerge.view` has an undefined
+    `content` and `getCursor` on it silently returns the end of the text; Java `text` at them
+    is silently empty and `makeCursor` reports "index 0 is out of bounds".
   - An index at the end of the text at `revision`, in both clients: the client makes the
     cursor for `index - 1` and adds 1 after resolving. automerge-java throws for
     `makeCursor(length)`, also with heads ("index 3 is out of bounds"), and in JS
@@ -277,7 +279,8 @@ skip agents.
 
 ### Feature flag
 
-`agent-focus` in `features` of `GET /server-info/`. A client that follows an agent checks it.
+`agent-focus` in `features` of `GET /server-info/`. A client that follows an agent checks it,
+or treats an agent without a focus as not followable: only a server with the feature sends one.
 
 ## 4. MCP tools
 
