@@ -59,7 +59,8 @@ means the top level.
 | Tool | Write | What it does |
 |---|---|---|
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |
-| `list_tree` | | Paths and titles of all pages, or of those below `section`. With `files`, also the sections and the files that are no pages, with size and type |
+| `list_tree` | | Paths and titles of all pages, or of those below `section`. With `files`, also the sections and the files that are no pages, with size and type. With `meta`, a column with the tags, status and description of each page (description cut to 120 characters); with `tag`, only the pages with that tag |
+| `read_wiki_config` | | The settings of `mkdocs.yml` that decide how pages render, filtered like `GET /wiki/config/` ([page-meta.md](page-meta.md)): no secrets, no `extra`, no `nav` |
 | `read_document` | | The markdown of a page with a header: `path`, `title`, `revision`, `viewers`, and where the viewers are |
 | `read_presence` | | Where the people who have a page open are: cursor, selection and visible lines, mapped to the current revision. See section 4 |
 | `point_at` | | Moves the agent's cursor, selection and view in a page people have open, changes no text. See section 4 |
