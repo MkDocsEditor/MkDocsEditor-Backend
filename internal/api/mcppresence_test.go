@@ -233,7 +233,7 @@ func TestMCPLiveEdit(t *testing.T) {
 	})
 	announced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgAgentChange })
 	synced := messageIndex(a, start, func(m map[string]any) bool { return m["type"] == collab.MsgSyncRequest })
-	if presence < 0 || !(presence < announced && announced < synced) {
+	if presence < 0 || presence >= announced || announced >= synced {
 		t.Errorf("order: presence %d, agent-change %d, sync %d", presence, announced, synced)
 	}
 }
