@@ -102,8 +102,13 @@ func TestMCPWaitForChange(t *testing.T) {
 
 func TestWaitCounter(t *testing.T) {
 	var w waitCounter
-	if !w.acquire("a") || !w.acquire("a") || w.acquire("a") || !w.acquire("b") {
-		t.Fatal("counts")
+	for i, want := range []bool{true, true, false} {
+		if got := w.acquire("a"); got != want {
+			t.Fatalf("acquire %d = %v", i, got)
+		}
+	}
+	if !w.acquire("b") {
+		t.Fatal("another caller")
 	}
 	w.release("a")
 	if !w.acquire("a") {
