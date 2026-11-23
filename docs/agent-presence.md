@@ -98,7 +98,7 @@ The `agent` object of presence (and of the `peers` in `presence-snapshot`) can h
   - An index at the end of the text at `revision`, in both clients: the client makes the
     cursor for `index - 1` and adds 1 after resolving. automerge-java throws for
     `makeCursor(length)`, also with heads ("index 3 is out of bounds"), and in JS
-    `getCursor(view, length)` returns `"end"`, which resolves to the end of the *current*
+    `getCursor(view, length)` returns the end-of-text cursor `"e"`, which resolves to the end of the *current*
     text and would jump when people append. If the text at `revision` is empty, the position
     is `"start"`.
   - A cursor whose character was deleted since resolves to where the text was: the index of
@@ -302,7 +302,7 @@ Tested against the libraries the clients use (`@automerge/automerge` 3.5.0, auto
 - A cursor on a character deleted later resolves to the next surviving character and does not
   throw (JS, Java).
 - `makeCursor` at the end of the text throws in Java, also with heads; JS `getCursor` at the
-  end returns `"end"`. JS `view` at unknown heads does not fail.
+  end returns the end-of-text cursor `"e"`. JS `view` at unknown heads does not fail.
 - `diff` patches are sequential and unsorted (JS: operation order; Java: document order).
 - Unknown keys and message types are ignored by both clients (Android by reading the code and
   a test; web by reading the code).
