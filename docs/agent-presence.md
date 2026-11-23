@@ -46,7 +46,10 @@ cannot create Automerge cursors, and the backend stays on Automerge core 0.5.0.
 - **Indexes count Unicode code points** of `content`, as the backend does everywhere else
   (`placeEdits`, authorship, references, text diff). This changes the rule "indices never
   go over the wire" of sync-protocol.md section 1: it needs a new wording when this moves
-  there. The clients convert (JS: the text of `Automerge.view(doc, heads)` is UTF-16).
+  there. automerge-java 0.0.9 counts code points as well (tested: `"a😀b"` has length 3), so
+  the Android client uses the indexes as they are with its Automerge calls and converts only
+  for the editor (Kotlin strings are UTF-16). JS counts UTF-16 code units and converts on the
+  text of `Automerge.view(doc, heads)`.
 
 ## 3. Protocol
 
@@ -82,17 +85,28 @@ The `agent` object of presence (and of the `peers` in `presence-snapshot`) can h
   A follower centers their middle, and without a viewport it scrolls to the cursor. For an
   empty text both are 0.
 - `selections` stays `[]`: clients that do not know `focus` see an agent without a cursor.
+  Both clients ignore unknown keys and unknown message types today (web: the `default` of
+  `handleMessage`; Android: Moshi codegen adapters without `failOnUnknown`, and
+  `MessageEnvelope.type` is a string). The Android parser does fail when a known field changes
+  its type or becomes null, so existing fields of presence keep their types.
 - To use a focus, a client creates a cursor for each index in its own document at `revision`
   (JS: `Automerge.getCursor` on `Automerge.view(doc, heads)`; Java: `makeCursor` with heads) and
   resolves it in the current document.
-  - An index at the end of the text at `revision`: `makeCursor(length)` throws in automerge-java
-    (sync-protocol.md section 6). The client makes the cursor for `index - 1` and adds 1 after
-    resolving. If the text at `revision` is empty, the position is `"start"`.
-  - A cursor whose character was deleted since: the position is where the text was, the next
-    surviving character after it (`move: "after"`, the default of JS `getCursor`; Java 0.0.9
-    has no such parameter and resolves as it does). If a cursor still does not resolve, the
-    client stops using it and applies `from` and `to` to the current text, clamped to its
-    length. It never moves to the start of the text.
+  - First it checks that its document has every head of `revision` (JS: `Automerge.hasHeads`).
+    JS `Automerge.view` at heads the document does not have does not fail: its `content` is
+    undefined and `getCursor` on it silently returns the end of the text.
+  - An index at the end of the text at `revision`, in both clients: the client makes the
+    cursor for `index - 1` and adds 1 after resolving. automerge-java throws for
+    `makeCursor(length)`, also with heads ("index 3 is out of bounds"), and in JS
+    `getCursor(view, length)` returns `"end"`, which resolves to the end of the *current*
+    text and would jump when people append. If the text at `revision` is empty, the position
+    is `"start"`.
+  - A cursor whose character was deleted since resolves to where the text was: the index of
+    the next surviving character. Both clients do this without an error (tested: JS
+    `getCursor` with its default `move: "after"`, Java 0.0.9 `lookupCursorIndex`). JS clients
+    use the default and do not pass `move: "before"`. Should a cursor still not resolve, the
+    client applies `from` and `to` to the current text, clamped to its length. It never moves
+    to the start of the text.
   - A client that does not have `revision` yet waits for the sync. After the wait limit it
     stops waiting and applies `from` and `to` to the current text, clamped to its length.
 - The focus is part of the presence of the agent, so `presence-snapshot` contains it and a
@@ -122,11 +136,18 @@ the `sync` message that can carry it:
   `presence-snapshot` and later joins never replay it. On `document-renamed` the queue stays,
   because the hashes do not change.
 - When the client has `H`, it computes the diff from `base` to `[H]`. The splices that insert
-  text are what the agent typed. The client animates those and shows everything else at once,
-  deleted text too. The splices of a diff are sequential: each index refers to the text after
-  the splices before it. The client maps them to positions in the text at `[H]` first, then
-  makes cursors for each inserted range at `[H]` and resolves them in the current document, so
+  text are what the agent typed (JS: patches with action `splice`; Java: `SpliceText`). The
+  client animates those and shows everything else at once, deleted text too (JS: `del`; Java:
+  `DeleteList`). A replacement comes as an insert and a delete.
+- The patches of a diff are sequential: each index refers to the text after the patches
+  before it. They are not sorted by position, and the order differs between the libraries
+  (tested: JS in the order of the operations, Java 0.0.9 in document order, with neighbours
+  merged). The client therefore maps them to positions in the text at `[H]` first, then makes
+  cursors for each inserted range at `[H]` and resolves them in the current document, so
   ranges stay right when people edited meanwhile.
+- One editor transaction of a client can hold the agent's change together with changes of
+  people that arrived in the same sync. The client never takes the inserted ranges from that
+  transaction; they come only from the diff and the cursors at `[H]`.
 - The same change also sets the `focus` of the agent: the end of the last inserted range in
   the order of the edits (not the highest position), at revision `[H]`. It is sent in the
   presence message of the agent, which goes out before the `agent-change` message.
@@ -143,7 +164,18 @@ the `sync` message that can carry it:
 - The animation is a decoration that hides the text not yet typed on top of the real
   document. The change is applied to the editor model at once, so that remote edits and the
   cursor of the person land at the right positions. Any input of the person (typing, a click,
-  a scroll away) ends the animation first. Only what is drawn changes.
+  a scroll away, touching the hidden range) ends the animation first. Only what is drawn
+  changes.
+- The hiding starts in the same editor transaction that applies `H`. Added in a later
+  transaction, the whole text would show for a frame first. So a client must know which
+  applied changes contain `H`; that is client work, not protocol. The decoration only maps
+  through later transactions and never holds a change back. Web: a CodeMirror 6
+  `Decoration.replace` in a `StateField` (a `ViewPlugin` cannot hide across line breaks).
+- Search, copy, undo and the rendered view see the whole text at once, because it is real.
+  Animations stay short for that reason.
+- The rendered view (alone, or beside the editor) shows a live change at once, without an
+  animation. A follower there scrolls to the line of the focus, because the rendered view can
+  scroll to a source line but not to a character.
 
 ### Lifetime
 
@@ -253,24 +285,33 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 
 | Side | Work |
 |---|---|
-| Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, the clearing of focus on an epoch change, tests with a websocket client |
+| Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
 | Web client | follow an agent with `focus` (like a person), the diff based animation, a setting to turn it off |
 | Android client | the same |
 
 Order: the backend part first. Following an agent works with `focus` alone, before any client
 has the animation, and each client can add the animation later.
 
-## 7. Not verified yet
+## 7. Verified and not verified
 
-These need a check in the clients before they rely on them:
+Tested against the libraries the clients use (`@automerge/automerge` 3.5.0, automerge-java
+0.0.9) with throwaway tests:
 
-- Which unit automerge-java 0.0.9 uses for text indexes. Add an emoji (outside the BMP) case to
-  the interop tests of both clients.
-- What `lookupCursorIndex` (Java) and `getCursor` (JS) do for a character that was deleted
-  after the revision. The rule above is the intent, not a result.
-- Whether the Android Moshi instance fails on unknown keys (the default does not), and the
-  index semantics of `Document.diff` in automerge-java 0.0.9 (assumed sequential, like JS).
+- Index units: JS UTF-16 code units, automerge-java Unicode code points.
+- A cursor made at an older revision resolves right after concurrent inserts (JS, Java).
+- A cursor on a character deleted later resolves to the next surviving character and does not
+  throw (JS, Java).
+- `makeCursor` at the end of the text throws in Java, also with heads; JS `getCursor` at the
+  end returns `"end"`. JS `view` at unknown heads does not fail.
+- `diff` patches are sequential and unsorted (JS: operation order; Java: document order).
+- Unknown keys and message types are ignored by both clients (Android by reading the code and
+  a test; web by reading the code).
+
+Still open:
+
+- An emoji (outside the BMP) case in the interop tests of both clients, so the units above
+  stay pinned.
 - Whether the Automerge sync can hold back a change after the `agent-change` message (the
   queue by `change` is written for it).
-- That the animation as a decoration can be done in the editor of each client without delaying
-  the application of patches.
+- That the animation as a decoration works in the Android editor. For the web editor it does
+  (CodeMirror 6, by reading the code), with the one-transaction rule above.
