@@ -164,18 +164,34 @@ the `sync` message that can carry it:
 - The animation is a decoration that hides the text not yet typed on top of the real
   document. The change is applied to the editor model at once, so that remote edits and the
   cursor of the person land at the right positions. Any input of the person (typing, a click,
-  a scroll away, touching the hidden range) ends the animation first. Only what is drawn
-  changes.
+  a scroll away, touching the hidden range) ends the animation first. A remote edit of
+  someone else inside a hidden range ends the animation of that range. The animation is
+  presentation only: what is drawn changes, nothing else.
+- Whether the hidden text keeps its space (the following text stays where it is) or is
+  collapsed (the following text slides along as the agent types) is open, see section 7.
 - The hiding starts in the same editor transaction that applies `H`. Added in a later
   transaction, the whole text would show for a frame first. So a client must know which
   applied changes contain `H`; that is client work, not protocol. The decoration only maps
-  through later transactions and never holds a change back. Web: a CodeMirror 6
-  `Decoration.replace` in a `StateField` (a `ViewPlugin` cannot hide across line breaks).
+  through later transactions and never holds a change back.
+  - Web: a CodeMirror 6 `Decoration.replace` in a `StateField` (a `ViewPlugin` cannot hide
+    across line breaks).
+  - Android: `EditorTextController.onRemoteChange` calls `applyRemote` synchronously on the
+    main thread; the hidden ranges are set in the same call and moved per splice like the
+    author runs. They are cleared synchronously in `onLocalEdit` and `onStateChanged`.
+    KodeEditor 9.x has no API for styles of an app-supplied range, so today the only way is
+    masks in the background colour drawn by `overlay` (`KodeEditorLayout.getPathForRange`).
+    Masks also cover the selection, remote cursors and line backgrounds, and may be drawn
+    one frame late with the old layout. The clean way is a KodeEditor API for range styles
+    (`SpanStyle(color = Transparent)`), which needs a KodeEditor release.
 - Search, copy, undo and the rendered view see the whole text at once, because it is real.
   Animations stay short for that reason.
-- The rendered view (alone, or beside the editor) shows a live change at once, without an
-  animation. A follower there scrolls to the line of the focus, because the rendered view can
-  scroll to a source line but not to a character.
+- The rendered view (alone, or beside the editor) shows a live change at once and is never
+  animated.
+  - Web: a follower in the rendered view scrolls to the line of the focus, because the
+    rendered view can scroll to a source line but not to a character.
+  - Android never follows in a rendered-only view: following opens the read-only editor
+    (`startFollowing`), and leaving the editor stops following. A rendered pane beside the
+    editor scrolls along with the editor.
 
 ### Lifetime
 
@@ -313,5 +329,10 @@ Still open:
   stay pinned.
 - Whether the Automerge sync can hold back a change after the `agent-change` message (the
   queue by `change` is written for it).
-- That the animation as a decoration works in the Android editor. For the web editor it does
-  (CodeMirror 6, by reading the code), with the one-transaction rule above.
+- The animation in the editors, by reading the code only, without a prototype. Web: feasible
+  with CodeMirror 6 and the one-transaction rule. Android: only with overlay masks today (a
+  frame late with the old layout is possible), cleanly only with a new KodeEditor API.
+- To decide: does the hidden text keep its space or collapse? Android masks and the KodeEditor
+  span API keep it, and collapsing would need hidden ranges in KodeEditor's layout. A CodeMirror
+  `Decoration.replace` collapses, and keeping the space on the web would need a mark
+  decoration with a transparent text colour instead.
