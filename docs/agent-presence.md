@@ -52,11 +52,15 @@ cannot create Automerge cursors, and the backend stays on Automerge core 0.5.0.
 
 ### Revisions
 
-All revisions are in the format of [content-api.md](content-api.md) (the heads). A revision in
-a hint is the heads of **the change itself**, not of the merged document: an agent edit with
+All revisions are in the format of [content-api.md](content-api.md) (the heads). The revision of
+a **change** is the heads of the change itself, `[H]`, not of the merged document: an agent edit with
 an old `baseRevision` is made on a fork of that revision and merged afterwards, so its indexes
 are only right at the heads of the fork after the commit, which are the hash `H` of the agent's
-change. The server must not use the heads of the merged document.
+change. The server must not use the heads of the merged document. The revision of `point_at`
+has no change: it is the revision the text was read at, which can be several heads.
+
+One limit applies everywhere a client waits for a revision or a change it does not have yet:
+**30 seconds**, called the wait limit below.
 
 ### Agent focus
 
@@ -72,29 +76,33 @@ The `agent` object of presence (and of the `peers` in `presence-snapshot`) can h
 
 - `revision` is the revision the indexes refer to.
 - `from` and `to` are the selection, `from == to` a cursor. `to` is after the last selected
-  character, so it can be the length of the text.
+  character, so it can be the length of the text (exclusive).
 - `viewport` is optional and has the meaning of the viewport of people: `top` is the index of
-  the first and `bottom` the index of the last visible character (both inclusive). A follower
-  centers their middle, and without a viewport it scrolls to the cursor.
+  the first and `bottom` the index of the last visible character (both inclusive, unlike `to`).
+  A follower centers their middle, and without a viewport it scrolls to the cursor. For an
+  empty text both are 0.
 - `selections` stays `[]`: clients that do not know `focus` see an agent without a cursor.
 - To use a focus, a client creates a cursor for each index in its own document at `revision`
   (JS: `Automerge.getCursor` on `Automerge.view(doc, heads)`; Java: `makeCursor` with heads) and
   resolves it in the current document.
   - An index at the end of the text at `revision`: `makeCursor(length)` throws in automerge-java
     (sync-protocol.md section 6). The client makes the cursor for `index - 1` and adds 1 after
-    resolving, or uses `"end"` if the text at `revision` is the current text.
-  - A cursor that does not resolve because its character was deleted: the client moves to the
-    nearest resolvable position and never to the start of the text. If it cannot, it uses the
-    indexes on the current text.
-  - A client that does not have `revision` yet waits for the sync. If it still has no
-    such revision after about 10 seconds, it drops the focus and uses the indexes on the
-    current text.
+    resolving. If the text at `revision` is empty, the position is `"start"`.
+  - A cursor whose character was deleted since: the position is where the text was, the next
+    surviving character after it (`move: "after"`, the default of JS `getCursor`; Java 0.0.9
+    has no such parameter and resolves as it does). If a cursor still does not resolve, the
+    client stops using it and applies `from` and `to` to the current text, clamped to its
+    length. It never moves to the start of the text.
+  - A client that does not have `revision` yet waits for the sync. After the wait limit it
+    stops waiting and applies `from` and `to` to the current text, clamped to its length.
 - The focus is part of the presence of the agent, so `presence-snapshot` contains it and a
   client that joins later can follow.
 - The server never puts the focus of an agent into `lastPositions` or ghosts. They are
   per account (`rememberPositionLocked`), and would overwrite the last position of the person
   whose account the agent uses.
-- After an epoch change, the server clears the focus of all agents.
+- A new epoch only starts when a session loads from lost state, so the server has no agent
+  presence to clear then. A client that sees a new epoch drops its queued `agent-change`
+  events and every agent focus it has.
 
 ### Live edits
 
@@ -110,15 +118,23 @@ the `sync` message that can carry it:
 - `base` is the heads of the fork before the commit (the dependencies of `H`), `change` is `H`.
 - The message is an event. The client keeps it in a queue by `change` until its document
   contains that change (the Automerge sync can hold a change back for a round trip, so the
-  message can be early), and drops it if the change does not arrive within about 30 seconds.
-  `presence-snapshot` and later joins never replay it.
+  message can be early), and drops it if the change does not arrive within the wait limit.
+  `presence-snapshot` and later joins never replay it. On `document-renamed` the queue stays,
+  because the hashes do not change.
 - When the client has `H`, it computes the diff from `base` to `[H]`. The splices that insert
   text are what the agent typed. The client animates those and shows everything else at once,
-  deleted text too. For each inserted range it makes cursors at `[H]` and resolves them in the
-  current document, so ranges stay right when people edited meanwhile.
-- The same change also sets the `focus` of the agent: the end of the last inserted range, at
-  revision `[H]`, sent in the presence message of the agent (it goes out before the
-  `agent-change` message). A follower follows the focus, whether or not the client animates.
+  deleted text too. The splices of a diff are sequential: each index refers to the text after
+  the splices before it. The client maps them to positions in the text at `[H]` first, then
+  makes cursors for each inserted range at `[H]` and resolves them in the current document, so
+  ranges stay right when people edited meanwhile.
+- The same change also sets the `focus` of the agent: the end of the last inserted range in
+  the order of the edits (not the highest position), at revision `[H]`. It is sent in the
+  presence message of the agent, which goes out before the `agent-change` message.
+- While a client animates a change, it draws the agent's cursor at the head of the animation,
+  and a follower follows that head. It switches to `focus` when the animation ends or is
+  skipped. Otherwise a follower would jump to the end while the text is still being typed.
+- A second change (of the same or another agent) that is ready while an animation runs: the
+  client finishes the running animation at once, then starts the new one.
 - A client may show a live change at once when it is large (suggested threshold: 2 KB
   inserted), when the document is not visible, or when the person turned the animation off.
   The backend does not know and does not care.
@@ -131,12 +147,16 @@ the `sync` message that can carry it:
 
 ### Lifetime
 
-An agent presence without a focus ends 60 seconds after the last change
-(`AgentPresenceLifetime`), as now. With a focus it lasts 5 minutes after the last change or
-`point_at`, because a turn of the model often takes longer than a minute and followers must
-not be dropped in the middle of a tour. Both end with `presence-leave` without a ghost. An
-instant edit also sets the focus (end of the last inserted range, or of the change if it only
-deleted), so it does not end an existing focus.
+Every agent change and every `point_at` sets a focus, and an agent presence with a focus lasts
+5 minutes after the last of them, because a turn of the model often takes longer than a minute
+and followers must not be dropped in the middle of a tour. This is a visible change: the agent
+stays in the list of people who are here for 5 minutes after an edit, not 60 seconds. It ends
+with `presence-leave` without a ghost. `point_at` with `clear` ends it at once. An instant
+edit sets the focus to the end of the last inserted range, or to the place of the change if it
+only deleted, so it does not end an existing focus. The old 60 seconds (`AgentPresenceLifetime`)
+only apply to a presence that never had a focus. The presence ends when the document unloads:
+that can be later than when the last person closes it, because a session with unsaved
+changes stays loaded until the flush works.
 
 ### Joining by link
 
@@ -163,7 +183,8 @@ makes the server send `agent-change`. The change is otherwise unchanged: atomic,
 `revision` in the answer, the same rate limit.
 
 - It is a parameter of the MCP tools only. The REST endpoints `POST /document/{id}/edits/`
-  and `PUT /document/{id}/content/` share the collab code but get no `live`.
+  and `PUT /document/{id}/content/` share the collab code and, with an app token, also set
+  the focus (instant), but get no `live`.
 - With several edits or a `write_document` that splices in many places, the focus is the
   end of the last inserted range, and a client shows many scattered splices at once.
 - `create_document` gets no `live`: nobody has a new page open.
@@ -198,8 +219,7 @@ Moves the agent's cursor, selection and viewport and changes no text.
   ignores the leading `#` characters and surrounding spaces and is case sensitive. A text that
   occurs as the text of more than one heading is an error.
 - If nobody has the page open, the answer is "nobody has this page open" and nothing
-  happens: a focus on a page without a connection would be lost anyway. When the last person
-  closes the page, the focus ends with it.
+  happens: a focus on a page without a connection would be lost anyway.
 - It does not mark the page as seen for `changes_since`.
 - App tokens with the scope `read` may use it. A reader can already send cursors and viewports
   over the websocket, the focus names only text the token can read, and followers move only
@@ -216,6 +236,15 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 - `internal/collab` gets `SetAgentFocus(d, agent, revision, from, to, viewport)`, sends
   `agent-change` from the commit of an agent change, and returns the account ids of the
   connections of a page for `viewers`. It knows nothing about MCP or headings.
+  - `SetAgentFocus` must not use `withSession`, which loads a temporary session for a closed
+    page. Under the lock of an existing session it checks that the page has connections
+    (else `ErrNobodyOpen`; a separate check followed by a set would be a race), that the
+    revision is known (`baseHeadsLocked`), and that `from`, `to`, `top` and `bottom` are not
+    beyond the length in code points of the text at that revision.
+  - `ApplyEdits` and `WriteContent` get an options parameter (`live`) that REST passes as zero.
+    `commitAgentForkLocked` gets it and the inserted ranges. `SpliceDiff` returns only an error
+    today (`textdiff.go`), so it has to report its ranges as well, for the focus of
+    `write_document`.
 - The commit of an agent change (`commitAgentForkLocked`) already sends the presence before the
   sync message through the same queue per connection. The `agent-change` message goes in
   between.
@@ -239,6 +268,8 @@ These need a check in the clients before they rely on them:
   the interop tests of both clients.
 - What `lookupCursorIndex` (Java) and `getCursor` (JS) do for a character that was deleted
   after the revision. The rule above is the intent, not a result.
+- Whether the Android Moshi instance fails on unknown keys (the default does not), and the
+  index semantics of `Document.diff` in automerge-java 0.0.9 (assumed sequential, like JS).
 - Whether the Automerge sync can hold back a change after the `agent-change` message (the
   queue by `change` is written for it).
 - That the animation as a decoration can be done in the editor of each client without delaying
