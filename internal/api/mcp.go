@@ -118,6 +118,7 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 			"from read_history."}, tools.readRevision)
 	}
 	tools.registerTreeTools(server, readOnly, caller.user.CanWrite())
+	tools.registerPinTools(server, readOnly, caller.user.CanWrite())
 	notDestructive := false
 	mcp.AddTool(server, &mcp.Tool{Name: "point_at", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
 		Description: "Show the people who have a page open where you are: moves your cursor and selection (select, a " +

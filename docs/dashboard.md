@@ -15,7 +15,8 @@ There are two lists:
 - **Family pins** are the same for everyone. Editors and admins change them.
 - **Personal pins** belong to one account. Every account has them, readers too.
 
-Only documents can be pinned.
+Only documents can be pinned. Agents read and change pins with the MCP tools `list_pins`,
+`set_pin` and `order_pins`, under the same rules ([mcp.md](mcp.md)).
 
 | Request | Who |
 |---|---|
