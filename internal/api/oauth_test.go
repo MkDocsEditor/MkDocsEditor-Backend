@@ -236,7 +236,7 @@ func TestOAuthFlow(t *testing.T) {
 
 	// the access token works for MCP, as an agent of bob with the client's name
 	s := e.mcpSession(tr.AccessToken)
-	if names := toolNames(t, s); len(names) != 21 {
+	if names := toolNames(t, s); len(names) != 22 {
 		t.Errorf("tools = %v", names)
 	}
 	docID := e.docID("guide/setup.md")
@@ -465,7 +465,7 @@ func TestOAuthSDKClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if names := toolNames(t, s); len(names) != 21 {
+	if names := toolNames(t, s); len(names) != 22 {
 		t.Errorf("tools = %v", names)
 	}
 	tokens, err := e.authn.AppTokens(e.authn.UserByUsername("bob").ID)

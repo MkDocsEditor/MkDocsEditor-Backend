@@ -77,6 +77,7 @@ means the top level.
 | `move_document` | yes | Moves and/or renames a page. Links in other pages are updated, like `POST /move/` |
 | `delete_document` | yes | Deletes a page; `force` when people have it open. Lists the links that broke |
 | `upload_resource` | yes | Creates or replaces (`replace`) a file that is no page. See below |
+| `request_upload` | yes | A one-time URL to upload a larger file with `curl`. See below |
 | `move_resource` | yes | Moves and/or renames a file; links are updated |
 | `delete_resource` | yes | Deletes a file. Lists the links that broke |
 | `create_section` | yes | Creates a section and missing parent sections |
@@ -111,9 +112,24 @@ text names their real type.
 
 `upload_resource` takes the path of the file like `read_resource` (from the wiki root, or relative
 to `document`), and the content as `text` or as `base64`. A request is limited to 4 MiB, so
-binary files must be small. Missing sections are created. An existing file is only replaced
+binary files must be small (larger ones: `request_upload`). Missing sections are created. An existing file is only replaced
 with `replace`; pages (`.md`) are refused, they are created with `create_document`. The commit
 is `Upload <path>` or `Replace <path>`.
+
+`request_upload` takes the same `path`, `document` and `replace`, and answers with a command like
+`curl -sS -T <file> 'https://…/api/uploads/<secret>/'`. The agent runs it in its shell, so the bytes of
+a larger file do not pass through the model. `PUT /uploads/{token}/` takes the body as the file
+(`server.maxUploadBytes`, default 64 MiB; the body goes to a temporary file `.upload-*` in the docs folder
+first, not into memory, so a limit of 1 GiB or more is fine for the backend) and does what `upload_resource` does, with the same commit message and the
+rate limit of the content API, as the account and app token that asked:
+- A reverse proxy in front has limits of its own (nginx: `client_max_body_size`, default 1 MiB).
+- The secret in the URL is the credential, the request needs no login. It works once (a failed
+  attempt uses it up), for the path it was issued for, for 10 minutes. An account has at most 10
+  open URLs.
+- The tickets are kept in memory: a restart invalidates them.
+- The account must still be allowed to write when the file arrives, and the path is checked
+  again (a file that appeared meanwhile needs `replace`).
+- The access log shows the URL; it is useless after its first use.
 
 The delete tools answer the links from outside the deleted item that broke, as
 `path:line destination`, for the agent to fix them. Deleting is committed like

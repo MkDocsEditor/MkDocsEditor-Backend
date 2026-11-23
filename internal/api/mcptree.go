@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 
@@ -95,7 +97,12 @@ func (t *mcpTools) registerTreeTools(server *mcp.Server, readOnly *mcp.ToolAnnot
 	notDestructive := false
 	mcp.AddTool(server, &mcp.Tool{Name: "upload_resource", Description: "Create or replace a file that is no page, like " +
 		"an image or a script: text as text, binary as base64 (keep it small, the request is limited to 4 MiB). " +
-		"Missing sections are created. Pages (.md) are created with create_document."}, t.uploadResource)
+		"Missing sections are created. Pages (.md) are created with create_document. For larger files use " +
+		"request_upload."}, t.uploadResource)
+	mcp.AddTool(server, &mcp.Tool{Name: "request_upload", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
+		Description: "Get a one-time URL to upload a file that is too large for upload_resource. Send the " +
+			"file from your shell with the curl command in the answer: its bytes do not pass through you. The URL works " +
+			"once, for this path only, for 10 minutes."}, t.requestUpload)
 	mcp.AddTool(server, &mcp.Tool{Name: "create_section", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
 		Description: "Create a section (a folder), and missing parent sections."}, t.createSection)
 	mcp.AddTool(server, &mcp.Tool{Name: "move_resource", Description: "Move or rename a file that is no page. Links to it " +
@@ -151,12 +158,9 @@ func (t *mcpTools) ensureSection(rel string) (s *wiki.Section, created []string,
 }
 
 func (t *mcpTools) uploadResource(_ context.Context, _ *mcp.CallToolRequest, in mcpUploadInput) (*mcp.CallToolResult, any, error) {
-	rel, err := t.targetPath(in.Path, in.Document)
+	rel, err := t.uploadTarget(in.Path, in.Document)
 	if err != nil {
 		return nil, nil, err
-	}
-	if strings.HasSuffix(strings.ToLower(rel), wiki.MarkdownFileExtension) {
-		return nil, nil, errors.New("pages (.md) are created with create_document and changed with edit_document")
 	}
 	var content []byte
 	switch {
@@ -169,46 +173,69 @@ func (t *mcpTools) uploadResource(_ context.Context, _ *mcp.CallToolRequest, in 
 	default:
 		content = []byte(in.Text)
 	}
+	msg, err := t.storeResource(rel, bytes.NewReader(content), in.Replace)
+	if err != nil {
+		return nil, nil, err
+	}
+	return text(msg), nil, nil
+}
+
+// uploadTarget resolves and checks the path of an upload: no page, a valid name, no section
+func (t *mcpTools) uploadTarget(p, document string) (string, error) {
+	rel, err := t.targetPath(p, document)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(strings.ToLower(rel), wiki.MarkdownFileExtension) {
+		return "", errors.New("pages (.md) are created with create_document and changed with edit_document")
+	}
 	if err = wiki.ValidateName(path.Base(rel)); err != nil {
-		return nil, nil, fmt.Errorf("invalid file name %q: no leading dot, no slashes or control characters", path.Base(rel))
+		return "", fmt.Errorf("invalid file name %q: no leading dot, no slashes or control characters", path.Base(rel))
 	}
 	tm := t.rs.treeManager
 	if tm.GetDocument(tm.IDOfRelPath(rel)) != nil || tm.GetSection(tm.IDOfRelPath(rel)) != nil {
-		return nil, nil, fmt.Errorf("%s is a page or a section, not a file", rel)
+		return "", fmt.Errorf("%s is a page or a section, not a file", rel)
 	}
-	if err = t.allowWrite(); err != nil {
-		return nil, nil, err
-	}
+	return rel, nil
+}
 
+// storeResource creates or replaces a file at a checked path and commits it. It returns the
+// message for the agent.
+func (t *mcpTools) storeResource(rel string, content io.Reader, replace bool) (string, error) {
+	tm := t.rs.treeManager
+	if err := t.allowWrite(); err != nil {
+		return "", err
+	}
 	var r *wiki.Resource
 	var created []string
+	var err error
 	verb, done := "Upload", "uploaded"
 	if existing := tm.GetResource(tm.IDOfRelPath(rel)); existing != nil {
-		if !in.Replace {
-			return nil, nil, fmt.Errorf("%s exists (%s): pass replace to overwrite it", rel, formatBytes(int(existing.Filesize)))
+		if !replace {
+			return "", fmt.Errorf("%s exists (%s): pass replace to overwrite it", rel, formatBytes(int(existing.Filesize)))
 		}
 		if r, err = tm.ReplaceResource(existing.ID, content); err != nil {
-			return nil, nil, err
+			return "", err
 		}
 		verb, done = "Replace", "replaced"
 	} else {
 		var s *wiki.Section
 		if s, created, err = t.ensureSection(path.Dir(rel)); err != nil {
-			return nil, nil, err
+			return "", err
 		}
-		if r, err = tm.CreateResource(s.ID, path.Base(rel), strings.NewReader(string(content))); err != nil {
-			return nil, nil, err
+		if r, err = tm.CreateResource(s.ID, path.Base(rel), content); err != nil {
+			return "", err
 		}
 	}
 	if r == nil {
-		return nil, nil, fmt.Errorf("%s was written, but is not in the tree: is the name excluded?", rel)
+		return "", fmt.Errorf("%s was written, but is not in the tree: is the name excluded?", rel)
 	}
 	t.rs.commitTreeAs(t.caller.user, verb+" %s", r.Path)
 	msg := fmt.Sprintf("%s %s (%s, %s)", done, r.RelPath, formatBytes(int(r.Filesize)), r.MimeType)
 	if len(created) > 0 {
 		msg += "\ncreated sections: " + strings.Join(created, ", ")
 	}
-	return text(msg), nil, nil
+	return msg, nil
 }
 
 func (t *mcpTools) createSection(_ context.Context, _ *mcp.CallToolRequest, in mcpSectionPathInput) (*mcp.CallToolResult, any, error) {

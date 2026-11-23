@@ -2108,6 +2108,46 @@ paths:
                 $ref: "#/components/schemas/ProtectedResourceMetadata"
         "404":
           $ref: "#/components/responses/Error"
+  /uploads/{token}/:
+    put:
+      summary: "Upload a file with a one-time URL of the MCP tool request_upload"
+      description: |
+        The body is the file. The secret in the URL is the credential: the request needs no
+        login. The URL works once, for the path it was issued for, for 10 minutes; the file
+        is at most `server.maxUploadBytes` (default 64 MiB). Answers with a text message. See docs/mcp.md.
+      operationId: putUpload
+      tags: [ MCP ]
+      security: [ ]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: "Created or replaced"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: "The account may not change content any more"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
   /.well-known/oauth-protected-resource/mcp/:
     get:
       summary: "Protected resource metadata (the URL of WWW-Authenticate)"

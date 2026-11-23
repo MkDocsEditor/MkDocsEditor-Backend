@@ -14,6 +14,9 @@ type (
 		// BackendURL is the public base URL of this API, used in connect links (default:
 		// derived from the request)
 		BackendURL string `yaml:"backendUrl"`
+		// MaxUploadBytes is the largest file of an upload URL (MCP tool request_upload), see
+		// docs/mcp.md (default 64 MiB)
+		MaxUploadBytes int64 `yaml:"maxUploadBytes"`
 		// TrustedProxies are the addresses (CIDRs or IPs) of reverse proxies whose
 		// X-Forwarded-For and X-Forwarded-Proto headers are trusted
 		TrustedProxies []string `yaml:"trustedProxies"`
