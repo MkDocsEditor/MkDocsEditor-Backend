@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -509,6 +510,10 @@ func TestMCPRequestUpload(t *testing.T) {
 	}
 	big := bytes.Repeat([]byte{0xAB, 0x00, 0x7F}, 2<<20)
 	url := urlOf(out)
+	// curl -T appends the name of the local file to a URL that ends in a slash
+	if strings.HasSuffix(url, "/") {
+		t.Errorf("upload URL %q ends in a slash", url)
+	}
 	if code, body := put(url, big); code != http.StatusOK || !strings.Contains(body, "uploaded img/big.bin") {
 		t.Fatalf("PUT = %d %q", code, body)
 	}
@@ -533,6 +538,22 @@ func TestMCPRequestUpload(t *testing.T) {
 	}
 	if got := e.readFile("img/big.bin"); got != "small" {
 		t.Errorf("replaced = %q", got)
+	}
+
+	// the exact command of the answer, with curl if it is installed
+	if _, err := exec.LookPath("curl"); err == nil {
+		out, _ = callTool(t, s, "request_upload", map[string]any{"path": "img/curl.bin"})
+		local := filepath.Join(t.TempDir(), "local-name.bin")
+		if err := os.WriteFile(local, []byte("by curl"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		line := out[strings.Index(out, "curl "):]
+		line = strings.Replace(line[:strings.Index(line, "\n")], "<file>", local, 1)
+		if b, err := exec.Command("sh", "-c", line+" -f").CombinedOutput(); err != nil {
+			t.Errorf("%s: %v %s", line, err, b)
+		} else if got := e.readFile("img/curl.bin"); got != "by curl" {
+			t.Errorf("curl stored %q", got)
+		}
 	}
 
 	// the file appeared after the URL was issued

@@ -116,7 +116,8 @@ func (t *mcpTools) requestUpload(_ context.Context, _ *mcp.CallToolRequest, in m
 	if err != nil {
 		return nil, nil, err
 	}
-	url := t.caller.baseURL + EndpointPathUpload + secret + "/"
+	// no trailing slash: curl -T appends the name of the local file to a URL that ends in one
+	url := t.caller.baseURL + EndpointPathUpload + secret
 	return text(fmt.Sprintf("Upload %s (up to %s) with:\n\ncurl -sS -T <file> '%s'\n\nThe URL works once and for %d minutes. "+
 		"The answer of the server says whether it worked.", rel, formatBytes(int(t.rs.maxUploadBytes())), url, int(uploadTicketTTL.Minutes()))), nil, nil
 }

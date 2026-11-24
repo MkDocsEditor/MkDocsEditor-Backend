@@ -124,8 +124,9 @@ with `replace`; pages (`.md`) are refused, they are created with `create_documen
 is `Upload <path>` or `Replace <path>`.
 
 `request_upload` takes the same `path`, `document` and `replace`, and answers with a command like
-`curl -sS -T <file> 'https://…/api/uploads/<secret>/'`. The agent runs it in its shell, so the bytes of
-a larger file do not pass through the model. `PUT /uploads/{token}/` takes the body as the file
+`curl -sS -T <file> 'https://…/api/uploads/<secret>'`. The URL has no trailing slash, because
+`curl -T` appends the local file name to a URL that ends in one. The agent runs it in its shell,
+so the bytes of a larger file do not pass through the model. `PUT /uploads/{token}/` takes the body as the file
 (`server.maxUploadBytes`, default 64 MiB; the body goes to a temporary file `.upload-*` in the docs folder
 first, not into memory, so a limit of 1 GiB or more is fine for the backend) and does what `upload_resource` does, with the same commit message and the
 rate limit of the content API, as the account and app token that asked:
