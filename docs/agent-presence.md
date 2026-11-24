@@ -95,7 +95,12 @@ The `agent` object of presence (and of the `peers` in `presence-snapshot`) can h
   (JS: `Automerge.getCursor` on `Automerge.view(doc, heads)`; Java: `makeCursor` with heads) and
   resolves it in the current document.
   - First it checks that its document has every head of `revision` (JS: `Automerge.hasHeads`;
-    Java: no such call, `fork(heads)` throws "invalid hash" for missing heads). Neither library
+    Java: no such call; per head on its own,
+    `document.get(ObjectId.ROOT, "content", new ChangeHash[]{head}).isPresent()`, which works
+    because every change of a page comes after the one that created `content`. Never
+    `fork(heads)` for this: automerge-java 0.0.9 (core 0.8.0) can panic natively in it
+    (`collector.rs` `MissingOps`) and crashed the app. A list with known and unknown heads
+    reads at the known ones, so check one head at a time.) Neither library
     fails otherwise at heads the document does not have: JS `Automerge.view` has an undefined
     `content` and `getCursor` on it silently returns the end of the text; Java `text` at them
     is silently empty and `makeCursor` reports "index 0 is out of bounds".
