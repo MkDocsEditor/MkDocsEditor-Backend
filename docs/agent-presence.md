@@ -170,84 +170,61 @@ the `sync` message that can carry it:
 ### Client animation
 
 Both clients behave the same. This is client behaviour, not protocol: the backend is not
-involved. It has two parts:
+involved. The rules and all their numbers are in KodeEditor's
+[reveal.md](https://github.com/markusressel/KodeEditor/blob/9.6.0/docs/reveal.md) (9.6.0),
+the source for both clients; the web client ships them in `src/editor/appearance.ts`. This
+section names them and adds what is app work.
 
 - The **typing reveal** shows the inserted text of a live agent change (an `agent-change`
-  event) bit by bit, as if it were typed.
+  event) bit by bit, as if it were typed. Each inserted range of the change is a chunk.
 - The **appearance animation** fades in text that others write as it appears: what the
   typing reveal uncovers, and the text of other people in the document as it arrives.
 
-Rules:
+The rules of reveal.md:
 
-- The app setting **"Animate edits of others"** turns the appearance animation on and off. It
-  is **on by default** in the web and Android apps (the default of the libraries, like the
-  KodeEditor configuration, stays off). It is only for text that others write (an agent, or another person
-  in the document), never for text the local person types, pastes, undoes or redoes. With the
-  setting off, a live agent change shows at once too, without a reveal.
-- The typing reveal, the same on both clients (the web client ships it in
-  `src/editor/appearance.ts`):
-  - speed: max(60 characters/s, length / 4 s), so no reveal takes longer than 4 s. The
-    length counts the UTF-16 units of all inserted ranges of one change together.
-  - a step every 30 ms; fractions of a character carry over to the next step
-  - no reveal, the text shows at once, when the change has more than 2048 characters, the
-    setting "Animate edits of others" is off, reduce motion is on, or the app or tab is
-    hidden
-  - the hiding takes precedence over other decorations of the same text
-- Defaults of the appearance animation, all settable by the client:
-  - fade-in: every character fades from opacity 0 to 1 over 500 ms from the moment it
-    appears, so a run of text fades as a gradient. A piece at progress p (0 to 1) has the
-    alpha 1 - (1 - p)^2.
-  - an optional slide of the appearing characters, 0 by default. It is optional per client;
-    the web client leaves it out for now.
-  - at most 256 animated ranges at once; above that, the neighbouring ranges with the closest
-    alphas merge into one
-  - local typing into a range that is fading in does not fade
-- Every animated range has a tag of its writer: the actor id of the change. The clients
+- **Queue (R1):** a chunk is hidden in the same change that inserts it and keeps its space,
+  so nothing below moves. The chunks of a writer wait in a queue; a new chunk never shows
+  hidden text. A change of the person, a remote change inside or at the edge of hidden text,
+  or a cursor or selection of the person in the text being revealed shows all of that writer's
+  hidden text at once, so nobody types into invisible text.
+- **Head (R2):** the writer's cursor is at the head of the reveal. Between chunks, while the
+  writer still writes, it stays at the end of the text revealed last; the app removes it when
+  the writer is done.
+- **Speed (R3):** at least 60 characters/s, and all text hidden when a chunk arrives shows
+  within 4 s.
+- **Fade-in (R4):** each character fades in with the alpha 1 - (1 - p)^2. The duration depends
+  on how fast its writer writes, from 320 ms (a person typing) to 1000 ms (a fast reveal). At
+  most 256 appearing pieces; above that, neighbours with the closest alphas merge.
+- **Cursor glide (R5, R5b, R5c):** remote cursors glide to their new place instead of jumping.
+- **Slide (R6, R6b):** the text behind a change of others slides to its new place.
+- **Caret cut (R7):** no appearing text shows ahead of the writer's caret.
+- **Wrap carry (R8):** a word at the start of a wrapped row is drawn at the end of the row above
+  while it fits there, then slides to its row in 120 ms, like a typed word.
+- **Calm label (R9):** the writer's name label goes below the cursor at once when it must, and
+  back above only after a rest of 2000 ms or a jump. After 1000 ms of writing it fades to an
+  alpha of 0.35; a rest, a jump or a hover shows it fully. Labels fade in and out in 200 ms.
+
+App rules:
+
+- The app setting **"Animate edits of others"** turns the appearance animation and the reveal
+  on and off. It is **on by default** in the web and Android apps (the default of the
+  libraries stays off). It is only for text that others write, never for text the local
+  person types; reveal.md says how big changes of the person (paste, undo, redo) animate.
+- No reveal, the text shows at once, when the change has more than 2048 characters, the
+  setting is off, reduce motion is on (web: `prefers-reduced-motion: reduce`), or the app or
+  tab is hidden. A follower still follows the agent's focus.
+- Every chunk and fade has a tag of its writer: the actor id of the change. The clients
   already know which account, and for agents which app token, an actor belongs to (the actor
-  map, [sync-protocol.md](sync-protocol.md) section 2), so this needs no message. Several
-  writers can appear at the same time. A new change of the same agent finishes that agent's
-  running reveal at once, then starts its own.
-- Input of the person never ends a fade, neither of an agent's text nor of other people's.
-  Only the agent's reveal can be skipped, in two ways:
-  - A tap or click on the area where text is being revealed right now skips the reveal: the
-    rest of the agent's text shows at once. Typing elsewhere, moving the cursor elsewhere and
-    scrolling do not.
-  - An edit of the person, or a remote edit, inside or at the edge of a hidden range finishes
-    the reveal of that range, so nobody types into invisible text.
-- Collapsed or folded parts of the text appear in one chunk when the reveal reaches them. They
-  are never typed out, and never shown before the reveal reaches them. (The web editor has no
-  folding today.)
-- With the system setting that removes animations (reduce motion; web:
-  `prefers-reduced-motion: reduce`), a live agent change shows at once: no reveal, no fade, no
-  slide. A follower still follows the agent's focus.
-- The cost per frame depends on the visible rows and the number of animated ranges, never on
-  the length of the document.
+  map, [sync-protocol.md](sync-protocol.md) section 2), so this needs no message.
 - The animation is presentation only. The change is applied to the editor model at once, so
-  that remote edits and the cursor of the person land at the right positions; only what is
-  drawn changes.
-- The hidden text keeps its space on both clients: it is drawn with a transparent text colour,
-  so the following text stays where it is and does not slide along as the agent types
-  (decided by Markus). Nothing moves under the eyes of a person who reads, and both clients
-  look the same.
-- The hiding starts in the same editor transaction that applies `H`. Added in a later
-  transaction, the whole text would show for a frame first. So a client must know which
-  applied changes contain `H`; that is client work, not protocol. The decoration only maps
-  through later transactions and never holds a change back.
-  - Web: a CodeMirror 6 `Decoration.mark` with a transparent text colour, held in a
-    `StateField` and mapped through every transaction. Not `Decoration.replace`, which would
-    collapse the text.
-  - Android: `EditorTextController.onRemoteChange` calls `applyRemote` synchronously on the
-    main thread; the hidden ranges are set in the same call and moved per splice like the
-    author runs. Local edits are reported synchronously in `onLocalEdit` and
-    `onStateChanged`, where the client finishes what the rules above say. The text is
-    hidden and animated with the KodeEditor API for styles of app-supplied ranges
-    (`SpanStyle(color = Transparent)`), merged over the highlighting and moved by splices
-    (KodeEditor PR #167). KodeEditor offsets are UTF-16, so the client converts the code
-    point indexes of this spec. Overlay masks in the background colour are not used: they
-    would also cover the selection, remote cursors and line backgrounds, and could be drawn
-    one frame late with the old layout. The Android animation needs a KodeEditor release
-    with that API; before it, Android follows the focus without an animation. Nothing else
-    in this spec depends on that API.
+  that remote edits and the cursor of the person land at the right positions.
+- The hiding starts in the same editor transaction that applies `H`; in a later one the whole
+  text would show for a frame first. So a client must know which applied changes contain `H`.
+  - Web: a CodeMirror 6 `Decoration.mark` with a transparent text colour in a `StateField`,
+    mapped through every transaction. Not `Decoration.replace`, which would collapse the text.
+  - Android: `EditorTextController.onRemoteChange` calls `KodeEditorReveal.insert`
+    synchronously on the main thread. KodeEditor offsets are UTF-16, so the client converts
+    the code point indexes of this spec.
 - Search, copy, undo and the rendered view see the whole text at once, because it is real.
   Animations stay short for that reason.
 - The rendered view (alone, or beside the editor) shows a live change at once and is never
@@ -385,11 +362,11 @@ The dependencies keep pointing downward ([AGENTS.md](../AGENTS.md)):
 | Side | Work |
 |---|---|
 | Backend | `focus`, `agent-change` and the lifetime (`internal/collab/agentpresence.go`), `live` and `viewers` in the tools, `point_at`, the feature flag, tests with a websocket client |
-| Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with the setting "Animate edits of others", on by default; no slide for now |
-| Android client | the same; the animation with the KodeEditor release that has range styles |
+| Web client | follow an agent with `focus` (like a person), the typing reveal and the appearance animation of "Client animation" (section 3) with the setting "Animate edits of others", on by default |
+| Android client | the same, with `KodeEditorReveal` |
 | Web and Android, where people are | send `at` (code point indexes at a revision) with every presence when the server lists `presence-indexes`, see "Where people are" (section 4) |
 | Backend, where people are | keep `at` per connection, `read_presence` and the block of `read_document`, the feature flag |
-| KodeEditor | an API for styles of app-supplied ranges, moved by splices (transparent text colour, fade-in): PR #167, released in KodeEditor 9.2.0 |
+| KodeEditor | the reveal and its rules R1 to R9 (`KodeEditorReveal`, docs/reveal.md), released in KodeEditor 9.6.0 |
 
 Order: the backend part first. Following an agent works with `focus` alone, before any client
 has the animation, and each client can add the animation later. The Android animation depends
