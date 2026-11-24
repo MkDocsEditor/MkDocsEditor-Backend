@@ -184,9 +184,10 @@ The rules of reveal.md:
 
 - **Queue (R1):** a chunk is hidden in the same change that inserts it and keeps its space,
   so nothing below moves. The chunks of a writer wait in a queue; a new chunk never shows
-  hidden text. A change of the person, a remote change inside or at the edge of hidden text,
-  or a cursor or selection of the person in the text being revealed shows all of that writer's
-  hidden text at once, so nobody types into invisible text.
+  hidden text. A change of the person anywhere, a remote change inside or at the edge of hidden
+  text, or a cursor or selection of the person placed into the text being revealed shows all of
+  that writer's hidden text at once, so nobody types into invisible text. A cursor right at the
+  start or end of that text, or one that only moves with changes of the text, shows nothing.
 - **Head (R2):** the writer's cursor is at the head of the reveal. Between chunks, while the
   writer still writes, it stays at the end of the text revealed last; the app removes it when
   the writer is done.
