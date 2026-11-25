@@ -104,7 +104,7 @@ func (t *mcpTools) readHistory(_ context.Context, _ *mcp.CallToolRequest, in mcp
 		return nil, nil, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "path: %s\nnewest first; uncommitted edits are not listed, see changes_since\n", d.RelPath)
+	fmt.Fprintf(&b, "path: %s\n%snewest first; uncommitted edits are not listed, see changes_since\n", d.RelPath, urlLine(t.documentURL(d)))
 	for i, cm := range commits {
 		e := t.rs.historyEntry(cm, summaries[i])
 		who := formatHistoryAuthor(e.Author)
@@ -187,7 +187,7 @@ func (t *mcpTools) changesSince(_ context.Context, _ *mcp.CallToolRequest, in mc
 		return nil, nil, contentToolError(err)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "path: %s\nsince: %s\nrevision: %s", d.RelPath, since, revision)
+	fmt.Fprintf(&b, "path: %s\n%ssince: %s\nrevision: %s", d.RelPath, urlLine(t.documentURL(d)), since, revision)
 	if base == current {
 		b.WriteString("\nno changes")
 		return text(b.String()), nil, nil

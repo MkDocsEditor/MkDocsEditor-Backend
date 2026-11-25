@@ -38,7 +38,9 @@ type (
 		Path     string          `json:"path"`
 		Title    string          `json:"title"`
 		Snippets []SearchSnippet `json:"snippets"`
-		score    int
+		// URL is the page in the web client, only in the answers of the MCP tool search
+		URL   string `json:"url,omitempty"`
+		score int
 	}
 
 	// SearchResponse is the answer of GET /search/

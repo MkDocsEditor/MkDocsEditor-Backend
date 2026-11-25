@@ -56,6 +56,25 @@ Pages are named by their path relative to the wiki root (`guide/setup.md`; `.md`
 leading `/` are optional) or by their id. Sections are named by their path, and empty or `/`
 means the top level.
 
+### Links for people
+
+Answers that name a page carry its address in the web client, so an agent can give a person a
+link without guessing: `https://<web client>/document/<id>`, `/section/<id>` for a section and
+`/resource/<id>` for a file, the routes of the web client. The base is `server.auth.clientUrl`.
+Without it, answers have no `url`; the server never builds one from the `Host` of the request.
+
+- `url` in the results of `create_document`, `edit_document`, `write_document`,
+  `move_document` (the new place, also of `move_section` and `move_resource`), `search`,
+  `get_backlinks` (of the linking page) and the pin tools.
+- A `url:` line in the header of `read_document`, `read_history` and `changes_since`, and the
+  address at the end of each `recent_changes` line of a page that is still there under that
+  path.
+- `list_tree` has an `id` column and states the pattern once (`page url: …/document/<id>`),
+  so the list does not get much longer; with `files`, also for sections and files.
+- The web client opens a page at a line with `?line=12` (1-based) and at a heading with
+  `?section=<heading text>`, like the links of the change feed. Nothing else is supported.
+- Links inside pages stay relative: `link_to` gives them.
+
 | Tool | Write | What it does |
 |---|---|---|
 | `search` | | Full-text search, see [content-api.md](content-api.md) section 7: paths, titles, matching lines |

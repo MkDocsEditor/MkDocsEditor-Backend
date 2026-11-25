@@ -29,7 +29,9 @@ read_document before changing a page, then change it with edit_document (preferr
 write_document. People may edit the same page at the same time: changes merge, so keep edits small.
 changes_since shows what people changed since you last read a page; read_history lists its commits.
 read_resource shows the images and other files pages link to; download_resource gets a file unchanged.
-list_tree with files lists them; upload_resource adds or replaces one. link_to gives the right relative link.`
+list_tree with files lists them; upload_resource adds or replaces one. link_to gives the right relative link.
+To show a person a page, give them its url from the results (url, or the page url of list_tree);
+add ?line=12 to open it at that line. Links inside pages stay relative (link_to).`
 
 // mcpCaller is who calls a tool: the user and the app token of the HTTP request
 type mcpCaller struct {
@@ -140,7 +142,8 @@ func (rs *RestService) newMCPServer(caller *mcpCaller, schemas *mcp.SchemaCache)
 		"(from read_document) is required; changes others made since are kept. Use edit_document for partial changes. " +
 		mcpLiveHint}, tools.writeDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "create_document", Annotations: &mcp.ToolAnnotations{DestructiveHint: &notDestructive},
-		Description: "Create a page in a section (a folder path, empty for the top level), optionally with content."}, tools.createDocument)
+		Description: "Create a page in a section (a folder path, empty for the top level), optionally with content. " +
+			"The answer has its url, to link the page for a person."}, tools.createDocument)
 	mcp.AddTool(server, &mcp.Tool{Name: "move_document", Description: "Move or rename a page. Links to it in other pages are " +
 		"updated. Give the target section path, the new name (without .md), or both."}, tools.moveDocument)
 	if rs.git != nil && caller.token != nil {
@@ -202,6 +205,7 @@ type (
 
 	mcpRevision struct {
 		Path     string `json:"path"`
+		URL      string `json:"url,omitempty"`
 		Revision string `json:"revision"`
 		// Viewers are the people who have the page open, see docs/mcp.md section 4
 		Viewers []string `json:"viewers"`
@@ -210,6 +214,7 @@ type (
 	mcpCreated struct {
 		ID       string `json:"id"`
 		Path     string `json:"path"`
+		URL      string `json:"url,omitempty"`
 		Revision string `json:"revision"`
 	}
 
@@ -217,12 +222,14 @@ type (
 		OldPath string `json:"oldPath"`
 		NewPath string `json:"newPath"`
 		ID      string `json:"id"`
+		URL     string `json:"url,omitempty"`
 		// UpdatedDocuments is the number of pages whose links were updated
 		UpdatedDocuments int `json:"updatedDocuments"`
 	}
 
 	mcpBacklink struct {
 		Path string `json:"path"`
+		URL  string `json:"url,omitempty"`
 		Line int    `json:"line"`
 		Link string `json:"link"`
 	}
@@ -303,7 +310,11 @@ func (t *mcpTools) search(_ context.Context, _ *mcp.CallToolRequest, in mcpSearc
 	if limit <= 0 {
 		limit = defaultSearchLimit
 	}
-	return nil, t.rs.search(q, min(limit, maxSearchLimit)), nil
+	out := t.rs.search(q, min(limit, maxSearchLimit))
+	for _, r := range out.Results {
+		r.URL = t.webURL("document", r.ID)
+	}
+	return nil, out, nil
 }
 
 func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpListInput) (*mcp.CallToolResult, any, error) {
@@ -315,29 +326,41 @@ func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpLis
 		}
 		root = s
 	}
+	// with a web client, the id of each item and the pattern of its url: a url in each line
+	// would make the list a lot longer
+	withURL := t.rs.authenticator.ClientURL() != ""
+	id := func(id string) string {
+		if withURL {
+			return "\t" + id
+		}
+		return ""
+	}
 	var lines, sections, files []string
 	for s := range root.Walk() {
 		if s != root || s.RelPath != "" {
-			sections = append(sections, s.RelPath+"/")
+			sections = append(sections, s.RelPath+"/"+id(s.ID))
 		}
 		for _, d := range s.Documents {
 			if in.Tag != "" && !slices.Contains(d.Meta.Tags, in.Tag) {
 				continue
 			}
-			line := d.RelPath + "\t" + d.Title
+			line := d.RelPath + id(d.ID) + "\t" + d.Title
 			if in.Meta {
 				line += "\t" + formatPageMeta(d.Meta)
 			}
 			lines = append(lines, line)
 		}
 		for _, r := range s.Resources {
-			files = append(files, fmt.Sprintf("%s\t%s\t%s", r.RelPath, formatBytes(int(r.Filesize)), r.MimeType))
+			files = append(files, fmt.Sprintf("%s%s\t%s\t%s", r.RelPath, id(r.ID), formatBytes(int(r.Filesize)), r.MimeType))
 		}
 	}
 	sort.Strings(lines)
 	out := "no pages"
 	if len(lines) > 0 {
 		header := "path\ttitle"
+		if withURL {
+			header = "page url: " + urlPattern(t.rs.authenticator.ClientURL(), "document") + "\npath\tid\ttitle"
+		}
 		if in.Meta {
 			header += "\tmeta"
 		}
@@ -346,11 +369,20 @@ func (t *mcpTools) listTree(_ context.Context, _ *mcp.CallToolRequest, in mcpLis
 	if in.Files {
 		sort.Strings(sections)
 		sort.Strings(files)
-		out += "\n\nsections:\n" + strings.Join(sections, "\n")
+		out += "\n\nsections:"
+		if withURL {
+			out += " (path, id; url " + urlPattern(t.rs.authenticator.ClientURL(), "section") + ")"
+		}
+		out += "\n" + strings.Join(sections, "\n")
 		if len(sections) == 0 {
 			out += "none"
 		}
-		out += "\n\nfiles (path, size, type):\n" + strings.Join(files, "\n")
+		if withURL {
+			out += "\n\nfiles (path, id, size, type; url " + urlPattern(t.rs.authenticator.ClientURL(), "resource") + "):\n"
+		} else {
+			out += "\n\nfiles (path, size, type):\n"
+		}
+		out += strings.Join(files, "\n")
 		if len(files) == 0 {
 			out += "none"
 		}
@@ -378,8 +410,8 @@ func (t *mcpTools) readDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 	for _, v := range positions {
 		block.WriteString(formatViewerLine(v) + "\n")
 	}
-	return text(fmt.Sprintf("path: %s\ntitle: %s\nrevision: %s\nviewers: %s\n%s---\n%s", d.RelPath, d.Title, revision,
-		formatViewers(t.viewers(d)), block.String(), content)), nil, nil
+	return text(fmt.Sprintf("path: %s\n%stitle: %s\nrevision: %s\nviewers: %s\n%s---\n%s", d.RelPath, urlLine(t.documentURL(d)),
+		d.Title, revision, formatViewers(t.viewers(d)), block.String(), content)), nil, nil
 }
 
 func (t *mcpTools) getBacklinks(_ context.Context, _ *mcp.CallToolRequest, in mcpDocumentRef) (*mcp.CallToolResult, *mcpBacklinks, error) {
@@ -389,7 +421,7 @@ func (t *mcpTools) getBacklinks(_ context.Context, _ *mcp.CallToolRequest, in mc
 	}
 	out := &mcpBacklinks{Backlinks: []mcpBacklink{}}
 	for _, b := range t.rs.documentBacklinks(d).Backlinks {
-		out.Backlinks = append(out.Backlinks, mcpBacklink{Path: b.Source.Path, Line: b.Line, Link: b.Destination})
+		out.Backlinks = append(out.Backlinks, mcpBacklink{Path: b.Source.Path, URL: t.webURL("document", b.Source.ID), Line: b.Line, Link: b.Destination})
 	}
 	return nil, out, nil
 }
@@ -414,7 +446,7 @@ func (t *mcpTools) editDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 		return nil, nil, contentToolError(err)
 	}
 	t.advanceSeen(d, before, revision)
-	return nil, &mcpRevision{Path: d.RelPath, Revision: revision, Viewers: t.viewers(d)}, nil
+	return nil, &mcpRevision{Path: d.RelPath, URL: t.documentURL(d), Revision: revision, Viewers: t.viewers(d)}, nil
 }
 
 func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpWriteInput) (*mcp.CallToolResult, *mcpRevision, error) {
@@ -437,7 +469,7 @@ func (t *mcpTools) writeDocument(_ context.Context, _ *mcp.CallToolRequest, in m
 		return nil, nil, contentToolError(err)
 	}
 	t.advanceSeen(d, before, revision)
-	return nil, &mcpRevision{Path: d.RelPath, Revision: revision, Viewers: t.viewers(d)}, nil
+	return nil, &mcpRevision{Path: d.RelPath, URL: t.documentURL(d), Revision: revision, Viewers: t.viewers(d)}, nil
 }
 
 func (t *mcpTools) createDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpCreateInput) (*mcp.CallToolResult, *mcpCreated, error) {
@@ -462,7 +494,7 @@ func (t *mcpTools) createDocument(_ context.Context, _ *mcp.CallToolRequest, in 
 		}
 	}
 	t.markSeen(d, revision, nil)
-	return nil, &mcpCreated{ID: d.ID, Path: d.RelPath, Revision: revision}, nil
+	return nil, &mcpCreated{ID: d.ID, Path: d.RelPath, URL: t.documentURL(d), Revision: revision}, nil
 }
 
 func (t *mcpTools) moveDocument(_ context.Context, _ *mcp.CallToolRequest, in mcpMoveInput) (*mcp.CallToolResult, *mcpMoved, error) {
@@ -492,5 +524,6 @@ func (t *mcpTools) moveDocument(_ context.Context, _ *mcp.CallToolRequest, in mc
 		}
 		return nil, nil, err
 	}
-	return nil, &mcpMoved{OldPath: result.OldPath, NewPath: result.NewPath, ID: result.NewID, UpdatedDocuments: len(result.Documents)}, nil
+	return nil, &mcpMoved{OldPath: result.OldPath, NewPath: result.NewPath, ID: result.NewID, URL: t.webURL("document", result.NewID),
+		UpdatedDocuments: len(result.Documents)}, nil
 }

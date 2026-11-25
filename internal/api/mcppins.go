@@ -17,6 +17,7 @@ const maxPinOrder = 200
 type (
 	mcpPin struct {
 		Path     string `json:"path"`
+		URL      string `json:"url,omitempty"`
 		Title    string `json:"title"`
 		PinnedBy string `json:"pinnedBy"`
 		PinnedAt string `json:"pinnedAt"`
@@ -59,7 +60,7 @@ func (t *mcpTools) pins() (*mcpPins, error) {
 	convert := func(in []PinResponse) []mcpPin {
 		out := []mcpPin{}
 		for _, p := range in {
-			out = append(out, mcpPin{Path: p.Path, Title: p.Title, PinnedBy: p.PinnedBy.DisplayName, PinnedAt: p.PinnedAt})
+			out = append(out, mcpPin{Path: p.Path, URL: t.webURL("document", p.DocumentID), Title: p.Title, PinnedBy: p.PinnedBy.DisplayName, PinnedAt: p.PinnedAt})
 		}
 		return out
 	}

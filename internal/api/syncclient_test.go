@@ -46,7 +46,8 @@ type syncEnv struct {
 
 var testPasswords = map[string]string{"alice": "alice-pw", "bob": "bob-pw", "carol": "carol-pw"}
 
-func newSyncEnv(t *testing.T) *syncEnv {
+// newSyncEnv starts a server on a test wiki; configure changes its configuration first
+func newSyncEnv(t *testing.T, configure ...func(*configuration.Configuration)) *syncEnv {
 	t.Helper()
 	project := wikitest.New(t)
 	cost := bcrypt.MinCost
@@ -61,6 +62,9 @@ func newSyncEnv(t *testing.T) *syncEnv {
 		{Username: "alice", PasswordHash: hash("alice-pw"), Role: "admin"},
 		{Username: "bob", PasswordHash: hash("bob-pw"), Role: "editor"},
 		{Username: "carol", PasswordHash: hash("carol-pw"), Role: "reader"},
+	}
+	for _, c := range configure {
+		c(&configuration.CurrentConfig)
 	}
 	stateDir := filepath.Join(project, ".mkdocseditor")
 	authn := newTestAuthenticator(t, stateDir)

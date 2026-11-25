@@ -275,7 +275,9 @@ func (t *mcpTools) moveItem(req *collab.MoveRequest) (*mcp.CallToolResult, *mcpM
 		}
 		return nil, nil, err
 	}
-	return nil, &mcpMoved{OldPath: result.OldPath, NewPath: result.NewPath, ID: result.NewID, UpdatedDocuments: len(result.Documents)}, nil
+	// the item types are the routes of the web client
+	return nil, &mcpMoved{OldPath: result.OldPath, NewPath: result.NewPath, ID: result.NewID, URL: t.webURL(req.Type, result.NewID),
+		UpdatedDocuments: len(result.Documents)}, nil
 }
 
 func (t *mcpTools) moveResource(_ context.Context, _ *mcp.CallToolRequest, in mcpMoveResourceInput) (*mcp.CallToolResult, *mcpMoved, error) {
@@ -459,6 +461,12 @@ func (t *mcpTools) recentChanges(_ context.Context, _ *mcp.CallToolRequest, in m
 		fmt.Fprintf(&b, "\n%s %s %s %s", e.Time, e.Kind, e.ItemType, e.Path)
 		if e.OldPath != "" {
 			fmt.Fprintf(&b, " (from %s)", e.OldPath)
+		}
+		// only pages that are still there, under that path
+		if e.ItemType == wiki.TypeDocument {
+			if u := t.documentURLOfPath(e.Path); u != "" {
+				fmt.Fprintf(&b, " %s", u)
+			}
 		}
 		if len(who) > 0 {
 			fmt.Fprintf(&b, " by %s", strings.Join(who, ", "))
