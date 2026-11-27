@@ -609,8 +609,31 @@ func (rs *RestService) getResourceContent(c *echo.Context) error {
 	if d == nil {
 		return rs.ReturnNotFound(c, id)
 	}
+	// the name lets a browser save the file under its own name, also from a tab that shows it
+	c.Response().Header().Set(echo.HeaderContentDisposition, inlineDisposition(filepath.Base(d.Path)))
 	// echo serves files from a fs.FS, which takes no absolute paths
 	return c.FileFS(filepath.Base(d.Path), os.DirFS(filepath.Dir(d.Path)))
+}
+
+// inlineDisposition is the Content-Disposition value that shows a file in the browser and names it
+// when saved (RFC 6266): filename is an ASCII fallback, filename* has the real name (RFC 8187).
+func inlineDisposition(name string) string {
+	var fallback strings.Builder
+	for _, r := range name {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' || r == '%' {
+			r = '_'
+		}
+		fallback.WriteRune(r)
+	}
+	var encoded strings.Builder
+	for _, b := range []byte(name) {
+		if b < 0x80 && (b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || strings.IndexByte("!#$&+-.^_`|~", b) >= 0) {
+			encoded.WriteByte(b)
+		} else {
+			fmt.Fprintf(&encoded, "%%%02X", b)
+		}
+	}
+	return `inline; filename="` + fallback.String() + `"; filename*=UTF-8''` + encoded.String()
 }
 
 // uploads a new resource file.
