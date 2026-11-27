@@ -3286,7 +3286,7 @@ paths:
       tags: [ Resources ]
       responses:
         "200":
-          description: "The file, with a content type derived from its name"
+          description: "The file, with a content type derived from its name. `Content-Disposition: inline` carries the file name (`filename` ASCII fallback, `filename*` the real name), so a browser that shows the file saves it under that name."
           content:
             application/octet-stream:
               schema:

@@ -154,6 +154,9 @@ func TestRestAliveAndTree(t *testing.T) {
 	if rec.Body.String() != "\x89PNG\r\n\x1a\n\x00\x01binary" {
 		t.Errorf("resource content = %q", rec.Body.String())
 	}
+	if got, want := rec.Header().Get("Content-Disposition"), `inline; filename="image.png"; filename*=UTF-8''image.png`; got != want {
+		t.Errorf("Content-Disposition = %q, want %q", got, want)
+	}
 	expectStatus(t, e.do(http.MethodGet, "/resource/unknown/", nil, ""), http.StatusNotFound)
 }
 
