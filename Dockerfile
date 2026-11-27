@@ -64,7 +64,7 @@ RUN go build \
  && /out/mkdocsrest --version
 
 # Runtime stage
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates git git-lfs tzdata \
  && addgroup -g 1000 -S mkdocs \
